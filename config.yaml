@@ -1,0 +1,114 @@
+# Scripted AI Agent 配置文件
+
+# API 配置
+api:
+  # GLM4.6 API配置
+  key: "3dae586b23fe4f19ab52a0152eebe182.luZt04U5Xbeu2sPl"
+  
+  # GLM API 端点 URL
+  url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+  
+  # 模型名称 - 留空则自动检测或启动时选择
+  model: null
+  
+  # 采样与生成参数
+  temperature: ${MODEL_TEMPERATURE:-0.7}
+  max_tokens: ${MODEL_MAX_TOKENS:-2048}
+  stream: ${MODEL_STREAM:-false}
+  timeout: ${MODEL_TIMEOUT:-60}
+
+# 工具配置
+tools:
+  # 沙盒目录 (可选)
+  # 如果不设置，将使用临时目录
+  sandbox_dir: ./sandbox
+  
+  # 脚本执行超时时间（秒）
+  script_timeout: 30
+  
+  # 支持的脚本语言
+  supported_languages:
+    - python
+    - bash
+    - javascript
+    - powershell
+
+# 上下文管理配置
+context:
+  # Token 限制
+  max_total_tokens: 64000
+  short_term_tokens: 20000
+  mid_term_tokens: 30000
+  long_term_tokens: 14000
+  
+  # 压缩策略
+  compression:
+    # 每 N 轮对话自动压缩
+    auto_compress_turns: 10
+    # 保留最近 N 条消息
+    keep_recent_messages: 6
+    # 重要性阈值（0-1）
+    importance_threshold: 0.7
+
+# Agent 配置
+agent:
+  # 错误重试
+  max_retries: 3
+  retry_delay: 2
+  
+  # 流式输出
+  stream_output: true
+  
+  # 调试模式
+  debug: false
+  
+  # 自动保存会话
+  auto_save:
+    enabled: true
+    interval_minutes: 10
+    directory: ./sessions
+
+# 日志配置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  level: INFO
+  
+  # 日志文件
+  file: ./logs/agent.log
+  
+  # 日志格式
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# 安全配置
+security:
+  # 允许执行的命令白名单（正则表达式）
+  allowed_commands:
+    - "^echo .*"
+    - "^ls .*"
+    - "^cat .*"
+    - "^grep .*"
+    - "^find .*"
+    - "^python .*"
+    - "^node .*"
+  
+  # 禁止访问的路径
+  restricted_paths:
+    - /etc
+    - /sys
+    - /root
+    - ~/.ssh
+    - ~/.aws
+
+# 性能优化
+performance:
+  # 缓存配置
+  cache:
+    enabled: true
+    max_size_mb: 100
+    ttl_seconds: 3600
+  
+  # 并发配置
+  max_concurrent_scripts: 3
+  
+  # 内存限制（MB）
+  max_memory_mb: 512
