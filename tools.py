@@ -8,36 +8,41 @@ import json
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import time
 import sys
 from tool_errors import ToolError
 from terminal import PersistentTerminal
+from async_terminal import ThreadedTerminal
 
 
 class BaseTools:
     """基础工具类 - 仅包含 3-5 个核心原子操作"""
     
-    def __init__(self, sandbox_dir: Optional[str] = None):
+    def __init__(self, sandbox_dir: Optional[str] = None, config: Optional[dict] = None):
         """初始化工具集
         
         Args:
             sandbox_dir: 沙盒目录路径，如果为 None 则使用 Paw-workspace
+            config: 终端配置
         """
         if sandbox_dir:
             self.sandbox_dir = Path(sandbox_dir).resolve()
-            self.sandbox_dir.mkdir(parents=True, exist_ok=True)
         else:
-            # 使用环境变量获取真实桌面路径
-            desktop = self._get_desktop_path()
-            # 固定使用 Paw-workspace 作为沙盒
-            self.sandbox_dir = desktop / "Paw-workspace"
-            self.sandbox_dir.mkdir(parents=True, exist_ok=True)
+            # 默认使用桌面下的 Paw-workspace 目录
+            desktop_path = self._get_desktop_path()
+            self.sandbox_dir = desktop_path / "Paw-workspace"
+        
+        # 确保沙盒目录存在
+        self.sandbox_dir.mkdir(parents=True, exist_ok=True)
         
         self.script_timeout = 30  # 默认脚本执行超时时间（秒）
         
-        # 创建持久化终端会话
+        # 创建持久化终端会话（虚拟终端）
         self.terminal = PersistentTerminal(self.sandbox_dir)
+        # 创建共享异步终端管理器，传递终端配置
+        terminal_config = config.get('terminal', {}) if config else {}
+        self.async_shell = ThreadedTerminal(self.sandbox_dir, terminal_config)
     
     def _get_desktop_path(self) -> Path:
         """获取真实的桌面路径（使用环境变量）"""
@@ -370,26 +375,76 @@ class BaseTools:
         except Exception as e:
             return f"错误: 列出目录失败 - {str(e)}"
     
-    def execute_command(self, command: str, timeout: Optional[int] = None) -> Dict[str, Any]:
-        """在持久化终端中执行命令
+    def execute_command(self, command: str) -> Dict[str, Any]:
+        """向共享终端发送命令（如果未打开则自动打开）
         
         Args:
-            command: 要执行的命令（可以是cd、ls等任何命令）
-            timeout: 超时时间（秒）
-            
+            command: 要执行的命令
+        
         Returns:
-            包含执行结果的字典，包括终端当前状态
+            执行结果字典
         """
-        if timeout is None:
-            timeout = self.script_timeout
+        # 如果终端未打开，自动打开
+        if not self.async_shell.is_shell_open():
+            open_result = self.async_shell.open_shell()
+            if not open_result.get("success"):
+                return {
+                    "success": False,
+                    "error": f"无法打开终端: {open_result.get('error', '未知错误')}",
+                    "stderr": f"无法打开终端: {open_result.get('error', '未知错误')}"
+                }
+            # 等待终端完全启动
+            import time
+            time.sleep(1)
         
-        # 使用持久化终端执行
-        result = self.terminal.execute(command, timeout)
-        
-        # 添加命令本身到结果中
-        result["command"] = command
-        
-        return result
+        return self.async_shell.enqueue_command(command)
+
+    def open_shell(self) -> Dict[str, Any]:
+        """打开共享异步终端窗口"""
+        return self.async_shell.open_shell()
+
+    def peek_shell(self) -> Dict[str, Any]:
+        """读取共享终端的增量输出"""
+        return self.async_shell.peek_output()
+
+    def interrupt_command(self) -> Dict[str, Any]:
+        """中断当前正在执行的命令"""
+        return self.async_shell.interrupt_command()
+    
+    def wait(self, seconds: float) -> Dict[str, Any]:
+        """等待指定时间（秒），用于同步异步操作"""
+        try:
+            # 确保输入是数字
+            try:
+                seconds = float(seconds)
+            except (TypeError, ValueError):
+                return {
+                    "success": False,
+                    "error": "等待时间必须是数字",
+                    "stderr": "等待时间必须是数字"
+                }
+            
+            if seconds < 0:
+                return {
+                    "success": False,
+                    "error": "等待时间不能为负数",
+                    "stderr": "等待时间不能为负数"
+                }
+            
+            import time
+            time.sleep(seconds)
+            
+            return {
+                "success": True,
+                "message": f"已等待 {seconds} 秒",
+                "stdout": f"已等待 {seconds} 秒"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"等待操作失败: {e}",
+                "stderr": f"等待操作失败: {e}"
+            }
     
     def get_terminal_status(self) -> Dict[str, Any]:
         """获取终端当前状态
@@ -397,7 +452,18 @@ class BaseTools:
         Returns:
             终端状态信息（用于显示给AI）
         """
-        return self.terminal.get_status()
+        return {
+            "persistent": {
+                "current_directory": str(self.terminal.current_dir),
+                "prompt": self.terminal.get_prompt(),
+                "command_history_count": len(self.terminal.command_history)
+            },
+            "shared_shell": {
+                "is_open": self.async_shell.is_shell_open(),
+                "pid": self.async_shell.process.pid if hasattr(self.async_shell, 'process') and self.async_shell.process else None,
+                "type": "threaded"
+            }
+        }
     
     def run_script(self, language: str, code: str, 
                   args: Optional[List[str]] = None) -> Dict[str, Any]:

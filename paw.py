@@ -20,7 +20,7 @@ import yaml
 init(autoreset=True)
 
 # 导入核心组件
-from consciousness import DigitalConsciousness, Thought, Memory
+from autostatus import AutoStatus
 from tools import BaseTools
 from chunk_system import ChunkManager, ChunkType, Chunk
 from tools_schema import TOOLS_SCHEMA
@@ -56,6 +56,7 @@ class ColoredOutput:
     
     @staticmethod
     def system(text: str) -> str:
+        """系统消息（青色）"""
         return f"{ColoredOutput.SYSTEM}{text}{ColoredOutput.RESET}"
     
     @staticmethod
@@ -85,18 +86,20 @@ class Paw:
         self.name = "Paw"
         self.birth_time = datetime.now()
         
-        # 核心组件
-        self.consciousness = DigitalConsciousness()
-        self.tools = BaseTools()
-        self.output = ColoredOutput()
-        
         # 读取配置文件
         config = self._load_config()
+        
+        # 核心组件（传递配置）
+        self.tools = BaseTools(config=config)
+        self.output = ColoredOutput()
         
         # API配置（优先级：参数 > config.yaml > 环境变量 > 默认值）
         self.api_url = api_url or config.get('api', {}).get('url') or os.getenv("API_URL", "http://localhost:1234/v1/chat/completions")
         self.model = model or config.get('api', {}).get('model') or os.getenv("MODEL", None)
         self.api_key = api_key or config.get('api', {}).get('key') or os.getenv("OPENAI_API_KEY", None)
+        
+        # 动态状态管理器（延迟初始化，等模型确定后）
+        self.autostatus = None
         
         # 上下文管理（使用语块系统，传入工具schema）
         self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
@@ -111,6 +114,9 @@ class Paw:
         
         # 可视化配置
         self.show_debug = True  # 显示调试信息
+        
+        # 工具调用结果收集（用于状态评估）
+        self.last_tool_results = []
     
     def _load_config(self) -> dict:
         """加载config.yaml配置文件"""
@@ -124,11 +130,22 @@ class Paw:
                 return {}
         return {}
     
-    def _create_system_prompt(self) -> str:
-        """创建系统提示词 - 第一人称视角"""
+    def _create_system_prompt(self, include_state: bool = False) -> str:
+        """创建系统提示词 - 第一人称视角
+        
+        Args:
+            include_state: 是否包含动态状态
+        """
         # 获取终端状态
         terminal_status = self.tools.get_terminal_status()
-        terminal_info = f"{terminal_status['prompt']} (位于: {terminal_status['relative_path']})"
+        persistent = terminal_status.get('persistent', {})
+        shared = terminal_status.get('shared_shell', {})
+        
+        # 构建终端信息
+        if shared.get('is_open'):
+            terminal_info = f"共享终端已开启 (PID: {shared.get('pid')})"
+        else:
+            terminal_info = f"虚拟终端: {persistent.get('prompt', 'N/A')} (位于: {persistent.get('current_directory', 'N/A')})"
         
         # 使用提示词配置文件
         main_prompt = SystemPrompts.get_main_system_prompt(self.name, self.birth_time)
@@ -139,26 +156,20 @@ class Paw:
         # 添加记忆上下文（建立历史感）
         memory_context = ConsciousnessPrompts.get_memory_context()
         
-        # 组合完整的系统提示词
+        # 组合基础系统提示词
         prompt = f"{main_prompt}\n\n{memory_context}"
         
-        # 添加系统提示词到语块管理器
-        self.chunk_manager.add_system_prompt(prompt)
-        return prompt
-    
-    def _inject_memories(self, context: str) -> List[str]:
-        """注入相关记忆"""
-        # 从consciousness获取相关记忆
-        memories = []
-        if hasattr(self.consciousness, 'memories'):
-            # 搜索相关记忆
-            keywords = context.lower().split()[:5]  # 取前5个关键词
-            for memory in self.consciousness.memories[-10:]:  # 最近10条记忆
-                if any(kw in memory.experience.lower() for kw in keywords):
-                    memories.append(f"[记忆] {memory.experience}")
+        # 如果需要，注入动态状态
+        if include_state and self.autostatus is not None:
+            prompt = self.autostatus.inject_to_prompt(prompt)
         
-        return memories
-    
+        # 添加或更新系统提示词到语块管理器
+        has_system = any(c.chunk_type == ChunkType.SYSTEM for c in self.chunk_manager.chunks)
+        if has_system:
+            self.chunk_manager.update_latest_system_prompt(prompt)
+        else:
+            self.chunk_manager.add_system_prompt(prompt)
+        return prompt
     
     async def _call_llm_with_tools(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用语言模型（支持Function Calling + 流式输出）
@@ -320,8 +331,16 @@ class Paw:
             # 系统交互
             elif tool_name == "execute_command":
                 result = self.tools.execute_command(**args)
+            elif tool_name == "open_shell":
+                result = self.tools.open_shell()
+            elif tool_name == "peek_shell":
+                result = self.tools.peek_shell()
+            elif tool_name == "interrupt_command":
+                result = self.tools.interrupt_command()
             elif tool_name == "run_script":
                 result = self.tools.run_script(**args)
+            elif tool_name == "wait":
+                result = self.tools.wait(**args)
             
             else:
                 error_msg = ToolPrompts.get_error_messages()["unknown_tool"].format(tool_name=tool_name)
@@ -388,14 +407,18 @@ class Paw:
         # 同时添加到chunk_manager（用于显示）
         self.chunk_manager.add_user_input(user_input)
         
-        # 2. 主循环
+        # 2. 主循环（无步数限制）
         step_count = 0
-        max_steps = 20
         final_response = ""
         no_action_count = 0  # 连续无工具调用计数
         
-        while step_count < max_steps:
+        while True:
             step_count += 1
+            
+            # 更新系统提示词，注入动态状态
+            if step_count > 1:  # 从第二次调用开始注入状态
+                updated_prompt = self._create_system_prompt(include_state=True)
+                self.messages[0]["content"] = updated_prompt
             
             # 调用支持Function Calling的API
             assistant_message = await self._call_llm_with_tools(self.messages)
@@ -440,8 +463,11 @@ class Paw:
                         "args": function_args
                     })
                     
+                    # 获取工具执行结果
+                    success = result.get("success", False)
+                    
                     # 确保result_text总是被定义
-                    if result.get("success"):
+                    if success:
                         result_text = str(result.get("result", ""))
                         # 显示结果预览
                         preview = result_text[:200] + "..." if len(result_text) > 200 else result_text
@@ -461,6 +487,12 @@ class Paw:
                     
                     # 同时添加到chunk_manager
                     self.chunk_manager.add_tool_result(result_text)
+                    
+                    # 收集工具结果用于状态评估
+                    self.last_tool_results.append({
+                        "tool": function_name,
+                        "success": success
+                    })
             
             # 检查是否完成
             if not tool_calls:
@@ -470,17 +502,31 @@ class Paw:
             else:
                 # 有工具调用，重置计数
                 no_action_count = 0
-            
-            if step_count >= max_steps:
-                max_steps_msg = UIPrompts.get_status_messages()["max_steps_reached"]
-                print(self.output.error(max_steps_msg))
-                break
         
-        # 形成记忆
-        await self.consciousness._form_memory(
-            f"任务: {user_input[:50]}",
-            {"steps": step_count, "response": final_response[:100]}
-        )
+        # 评估状态（使用独立的API调用）
+        if self.autostatus is not None:
+            try:
+                # 只保留最近5个工具结果
+                if len(self.last_tool_results) > 5:
+                    self.last_tool_results = self.last_tool_results[-5:]
+                
+                # 评估新状态
+                await self.autostatus.evaluate_state(
+                    conversation_history=self.messages[-6:],  # 最近3轮对话
+                    tool_results=self.last_tool_results
+                )
+                
+                # 显示状态摘要
+                if self.show_debug:
+                    status_summary = self.autostatus.get_summary()
+                    print(self.output.dim(status_summary))
+                    
+            except Exception as e:
+                # 状态评估失败不影响主流程
+                if self.show_debug:
+                    import traceback
+                    print(self.output.dim(f"状态评估失败: {e}"))
+                    traceback.print_exc()
         
         return final_response
     
@@ -562,13 +608,15 @@ class Paw:
         if not self.model:
             self.model = await self._select_model()
         
+        # 现在模型已确定，初始化AutoStatus
+        if self.autostatus is None:
+            self.autostatus = AutoStatus(self.api_url, self.model, self.api_key)
+        
         # 启动横幅（简约风格）
         ui_msgs = UIPrompts.get_startup_messages()
         print(f"\n{Style.BRIGHT}{ui_msgs['banner']}{Style.RESET_ALL} {self.output.dim(ui_msgs['version'])}")
         print(self.output.dim(f"Model: {self.model}"))
-        
-        # 初始化意识
-        await self.consciousness._perceive_environment()
+        print(self.output.dim("\n提示: 直接回车可唤醒Paw开始自主生活"))
         
         # 主循环
         while True:
@@ -577,19 +625,22 @@ class Paw:
                 user_input = input(f"\n{self.output.user('> ')}").strip()
                 
                 if user_input.lower() in ['exit', 'quit', 'bye']:
-                    self.consciousness._save_identity()
-                    await self.consciousness._save_memories()
+                    # 保存状态（如果需要可以在这里添加持久化逻辑）
                     goodbye_msg = UIPrompts.get_startup_messages()["goodbye"]
                     print(self.output.dim(goodbye_msg))
                     break
                 
-                # 空输入表示"继续"，不是忽略
+                # 空输入处理
                 if not user_input:
                     # 检查是否有对话历史
-                    if len(self.messages) <= 1:  # 只有system prompt
-                        continue
-                    # 添加一个特殊的继续标记
-                    user_input = "[继续]"
+                    if len(self.messages) <= 1:  # 只有system prompt，是第一次空输入
+                        # 发送系统唤醒消息，让AI开始自主生活
+                        system_wake_msg = "[系统提示]: Paw闹铃启动... 请赶紧醒过来开始今天的生活。[系统提示]hujiyo状态：[离线]"
+                        print(self.output.system(system_wake_msg))
+                        user_input = system_wake_msg
+                    else:
+                        # 有对话历史，添加继续标记
+                        user_input = "[系统提示:继续]"
                 
                 # 特殊命令
                 if user_input == '/clear':

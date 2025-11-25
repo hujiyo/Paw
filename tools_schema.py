@@ -256,20 +256,57 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "execute_command",
-            "description": "在持久化终端中执行命令。终端保持状态，可以使用cd切换目录，目录状态会在多次命令间保持。",
+            "description": "向已打开的共享终端发送命令。需要先调用 open_shell 打开终端。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
                         "description": "要执行的命令（如 'ls'、'cd data'、'python script.py'）"
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "超时时间（秒）"
                     }
                 },
                 "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_shell",
+            "description": "启动共享异步终端窗口，让AI与用户共同使用。仅支持 Windows。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "interrupt_command",
+            "description": "中断当前正在执行的长时间运行命令，相当于发送 Ctrl+C 信号。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wait",
+            "description": "等待指定时间（秒），用于同步异步操作。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seconds": {
+                        "type": "number",
+                        "description": "等待的秒数，可为整数或小数"
+                    }
+                },
+                "required": ["seconds"]
             }
         }
     },

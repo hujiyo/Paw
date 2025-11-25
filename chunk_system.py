@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 语块系统 - 智能上下文管理
-每个语块都知道自己的来源，不需要猜测
+每个语块都知道自己的来源
 """
 
 from dataclasses import dataclass, field
@@ -111,6 +111,18 @@ class ChunkManager:
     def add_system_prompt(self, prompt: str) -> Chunk:
         """添加系统提示词（注入）"""
         return self.add_chunk(prompt, ChunkType.SYSTEM)
+
+    def update_latest_system_prompt(self, prompt: str) -> Chunk:
+        """更新最近的系统提示词内容"""
+        for chunk in reversed(self.chunks):
+            if chunk.chunk_type == ChunkType.SYSTEM:
+                old_tokens = chunk.tokens
+                chunk.content = prompt
+                chunk.tokens = 0
+                chunk.estimate_tokens()
+                self.current_tokens += chunk.tokens - old_tokens
+                return chunk
+        return self.add_system_prompt(prompt)
     
     def add_memory(self, memory: str) -> Chunk:
         """添加记忆（注入）"""
@@ -156,11 +168,13 @@ class ChunkManager:
             # 确定角色
             if chunk.chunk_type in [ChunkType.SYSTEM, ChunkType.MEMORY]:
                 role = "system"
-            elif chunk.chunk_type in [ChunkType.USER, ChunkType.TOOL_RESULT]:
-                # 工具结果作为user角色，表示这是系统反馈
+            elif chunk.chunk_type == ChunkType.USER:
                 role = "user"
             elif chunk.chunk_type == ChunkType.ASSISTANT:
                 role = "assistant"
+            elif chunk.chunk_type == ChunkType.TOOL_RESULT:
+                # 工具结果使用 tool 角色（OpenAI Function Calling 标准）
+                role = "tool"
             else:
                 continue
             
@@ -210,20 +224,25 @@ class ChunkManager:
             print(tools_summary)
         
         if show_llm_view:
-            # 显示LLM实际看到的消息（合并后）
-            messages = self.get_context_for_llm()
-            for msg in messages:
-                role_label = f"[{msg['role'].upper()}]"
-                if use_colors:
-                    if msg['role'] == 'system':
-                        role_label = f"{Fore.YELLOW}{role_label}{Style.RESET_ALL}"
-                    elif msg['role'] == 'user':
-                        role_label = f"{Fore.CYAN}{role_label}{Style.RESET_ALL}"
-                    elif msg['role'] == 'assistant':
-                        role_label = f"{Fore.GREEN}{role_label}{Style.RESET_ALL}"
+            # 显示原始语块（保留类型信息）
+            for chunk in self.chunks:
+                # 跳过思考和工具调用（不发送给LLM）
+                if chunk.chunk_type in [ChunkType.THOUGHT, ChunkType.TOOL_CALL]:
+                    continue
                 
-                print(f"\n{role_label}")
-                print(msg['content'])
+                type_label = f"[{chunk.chunk_type.value.upper()}]"
+                if use_colors:
+                    if chunk.chunk_type in [ChunkType.SYSTEM, ChunkType.MEMORY]:
+                        type_label = f"{Fore.YELLOW}{type_label}{Style.RESET_ALL}"
+                    elif chunk.chunk_type == ChunkType.USER:
+                        type_label = f"{Fore.CYAN}{type_label}{Style.RESET_ALL}"
+                    elif chunk.chunk_type == ChunkType.ASSISTANT:
+                        type_label = f"{Fore.GREEN}{type_label}{Style.RESET_ALL}"
+                    elif chunk.chunk_type == ChunkType.TOOL_RESULT:
+                        type_label = f"{Fore.BLUE}{type_label}{Style.RESET_ALL}"
+                
+                print(f"\n{type_label}")
+                print(chunk.content)
         else:
             # 显示原始语块
             for i, chunk in enumerate(self.chunks):
