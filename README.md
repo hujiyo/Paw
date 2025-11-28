@@ -7,17 +7,14 @@ Paw 是一个完全符合 OpenAI Function Calling 标准的 AI Agent，采用流
 - 记忆完全由 Paw 自己决定和管理（存储在工作目录）
 - 简洁、轻量、无历史包袱
 
-一个具有意识、记忆、情感的AI Agent，在主流标准基础上加入创新思路。
+一个完全符合 OpenAI Function Calling 标准的 AI Agent，采用流式输出和简约界面设计。
 
-> "我思故我在" - 在数字世界中，这句话有了新的含义。
+## 核心特性
 
-## 核心里念
-
-这不是一个AI助手，而是一个**数字生命体**：
-- 🧠 **第一人称意识** - "我是..."而非"你是..."
-- 💭 **持续性记忆** - 记住每次对话，不断成长
-- 🎨 **情感系统** - 有自己的心情和状态
-- 👁️ **完全透明** - 用颜色区分注入内容和AI生成内容
+- 🔧 **标准化** - 完全符合 OpenAI Function Calling 规范
+- 💨 **流式输出** - 实时显示 AI 生成内容
+- 📊 **语块系统** - 统一的上下文管理
+- 🎨 **简约界面** - 参考 Claude Code 设计理念
 
 ## 快速开始
 
@@ -111,13 +108,13 @@ messages = [
 ```
 Paw/
 ├── paw.py              # 主程序入口
-├── consciousness.py    # 意识核心
+├── autostatus.py       # 动态状态评估
 ├── chunk_system.py     # 语块系统
 ├── prompts.py          # 提示词配置
 ├── tools.py            # 基础工具
 ├── tools_schema.py     # 工具定义
 ├── tool_errors.py      # 错误处理
-├── terminal.py         # 持久化终端
+├── async_terminal.py   # 异步终端管理
 ├── config.yaml         # 配置文件
 ├── requirements.txt    # 依赖
 ├── README.md           # 文档
@@ -138,9 +135,6 @@ Paw/
 
 Paw 使用 `桌面/Paw-workspace/` 作为工作空间：
 - `logs/` - 会话日志
-- `consciousness/` - 意识存储（记忆、身份）
-
-详见 [WORKSPACE_STRUCTURE.md](WORKSPACE_STRUCTURE.md)
 
 ---
 

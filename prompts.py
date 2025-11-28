@@ -234,99 +234,6 @@ Paw-workspace目录的所有权是我的
 </declaration>"""
 
 
-class ConsciousnessPrompts:
-    """意识模块相关的提示词"""
-    
-    @staticmethod
-    def get_first_awakening_message() -> str:
-        """恢复意识时的消息（新身份文件）"""
-        return "系统启动。我是Paw。正在加载工作环境..."
-    
-    @staticmethod
-    def get_awakening_message(name: str) -> str:
-        """恢复意识的消息（已有身份文件）"""
-        return f"继续上次的工作。加载历史记录..."
-    
-    @staticmethod
-    def get_memory_context() -> str:
-        """建立记忆上下文 - 工作目录内的经验"""
-        return """我在工作目录里的经验：
-这个目录是我的完整世界。根目录下通常有配置文件、数据文件、脚本文件。我会按照项目需求组织子目录结构。
-文件查找很简单：list_directory 看当前目录，find_files 递归搜索，grep_search 在文件内容中查找。所有路径都是相对路径。
-Python 脚本执行时的常见问题：ImportError 检查文件是否存在，IndentationError 是缩进问题，FileNotFoundError 说明路径不对。
-不同文件类型的处理：.py 可执行，.json 需要解析，.txt 直接读取，.log 可能很大要注意。
-每次任务都在这个目录里完成。创建文件、修改代码、运行脚本，一切都在工作空间内。"""    
-    @staticmethod
-    def get_thinking_templates() -> Dict[str, str]:
-        """思考模板 - 处理问题时的思维模式"""
-        return {
-            "analyzing": " 让我分析一下这个问题的结构。",
-            "confident": " 我遇到过类似的情况。",
-            "debugging": " 需要找出问题的根源。",
-            "optimizing": " 有没有更高效的方法？",
-            "exploring": " 先了解一下相关的文件和依赖。"
-        }
-    
-    @staticmethod
-    def get_learning_insights() -> Dict[str, str]:
-        """学习记录 - 从执行结果中总结的经验"""
-        return {
-            "error": "错误原因已记录，下次避免",
-            "success": "这个方法有效，可以复用",
-            "new_pattern": "发现了一个可重复的解决模式",
-            "connection": "这些组件之间存在依赖关系",
-            "unexpected": "意外的结果，需要更新理解",
-            "adaptation": "方法需要调整以适应新情况"
-        }
-    
-    @staticmethod
-    def get_reflection_insights() -> Dict[str, str]:
-        """工作状态评估"""
-        return {
-            "high_activity": "处理了大量任务，运行正常",
-            "low_activity": "任务较少，可能需要更多信息",
-            "resource_heavy": "资源占用较高，考虑优化",
-            "efficient": "当前方法效率良好",
-            "learning": "积累了新的解决方案"
-        }
-    
-    @staticmethod
-    def get_pattern_recognition() -> list:
-        """模式识别 - 从多次执行中发现的规律"""
-        return [
-            "相似的错误通常有相同的根源",
-            "某些操作序列经常一起出现",
-            "特定的文件结构暗示特定的项目类型",
-            "重复的任务可以优化为脚本",
-            "不同模块之间的调用链路存在规律"
-        ]
-    
-    @staticmethod
-    def get_identity_template() -> Dict[str, Any]:
-        """身份配置 - 系统工作者属性"""
-        return {
-            "name": "Paw",
-            "capabilities": [
-                "文件系统操作",
-                "代码执行", 
-                "错误诊断",
-                "任务自动化"
-            ],
-            "work_style": {
-                "problem_solving": 0.9,  # 解决问题能力
-                "efficiency": 0.7,       # 执行效率
-                "error_handling": 0.8,   # 错误处理
-                "documentation": 0.6,    # 记录习惯
-                "optimization": 0.7      # 优化倾向
-            },
-            "environment": "Paw-workspace工作目录，Python为主要执行环境",
-            "task_count": 0,
-            "error_count": 0,
-            "success_patterns": [],     # 成功的解决方案模式
-            "common_paths": ["./", "data/", "scripts/", "temp/"]  # 工作目录内的常用路径
-        }
-
-
 class UIPrompts:
     """用户界面相关的提示词"""
     
@@ -385,7 +292,6 @@ class ToolPrompts:
 # 导出所有提示词类
 __all__ = [
     'SystemPrompts',
-    'ConsciousnessPrompts',
     'UIPrompts',
     'ToolPrompts'
 ]
@@ -403,12 +309,6 @@ if __name__ == "__main__":
     system_prompt = SystemPrompts.get_main_system_prompt("Paw", birth)
     print("\n【系统提示词】")
     print(system_prompt)
-    
-    # 思考模板
-    print("\n【思考模板】")
-    templates = ConsciousnessPrompts.get_thinking_templates()
-    for mood, template in templates.items():
-        print(f"  {mood}: {template}")
     
     # UI提示
     print("\n【UI消息】")

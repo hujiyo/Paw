@@ -34,7 +34,6 @@ class AutoStatus:
             "cognitive_load": "medium",     # 认知负载: low/medium/high
             "execution_mode": "exploring",  # 执行模式: exploring/analyzing/executing/optimizing
             "confidence": 0.7,              # 置信度: 0.0-1.0
-            "fatigue": 0.0,                # 疲劳度: 0.0-1.0
             "recent_focus": "系统初始化"     # 最近焦点
         }
         
@@ -147,13 +146,7 @@ class AutoStatus:
    - 连续成功 额外+0.1
    - 保持在[0.0, 1.0]范围
 
-4. fatigue（疲劳度）0-1:
-   - 每轮对话 +0.1
-   - 遇到错误 +0.2
-   - 成功完成任务 -0.1
-   - 保持在[0.0, 1.0]范围
-
-5. recent_focus（最近焦点）:
+4. recent_focus（最近焦点）:
    - 用2-4个字概括刚才的任务类型
    - 例如：代码调试、文件创建、错误分析、优化算法
 
@@ -162,7 +155,6 @@ class AutoStatus:
     "cognitive_load": "low/medium/high",
     "execution_mode": "exploring/analyzing/executing/optimizing",
     "confidence": 0.0-1.0,
-    "fatigue": 0.0-1.0,
     "recent_focus": "2-4个字"
 }}"""
         
@@ -268,12 +260,6 @@ class AutoStatus:
             confidence = 0.5
         state["confidence"] = max(0.0, min(1.0, float(confidence)))
         
-        # 验证fatigue（0-1范围）
-        fatigue = state.get("fatigue", 0.0)
-        if not isinstance(fatigue, (int, float)):
-            fatigue = 0.0
-        state["fatigue"] = max(0.0, min(1.0, float(fatigue)))
-        
         # 验证recent_focus
         if not isinstance(state.get("recent_focus"), str):
             state["recent_focus"] = "未知任务"
@@ -286,16 +272,8 @@ class AutoStatus:
         """
         自动衰减状态（当无法评估时）
         """
-        # 疲劳度增加
-        self.current_state["fatigue"] = min(1.0, self.current_state["fatigue"] + 0.1)
-        
         # 置信度略微下降
         self.current_state["confidence"] = max(0.0, self.current_state["confidence"] - 0.05)
-        
-        # 执行模式回归到exploring
-        if self.current_state["fatigue"] > 0.8:
-            self.current_state["execution_mode"] = "exploring"
-            self.current_state["cognitive_load"] = "low"
         
         return self.current_state
     
@@ -348,27 +326,17 @@ class AutoStatus:
         else:
             confidence_style = "低置信度 - 谨慎探索，充分验证"
         
-        # 根据疲劳度调整策略
-        if self.current_state["fatigue"] > 0.7:
-            fatigue_strategy = "疲劳较高 - 简化方案，避免复杂操作"
-        elif self.current_state["fatigue"] > 0.4:
-            fatigue_strategy = "轻微疲劳 - 保持专注，合理分配精力"
-        else:
-            fatigue_strategy = "精力充沛 - 可处理复杂任务"
-        
         return f"""
 # 当前状态 (DYNAMIC STATE)
 <current_state>
 认知负载: {self.current_state['cognitive_load']} - {load_impact}
 执行模式: {self.current_state['execution_mode']} - {mode_approach}
 置信水平: {self.current_state['confidence']:.1f} - {confidence_style}
-疲劳程度: {self.current_state['fatigue']:.1f} - {fatigue_strategy}
 任务焦点: {self.current_state['recent_focus']}
 对话轮次: 第{self.conversation_rounds}轮
 
 状态影响:
 - 回答风格: {'简洁直接' if self.current_state['cognitive_load'] == 'high' else '详细完整'}
-- 错误容忍: {'需要更仔细' if self.current_state['fatigue'] > 0.6 else '正常水平'}
 - 决策速度: {'快速决策' if self.current_state['confidence'] > 0.8 else '充分思考'}
 </current_state>"""
     
@@ -380,7 +348,6 @@ class AutoStatus:
             "cognitive_load": "medium",
             "execution_mode": "exploring",
             "confidence": 0.7,
-            "fatigue": 0.0,
             "recent_focus": "新任务"
         }
         self.state_history = []
@@ -392,8 +359,7 @@ class AutoStatus:
         """
         return (f"[状态] 模式:{self.current_state['execution_mode']} | "
                 f"负载:{self.current_state['cognitive_load']} | "
-                f"置信:{self.current_state['confidence']:.1f} | "
-                f"疲劳:{self.current_state['fatigue']:.1f}")
+                f"置信:{self.current_state['confidence']:.1f}")
 
 
 # 测试

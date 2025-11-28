@@ -34,7 +34,7 @@ from autostatus import AutoStatus
 from tools import BaseTools
 from chunk_system import ChunkManager, ChunkType, Chunk
 from tools_schema import TOOLS_SCHEMA
-from prompts import SystemPrompts, ConsciousnessPrompts, UIPrompts, ToolPrompts
+from prompts import SystemPrompts, UIPrompts, ToolPrompts
 
 
 class ColoredOutput:
@@ -146,14 +146,12 @@ class Paw:
         """
         # 获取终端状态
         terminal_status = self.tools.get_terminal_status()
-        persistent = terminal_status.get('persistent', {})
-        shared = terminal_status.get('shared_shell', {})
         
         # 构建终端信息
-        if shared.get('is_open'):
-            terminal_info = f"共享终端已开启 (PID: {shared.get('pid')})"
+        if terminal_status.get('is_open'):
+            terminal_info = f"共享终端已开启 (PID: {terminal_status.get('pid')}, 工作目录: {terminal_status.get('working_directory')})"
         else:
-            terminal_info = f"虚拟终端: {persistent.get('prompt', 'N/A')} (位于: {persistent.get('current_directory', 'N/A')})"
+            terminal_info = f"终端未启动 (工作目录: {terminal_status.get('working_directory')})"
         
         # 使用提示词配置文件
         main_prompt = SystemPrompts.get_main_system_prompt(self.name, self.birth_time)
@@ -161,11 +159,8 @@ class Paw:
         # 替换终端状态占位符
         main_prompt = main_prompt.replace("{terminal_status}", terminal_info)
         
-        # 添加记忆上下文（建立历史感）
-        memory_context = ConsciousnessPrompts.get_memory_context()
-        
         # 组合基础系统提示词
-        prompt = f"{main_prompt}\n\n{memory_context}"
+        prompt = main_prompt
         
         # 如果需要，注入动态状态
         if include_state and self.autostatus is not None:

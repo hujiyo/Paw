@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import time
 import sys
 from tool_errors import ToolError
-from terminal import PersistentTerminal
 from async_terminal import ThreadedTerminal
 
 
@@ -38,8 +37,6 @@ class BaseTools:
         
         self.script_timeout = 30  # 默认脚本执行超时时间（秒）
         
-        # 创建持久化终端会话（虚拟终端）
-        self.terminal = PersistentTerminal(self.sandbox_dir)
         # 创建共享异步终端管理器，传递终端配置
         terminal_config = config.get('terminal', {}) if config else {}
         self.async_shell = ThreadedTerminal(self.sandbox_dir, terminal_config)
@@ -454,16 +451,10 @@ class BaseTools:
             终端状态信息（用于显示给AI）
         """
         return {
-            "persistent": {
-                "current_directory": str(self.terminal.current_dir),
-                "prompt": self.terminal.get_prompt(),
-                "command_history_count": len(self.terminal.command_history)
-            },
-            "shared_shell": {
-                "is_open": self.async_shell.is_shell_open(),
-                "pid": self.async_shell.process.pid if hasattr(self.async_shell, 'process') and self.async_shell.process else None,
-                "type": "threaded"
-            }
+            "is_open": self.async_shell.is_shell_open(),
+            "pid": self.async_shell.process.pid if hasattr(self.async_shell, 'process') and self.async_shell.process else None,
+            "type": "threaded_terminal",
+            "working_directory": str(self.sandbox_dir)
         }
     
     def run_script(self, language: str, code: str, 
