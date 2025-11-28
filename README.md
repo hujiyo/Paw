@@ -72,7 +72,11 @@ messages = [
 
 ### 创新点：语块系统
 
-在标准基础上，用 `chunk_manager` 管理显示和压缩，但**不干扰**标准消息格式。
+`chunk_manager` 是**唯一的上下文管理器**，负责：
+- 📦 统一管理所有消息（system, user, assistant, tool）
+- 🔄 精确转换为OpenAI标准格式（包含tool_calls, tool_call_id等）
+- 📊 上下文可视化（`/chunks`命令显示LLM实际视角）
+- 🎯 未来支持上下文工程（压缩、优先级、摘要等）
 
 ## 简约界面
 
@@ -97,8 +101,8 @@ messages = [
 ## 命令
 
 - `/model` - 检测并切换可用模型
-- `/chunks` - 查看上下文
-- `/messages` - 查看消息历史（调试）
+- `/chunks` - 查看完整上下文（**LLM实际视角**，包含tool_calls等完整信息）
+- `/messages` - 查看原始消息格式（OpenAI标准，调试用）
 - `/clear` - 清空历史
 - `exit` - 退出
 

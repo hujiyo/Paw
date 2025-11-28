@@ -79,7 +79,7 @@ class BaseTools:
         return Path.home() / "Desktop"
     
     def read_file(self, path: str, start_line: int = None, end_line: int = None) -> str:
-        """读取文件内容（支持按行读取）
+        """读取文件内容（仅支持UTF-8编码）
         
         Args:
             path: 文件路径
@@ -94,6 +94,7 @@ class BaseTools:
             if not file_path.exists():
                 return f"错误: 文件不存在 {file_path}"
             
+            # 所有文件必须是UTF-8
             with open(file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 
@@ -523,12 +524,13 @@ class BaseTools:
                 if args:
                     cmd.extend(args)
                 
-                # 执行脚本
+                # 执行脚本（UTF-8）
                 start_time = time.time()
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
                     timeout=self.script_timeout,
                     cwd=str(self.sandbox_dir)
                 )
@@ -628,7 +630,7 @@ class BaseTools:
                 nonlocal files_searched
                 try:
                     files_searched += 1
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(file_path, 'r', encoding='utf-8') as f:
                         for line_num, line in enumerate(f, 1):
                             # 匹配检查
                             if is_regex:

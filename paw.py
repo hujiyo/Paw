@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 Paw - 数字生命体标准启动器
 统一入口，上帝视角，完全可视化
@@ -15,6 +16,15 @@ from typing import Dict, List, Any, Optional, Tuple
 import re
 from colorama import init, Fore, Back, Style
 import yaml
+
+# 设置环境为UTF-8（Windows兼容）
+if sys.platform == "win32":
+    # 设置标准输出为UTF-8
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+    # 设置环境变量
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # 初始化颜色系统
 init(autoreset=True)
@@ -107,10 +117,8 @@ class Paw:
         # 系统提示词（第一人称）
         self.system_prompt = self._create_system_prompt()
         
-        # OpenAI标准消息历史（持久化）
-        self.messages = [
-            {"role": "system", "content": self.system_prompt}
-        ]
+        # 注意：消息历史现在完全由chunk_manager管理
+        # 不再使用self.messages
         
         # 可视化配置
         self.show_debug = True  # 显示调试信息
@@ -388,23 +396,15 @@ class Paw:
     
     def clear_history(self):
         """清空对话历史（保留system prompt）"""
-        self.messages = [
-            {"role": "system", "content": self.system_prompt}
-        ]
-        self.chunk_manager.chunks.clear()
-        self.chunk_manager.current_tokens = 0
+        self.chunk_manager.clear()
+        # 重新添加系统提示词
+        self.chunk_manager.add_system_prompt(self.system_prompt)
         status_msg = UIPrompts.get_status_messages()["history_cleared"]
         print(self.output.dim(status_msg))
     
     async def process_input(self, user_input: str) -> str:
         """处理用户输入 - 完全符合OpenAI Function Calling标准"""
-        # 1. 添加用户输入到持久化消息历史
-        self.messages.append({
-            "role": "user",
-            "content": user_input
-        })
-        
-        # 同时添加到chunk_manager（用于显示）
+        # 1. 添加用户输入到chunk_manager（唯一的上下文来源）
         self.chunk_manager.add_user_input(user_input)
         
         # 2. 主循环（无步数限制）
@@ -418,28 +418,20 @@ class Paw:
             # 更新系统提示词，注入动态状态
             if step_count > 1:  # 从第二次调用开始注入状态
                 updated_prompt = self._create_system_prompt(include_state=True)
-                self.messages[0]["content"] = updated_prompt
+            
+            # 从chunk_manager获取上下文消息
+            messages = self.chunk_manager.get_context_for_llm()
             
             # 调用支持Function Calling的API
-            assistant_message = await self._call_llm_with_tools(self.messages)
+            assistant_message = await self._call_llm_with_tools(messages)
             
             # 提取内容和工具调用
             content = assistant_message.get("content")
             tool_calls = assistant_message.get("tool_calls")
             
-            # 添加完整的assistant消息（OpenAI标准）
-            assistant_msg = {
-                "role": "assistant",
-                "content": content
-            }
-            if tool_calls:
-                assistant_msg["tool_calls"] = tool_calls
-            
-            self.messages.append(assistant_msg)
-            
-            # 添加到chunk_manager
+            # 添加assistant消息到chunk_manager（包含tool_calls）
+            self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
             if content:
-                self.chunk_manager.add_assistant_response(content)
                 final_response = content
             
             # 注意：响应已在_call_llm_with_tools中流式显示
@@ -477,16 +469,12 @@ class Paw:
                         result_text = f"错误: {error_msg}"
                         print(self.output.error(f"  {result_text}"))
                     
-                    # 添加工具结果（OpenAI标准）
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": function_name,
-                        "content": result_text
-                    })
-                    
-                    # 同时添加到chunk_manager
-                    self.chunk_manager.add_tool_result(result_text)
+                    # 添加工具结果到chunk_manager（OpenAI标准）
+                    self.chunk_manager.add_tool_result(
+                        result_text,
+                        tool_call_id=tool_call_id,
+                        tool_name=function_name
+                    )
                     
                     # 收集工具结果用于状态评估
                     self.last_tool_results.append({
@@ -510,9 +498,12 @@ class Paw:
                 if len(self.last_tool_results) > 5:
                     self.last_tool_results = self.last_tool_results[-5:]
                 
+                # 从chunk_manager获取最近的消息用于状态评估
+                recent_messages = self.chunk_manager.get_context_for_llm()[-6:]
+                
                 # 评估新状态
                 await self.autostatus.evaluate_state(
-                    conversation_history=self.messages[-6:],  # 最近3轮对话
+                    conversation_history=recent_messages,
                     tool_results=self.last_tool_results
                 )
                 
@@ -632,8 +623,9 @@ class Paw:
                 
                 # 空输入处理
                 if not user_input:
-                    # 检查是否有对话历史
-                    if len(self.messages) <= 1:  # 只有system prompt，是第一次空输入
+                    # 检查是否有对话历史（通过chunk数量判断）
+                    user_chunks = [c for c in self.chunk_manager.chunks if c.chunk_type == ChunkType.USER]
+                    if len(user_chunks) == 0:  # 没有用户输入，是第一次空输入
                         # 发送系统唤醒消息，让AI开始自主生活
                         system_wake_msg = "[系统提示]: Paw闹铃启动... 请赶紧醒过来开始今天的生活。[系统提示]hujiyo状态：[离线]"
                         print(self.output.system(system_wake_msg))
@@ -661,8 +653,9 @@ class Paw:
                 
                 if user_input == '/messages':
                     # 显示完整的消息历史（调试用）
-                    print(self.output.dim(f"\n消息历史 ({len(self.messages)} 条):"))
-                    for i, msg in enumerate(self.messages):
+                    messages = self.chunk_manager.get_context_for_llm()
+                    print(self.output.dim(f"\n消息历史 ({len(messages)} 条):"))
+                    for i, msg in enumerate(messages):
                         role = msg.get("role", "unknown")
                         content = msg.get("content", "")
                         tool_calls = msg.get("tool_calls")
