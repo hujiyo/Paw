@@ -114,7 +114,7 @@ Paw/
 ├── tools.py            # 基础工具
 ├── tools_schema.py     # 工具定义
 ├── tool_errors.py      # 错误处理
-├── async_terminal.py   # 异步终端管理
+├── terminal.py   # 异步终端管理
 ├── config.yaml         # 配置文件
 ├── requirements.txt    # 依赖
 ├── README.md           # 文档

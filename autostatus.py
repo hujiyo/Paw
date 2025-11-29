@@ -41,6 +41,10 @@ class AutoStatus:
         self.state_history = []
         self.conversation_rounds = 0
         
+        # 保存最后一次发送给LLM的提示词（调试用）
+        self.last_prompt = None
+        self.last_response = None
+        
     async def evaluate_state(self, 
                            conversation_history: List[Dict[str, str]], 
                            tool_results: Optional[List[Dict]] = None) -> Dict[str, Any]:
@@ -58,6 +62,9 @@ class AutoStatus:
         
         # 构建评估提示词
         evaluation_prompt = self._build_evaluation_prompt(conversation_history, tool_results)
+        
+        # 保存提示词（调试用）
+        self.last_prompt = evaluation_prompt
         
         try:
             # 调用API评估状态
@@ -114,49 +121,39 @@ class AutoStatus:
                 success = result.get("success", False)
                 tools_text += f"- {tool_name}: {'成功' if success else '失败'}\n"
         
-        # 构建提示词
-        prompt = f"""你是一个状态评估器，需要根据对话内容和执行结果评估AI的当前状态。
+        # 构建简洁的状态评估提示词
+        # 设计原则：给出明确的默认值，让LLM只需做微调
+        
+        # 计算建议的置信度变化
+        prev_confidence = self.current_state.get("confidence", 0.5)
+        success_count = sum(1 for r in (tool_results or []) if r and r.get("success"))
+        fail_count = sum(1 for r in (tool_results or []) if r and not r.get("success"))
+        suggested_confidence = min(1.0, max(0.0, prev_confidence + success_count * 0.1 - fail_count * 0.2))
+        
+        prompt = f"""# 任务
+根据下方信息，输出一个JSON对象表示AI当前状态。
 
-最近对话：
-{history_text if history_text else "（无对话）"}
+# 输入
+对话轮数: {self.conversation_rounds}
+最近对话: {history_text if history_text else "用户刚开始对话"}
+工具结果: {tools_text if tools_text else "无"}
+上次状态: load={self.current_state.get('cognitive_load')}, mode={self.current_state.get('execution_mode')}, conf={prev_confidence:.1f}
 
-工具调用结果：
-{tools_text if tools_text else "（无工具调用）"}
-
-之前的状态：
-{json.dumps(self.current_state, ensure_ascii=False, indent=2)}
-
-已进行 {self.conversation_rounds} 轮对话
-
-评估规则：
-1. cognitive_load（认知负载）:
-   - low: 简单查询、单一操作
-   - medium: 常规任务、多步操作
-   - high: 复杂调试、多重错误、嵌套问题
-
-2. execution_mode（执行模式）:
-   - exploring: 初次了解、搜索信息
-   - analyzing: 分析问题、理解需求
-   - executing: 执行任务、修改文件
-   - optimizing: 优化代码、改进方案
-
-3. confidence（置信度）0-1:
-   - 成功操作 +0.1
-   - 失败操作 -0.2
-   - 连续成功 额外+0.1
-   - 保持在[0.0, 1.0]范围
-
-4. recent_focus（最近焦点）:
-   - 用2-4个字概括刚才的任务类型
-   - 例如：代码调试、文件创建、错误分析、优化算法
-
-请直接输出JSON格式的新状态，不要任何解释或其他内容：
+# 输出格式
 {{
-    "cognitive_load": "low/medium/high",
-    "execution_mode": "exploring/analyzing/executing/optimizing",
-    "confidence": 0.0-1.0,
-    "recent_focus": "2-4个字"
-}}"""
+  "cognitive_load": "low",
+  "execution_mode": "exploring", 
+  "confidence": {suggested_confidence:.1f},
+  "recent_focus": "聊天"
+}}
+
+# 字段说明
+- cognitive_load: low(简单问答) / medium(常规任务) / high(复杂调试)
+- execution_mode: exploring(了解信息) / analyzing(分析问题) / executing(执行任务) / optimizing(优化改进)
+- confidence: 0.0-1.0，建议值{suggested_confidence:.1f}(基于工具成功/失败计算)
+- recent_focus: 2-4字描述当前任务，如"代码修复""文件读取""闲聊"
+
+直接输出JSON，不要其他内容。"""
         
         return prompt
     
@@ -171,14 +168,26 @@ class AutoStatus:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         
+        # 系统提示词：明确角色和输出要求
+        system_content = """你是一个JSON状态生成器。你的唯一任务是根据输入信息输出一个JSON对象。
+
+规则：
+1. 只输出JSON，不要任何其他文字
+2. 不要使用markdown代码块
+3. JSON必须是单行或多行的有效格式
+4. 如果不确定，就使用输出格式中给出的默认值
+
+示例输出：
+{"cognitive_load": "medium", "execution_mode": "executing", "confidence": 0.7, "recent_focus": "代码修复"}"""
+
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "你是一个精确的状态评估器。只输出JSON，不要解释。"},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.3,  # 低温度，保证稳定
-            "max_tokens": 100
+            "temperature": 0.2,  # 更低温度，保证稳定输出
+            "max_tokens": 150  # 稍微增加，避免截断
         }
         
         try:
@@ -203,7 +212,15 @@ class AutoStatus:
                     if "message" not in result["choices"][0]:
                         raise Exception(f"choices[0]缺少message字段: {json.dumps(result['choices'][0], ensure_ascii=False)[:200]}")
                     
-                    content = result["choices"][0]["message"]["content"]
+                    content = result["choices"][0]["message"].get("content")
+                    
+                    # 保存响应（调试用）
+                    self.last_response = content
+                    
+                    # 检查content是否为空
+                    if not content or not content.strip():
+                        # API返回空内容，使用自动衰减
+                        return self._auto_decay()
                     
                     # 解析JSON
                     try:

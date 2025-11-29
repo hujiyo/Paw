@@ -48,9 +48,12 @@ class ColoredOutput:
     # 角色颜色
     USER = Fore.WHITE + Style.BRIGHT
     ASSISTANT = Fore.GREEN
-    TOOL = Fore.BLUE + Style.DIM
+    TOOL = Fore.CYAN + Style.DIM  # 工具调用用青色
+    TOOL_NAME = Fore.CYAN  # 工具名称
+    TOOL_ARGS = Fore.WHITE + Style.DIM  # 工具参数
     SYSTEM = Fore.YELLOW + Style.DIM
     ERROR = Fore.RED
+    SUCCESS = Fore.GREEN + Style.DIM  # 成功状态
     
     @staticmethod
     def user(text: str) -> str:
@@ -63,6 +66,19 @@ class ColoredOutput:
     @staticmethod
     def tool(text: str) -> str:
         return f"{ColoredOutput.TOOL}{text}{ColoredOutput.RESET}"
+    
+    @staticmethod
+    def tool_call(name: str, args: str) -> str:
+        """格式化工具调用显示"""
+        return f"{ColoredOutput.TOOL_NAME}● {name}{ColoredOutput.RESET} {ColoredOutput.TOOL_ARGS}{args}{ColoredOutput.RESET}"
+    
+    @staticmethod
+    def tool_result(text: str, success: bool = True) -> str:
+        """格式化工具结果显示"""
+        if success:
+            return f"{ColoredOutput.SUCCESS}  ✓ {text}{ColoredOutput.RESET}"
+        else:
+            return f"{ColoredOutput.ERROR}  ✗ {text}{ColoredOutput.RESET}"
     
     @staticmethod
     def system(text: str) -> str:
@@ -174,6 +190,58 @@ class Paw:
             self.chunk_manager.add_system_prompt(prompt)
         return prompt
     
+    def _get_brief_result(self, tool_name: str, result: str) -> str:
+        """生成简洁的工具结果摘要"""
+        # 根据工具类型生成不同的简洁描述
+        if tool_name in ["open_shell"]:
+            return "终端已就绪"
+        elif tool_name in ["execute_command"]:
+            return "已执行"
+        elif tool_name in ["interrupt_command"]:
+            return "已中断"
+        elif tool_name in ["read_file"]:
+            lines = result.count('\n') + 1
+            return f"读取 {lines} 行"
+        elif tool_name in ["write_file"]:
+            return "已写入"
+        elif tool_name in ["delete_file"]:
+            return "已删除"
+        elif tool_name in ["edit_file", "replace_in_file", "multi_edit"]:
+            return "已修改"
+        elif tool_name in ["list_directory"]:
+            items = len(result.split('\n')) if result else 0
+            return f"{items} 项"
+        elif tool_name in ["find_files", "grep_search", "search_in_file"]:
+            matches = result.count('\n') + 1 if result.strip() else 0
+            return f"找到 {matches} 处" if matches else "无匹配"
+        elif tool_name in ["run_script"]:
+            return "脚本完成"
+        elif tool_name in ["wait"]:
+            return "等待完成"
+        else:
+            # 默认：截取前30字符
+            brief = result.replace('\n', ' ')[:30]
+            return brief + "..." if len(result) > 30 else brief
+    
+    def _refresh_shell_chunk(self, move_to_end: bool = False):
+        """刷新Shell输出到chunk（如果终端已打开）
+        
+        Args:
+            move_to_end: 是否将 Shell chunk 移动到末尾
+                - True: 终端操作后调用，Shell chunk 紧跟在操作之后
+                - False: 普通刷新，只更新内容不移动位置
+        """
+        if self.tools.async_shell.is_shell_open():
+            # 获取终端屏幕快照
+            screen_output = self.tools.async_shell.get_screen_snapshot()
+            if screen_output:
+                # 更新Shell chunk
+                self.chunk_manager.update_shell_output(screen_output, move_to_end=move_to_end)
+        else:
+            # 终端已关闭，移除Shell chunk
+            if self.chunk_manager.has_shell_chunk():
+                self.chunk_manager.remove_shell_chunk()
+    
     async def _call_llm_with_tools(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用语言模型（支持Function Calling + 流式输出）
         
@@ -242,12 +310,14 @@ class Paw:
                             
                             # 处理内容（流式打印）
                             if 'content' in delta and delta['content']:
-                                if not has_content:
-                                    print(f"\n{self.output.assistant('')}", end='', flush=True)
-                                    has_content = True
                                 content_text = delta['content']
+                                # 首次输出时去除前导换行
+                                if not has_content:
+                                    content_text = content_text.lstrip('\n')
+                                    if not content_text:
+                                        continue
+                                    has_content = True
                                 content_chunks.append(content_text)
-                                # 暂时打印，如果后面发现有<<<DONE>>>会重新处理
                                 print(self.output.assistant(content_text), end='', flush=True)
                             
                             # 处理tool_calls（累积）
@@ -273,7 +343,7 @@ class Paw:
                             continue
                     
                     if has_content:
-                        print()  # 换行
+                        print()  # 结束流式输出的换行
                     
                     # 组合完整内容
                     full_content = ''.join(content_chunks) if content_chunks else None
@@ -331,15 +401,16 @@ class Paw:
             elif tool_name == "list_directory":
                 result = self.tools.list_directory(**args)
             
-            # 系统交互
+            # 系统交互（终端操作后只刷新内容，移动逻辑由process_input控制）
             elif tool_name == "execute_command":
                 result = self.tools.execute_command(**args)
+                self._refresh_shell_chunk(move_to_end=False)
             elif tool_name == "open_shell":
                 result = self.tools.open_shell()
-            elif tool_name == "peek_shell":
-                result = self.tools.peek_shell()
+                self._refresh_shell_chunk(move_to_end=False)
             elif tool_name == "interrupt_command":
                 result = self.tools.interrupt_command()
+                self._refresh_shell_chunk(move_to_end=False)
             elif tool_name == "run_script":
                 result = self.tools.run_script(**args)
             elif tool_name == "wait":
@@ -414,6 +485,9 @@ class Paw:
             if step_count > 1:  # 从第二次调用开始注入状态
                 updated_prompt = self._create_system_prompt(include_state=True)
             
+            # 刷新Shell输出到chunk（如果终端已打开）
+            self._refresh_shell_chunk()
+            
             # 从chunk_manager获取上下文消息
             messages = self.chunk_manager.get_context_for_llm()
             
@@ -433,16 +507,15 @@ class Paw:
             
             # 执行工具调用
             if tool_calls:
-                for tool_call in tool_calls:
+                for i, tool_call in enumerate(tool_calls):
                     # 提取工具信息
                     tool_call_id = tool_call.get("id")
                     function_name = tool_call["function"]["name"]
                     function_args = json.loads(tool_call["function"]["arguments"])
                     
-                    # 显示工具调用
-                    args_str = json.dumps(function_args, ensure_ascii=False)
-                    tool_icon = ToolPrompts.get_tool_execution_prefix()
-                    print(f"\n{self.output.tool(f'{tool_icon} {function_name}({args_str})')}")
+                    # 显示工具调用（简洁格式，紧凑排列）
+                    args_str = json.dumps(function_args, ensure_ascii=False) if function_args else ""
+                    print(self.output.tool_call(function_name, args_str))
                     
                     # 执行工具
                     result = await self._execute_tool({
@@ -456,13 +529,13 @@ class Paw:
                     # 确保result_text总是被定义
                     if success:
                         result_text = str(result.get("result", ""))
-                        # 显示结果预览
-                        preview = result_text[:200] + "..." if len(result_text) > 200 else result_text
-                        print(self.output.dim(f"  {preview}"))
+                        # 简洁的成功提示
+                        brief = self._get_brief_result(function_name, result_text)
+                        print(self.output.tool_result(brief, success=True), flush=True)
                     else:
                         error_msg = result.get('error', '未知错误')
                         result_text = f"错误: {error_msg}"
-                        print(self.output.error(f"  {result_text}"))
+                        print(self.output.tool_result(error_msg, success=False), flush=True)
                     
                     # 添加工具结果到chunk_manager（OpenAI标准）
                     self.chunk_manager.add_tool_result(
@@ -470,6 +543,12 @@ class Paw:
                         tool_call_id=tool_call_id,
                         tool_name=function_name
                     )
+                    
+                    # 如果是 Shell 相关工具，移动 Shell chunk 到末尾
+                    # 确保 Shell Output 出现在 Tool Result 之后（作为下一轮对话的开始）
+                    # 避免插在 Assistant 和 Tool Result 之间破坏 API 规范
+                    if function_name in ["execute_command", "open_shell", "interrupt_command"]:
+                        self._refresh_shell_chunk(move_to_end=True)
                     
                     # 收集工具结果用于状态评估
                     self.last_tool_results.append({
@@ -636,6 +715,16 @@ class Paw:
                 
                 if user_input == '/chunks':
                     self.chunk_manager.print_context(show_llm_view=True)
+                    # 打印 autostatus 上下文
+                    if self.autostatus is not None:
+                        print(self.output.dim("\n--- AutoStatus 调试信息 ---"))
+                        print(self.output.dim(f"对话轮次: {self.autostatus.conversation_rounds}"))
+                        print(self.output.dim(f"当前状态: {json.dumps(self.autostatus.current_state, ensure_ascii=False)}"))
+                        if self.autostatus.last_prompt:
+                            print(self.output.dim("\n[发送给LLM的提示词]"))
+                            print(self.output.dim(self.autostatus.last_prompt))
+                        if self.autostatus.last_response:
+                            print(self.output.dim(f"\n[LLM响应] {self.autostatus.last_response}"))
                     continue
                 
                 if user_input == '/model':

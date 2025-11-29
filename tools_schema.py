@@ -256,7 +256,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "execute_command",
-            "description": "向已打开的共享终端发送命令。需要先调用 open_shell 打开终端。",
+            "description": "向共享终端发送命令（如未打开会自动打开）。命令发送后会自动等待0.5秒，终端的输出会自动在[当前终端屏幕]区域刷新，无需手动查看。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -273,7 +273,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "open_shell",
-            "description": "启动共享异步终端窗口，让AI与用户共同使用。仅支持 Windows。",
+            "description": "启动共享异步终端窗口。会等待命令提示符出现后才返回，确保终端完全就绪。终端输出会自动显示在上下文开头。",
             "parameters": {
                 "type": "object",
                 "properties": {},

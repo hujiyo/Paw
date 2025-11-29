@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import time
 import sys
 from tool_errors import ToolError
-from async_terminal import ThreadedTerminal
+from terminal import ThreadedTerminal
 
 
 class BaseTools:
@@ -400,10 +400,6 @@ class BaseTools:
     def open_shell(self) -> Dict[str, Any]:
         """打开共享异步终端窗口"""
         return self.async_shell.open_shell()
-
-    def peek_shell(self) -> Dict[str, Any]:
-        """读取共享终端的增量输出"""
-        return self.async_shell.peek_output()
 
     def interrupt_command(self) -> Dict[str, Any]:
         """中断当前正在执行的命令"""

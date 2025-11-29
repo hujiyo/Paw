@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import time
 import threading
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any
 from queue import Queue, Empty
@@ -10,6 +11,9 @@ import sys
 
 class ThreadedTerminal:
     """基于线程的终端管理器（替代 pexpect 方案）"""
+    
+    # 调试模式开关（设为 False 隐藏 DEBUG 输出）
+    DEBUG = False
     
     def __init__(self, sandbox_dir: Path, shell_config: dict = None):
         self.sandbox_dir = sandbox_dir
@@ -23,12 +27,18 @@ class ThreadedTerminal:
         self.is_running = False
         self.worker_thread = None
         
-        # 输出缓冲
+        # 输出缓冲（保留最近N行作为屏幕快照）
         self.output_buffer = []
+        self.max_screen_lines = 50  # 屏幕最大行数
         self.lock = threading.Lock()
         
         # 控制信号
         self._stop_flag = False
+    
+    def _debug(self, msg: str):
+        """调试输出（仅在 DEBUG=True 时显示）"""
+        if self.DEBUG:
+            print(f"[DEBUG]{msg}")
     
     def _get_shell_cmd(self) -> list:
         """获取 Shell 命令"""
@@ -99,11 +109,31 @@ class ThreadedTerminal:
                     "stderr": "终端启动超时"
                 }
             
+            # 等待终端输出稳定（表示终端真正就绪）
+            # 策略：如果连续 0.3 秒没有新输出，认为终端已就绪
+            stable_timeout = 3  # 最多等待 3 秒
+            stable_duration = 0.3  # 输出稳定时间
+            stable_start = time.time()
+            last_output = ""
+            last_change_time = time.time()
+            
+            while (time.time() - stable_start) < stable_timeout:
+                current_output = self.get_screen_snapshot()
+                if current_output != last_output:
+                    # 有新输出，重置稳定计时
+                    last_output = current_output
+                    last_change_time = time.time()
+                elif current_output and (time.time() - last_change_time) >= stable_duration:
+                    # 输出已稳定且非空，终端就绪
+                    break
+                time.sleep(0.05)
+            
             shell_type = self.shell_config.get('shell', 'powershell')
             return {
                 "success": True,
-                "message": f"{shell_type.upper()} 线程终端已启动",
-                "type": "threaded"
+                "message": f"{shell_type.upper()} 终端已就绪",
+                "type": "threaded",
+                "screen": self.get_screen_snapshot()  # 返回当前屏幕内容
             }
             
         except Exception as e:
@@ -113,8 +143,13 @@ class ThreadedTerminal:
                 "stderr": f"启动线程终端失败: {e}"
             }
     
-    def enqueue_command(self, command: str) -> Dict[str, Any]:
-        """发送命令到终端"""
+    def enqueue_command(self, command: str, wait_output: float = 0.5) -> Dict[str, Any]:
+        """发送命令到终端
+        
+        Args:
+            command: 要执行的命令
+            wait_output: 发送命令后等待输出的时间（秒），默认0.5秒
+        """
         if not self.is_shell_open():
             return {
                 "success": False,
@@ -129,12 +164,17 @@ class ThreadedTerminal:
                 "command": command
             }, timeout=1)
             
+            # 等待一小段时间让命令输出产生
+            # 这样下一次 LLM 调用时，shell chunk 就能包含命令输出
+            if wait_output > 0:
+                time.sleep(wait_output)
+            
             return {
                 "success": True,
                 "mode": "threaded_shell",
                 "queued_command": command,
                 "message": f"命令已发送: {command}",
-                "stdout": f"命令已发送: {command}"
+                "note": "终端输出将自动显示在上下文的[当前终端屏幕]区域"
             }
         except Exception as e:
             return {
@@ -143,38 +183,29 @@ class ThreadedTerminal:
                 "stderr": f"发送命令失败: {e}"
             }
     
-    def peek_output(self) -> Dict[str, Any]:
-        """读取终端输出"""
-        if not self.is_shell_open():
-            return {
-                "success": False,
-                "error": "终端尚未启动",
-                "stderr": "终端尚未启动"
-            }
+    def _remove_ansi_codes(self, text: str) -> str:
+        """去除 ANSI 颜色控制码"""
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        return ansi_escape.sub('', text)
+
+    def get_screen_snapshot(self) -> str:
+        """获取终端屏幕快照（不清空缓冲区）
         
+        返回最近 max_screen_lines 行的内容，模拟真实终端屏幕。
+        会自动去除 ANSI 颜色代码，避免影响上下文显示。
+        """
         with self.lock:
             if not self.output_buffer:
-                return {
-                    "success": True,
-                    "stdout": "",
-                    "message": "没有新的终端输出"
-                }
-            
-            # 取出所有缓冲输出并清空
-            output = ''.join(self.output_buffer)
-            self.output_buffer.clear()
-        
-        return {
-            "success": True,
-            "stdout": output
-        }
+                return ""
+            raw_output = ''.join(self.output_buffer)
+            return self._remove_ansi_codes(raw_output)
     
     def _worker_loop(self):
         """工作线程：管理终端进程和命令执行"""
         shell_cmd = self._get_shell_cmd()
         
         try:
-            print(f"[DEBUG] 工作线程启动，命令: {' '.join(shell_cmd)}")
+            self._debug(f" 工作线程启动，命令: {' '.join(shell_cmd)}")
             
             # 启动终端进程（作为交互式 shell）
             self.process = subprocess.Popen(
@@ -188,7 +219,7 @@ class ThreadedTerminal:
                 universal_newlines=True
             )
             
-            print(f"[DEBUG] 终端进程已启动，PID: {self.process.pid}")
+            self._debug(f" 终端进程已启动，PID: {self.process.pid}")
             self.is_running = True
             
             # 启动输出读取线程
@@ -203,7 +234,7 @@ class ThreadedTerminal:
                     
                     if message["type"] == "command":
                         command = message["command"]
-                        print(f"[DEBUG] 执行命令: {command}")
+                        self._debug(f" 执行命令: {command}")
                         
                         # 在 shell 中执行命令
                         self._execute_command_with_timeout(command)
@@ -215,13 +246,13 @@ class ThreadedTerminal:
                 except Empty:
                     continue  # 没有新命令，继续循环
                 except Exception as e:
-                    print(f"[DEBUG] 命令处理错误: {e}")
+                    self._debug(f" 命令处理错误: {e}")
                     break
             
-            print("[DEBUG] 工作线程结束")
+            self._debug(" 工作线程结束")
             
         except Exception as e:
-            print(f"[DEBUG] 工作线程异常: {e}")
+            self._debug(f" 工作线程异常: {e}")
             self.result_queue.put({
                 "type": "error",
                 "error": str(e)
@@ -240,7 +271,7 @@ class ThreadedTerminal:
                 self.process.stdin.flush()
                 
         except Exception as e:
-            print(f"[DEBUG] 命令执行错误: {e}")
+            self._debug(f" 命令执行错误: {e}")
     
     def _interrupt_current_command(self):
         """中断当前正在执行的命令"""
@@ -262,10 +293,10 @@ class ThreadedTerminal:
                     except:
                         self.process.terminate()
                         
-                print("[DEBUG] 已发送中断信号")
+                self._debug(" 已发送中断信号")
                 
         except Exception as e:
-            print(f"[DEBUG] 中断命令失败: {e}")
+            self._debug(f" 中断命令失败: {e}")
             # 最后的手段：强制终止进程
             try:
                 self.process.kill()
@@ -289,28 +320,59 @@ class ThreadedTerminal:
                     pass
     
     def _read_output_loop(self):
-        """输出读取线程"""
+        """输出读取线程
+        
+        持续读取终端输出，保留最近 max_screen_lines 行作为屏幕快照
+        使用逐字符读取以确保不带换行符的提示符也能被及时读取
+        """
         try:
+            current_line = []
             while not self._stop_flag and self.is_running:
                 if not hasattr(self, 'process') or not self.process.stdout:
                     break
                 
-                # 非阻塞读取
+                # 逐字符读取
                 try:
-                    line = self.process.stdout.readline()
-                    if line:
-                        with self.lock:
-                            self.output_buffer.append(line)
+                    char = self.process.stdout.read(1)
+                    if char:
+                        current_line.append(char)
+                        
+                        # 如果遇到换行符，或者累积了一定长度，就更新到 buffer
+                        if char == '\n' or len(current_line) > 0:
+                            with self.lock:
+                                # 将当前行内容更新到 buffer 的最后一行
+                                line_content = ''.join(current_line)
+                                
+                                if self.output_buffer and not self.output_buffer[-1].endswith('\n'):
+                                    # 如果 buffer 最后一行没结束，追加到最后一行
+                                    self.output_buffer[-1] += line_content
+                                else:
+                                    # 否则作为新行添加
+                                    self.output_buffer.append(line_content)
+                                
+                                # 如果当前字符是换行，重置 current_line
+                                if char == '\n':
+                                    current_line = []
+                                else:
+                                    # 如果不是换行，清空 current_line (因为已经追加到 buffer 了)
+                                    # 注意：这里为了避免频繁锁操作，可以优化，但为了实时性先这样
+                                    current_line = []
+                                
+                                # 保持 buffer 大小
+                                if len(self.output_buffer) > self.max_screen_lines:
+                                    self.output_buffer = self.output_buffer[-self.max_screen_lines:]
                     else:
-                        # 没有更多输出，短暂等待
+                        # 进程可能结束了
+                        if self.process.poll() is not None:
+                            break
                         time.sleep(0.01)
                         
                 except Exception as e:
-                    print(f"[DEBUG] 输出读取错误: {e}")
+                    self._debug(f" 输出读取错误: {e}")
                     break
                     
         except Exception as e:
-            print(f"[DEBUG] 输出读取线程异常: {e}")
+            self._debug(f" 输出读取线程异常: {e}")
     
     def interrupt_command(self) -> Dict[str, Any]:
         """中断当前正在执行的命令"""
@@ -348,4 +410,4 @@ class ThreadedTerminal:
             self.worker_thread.join(timeout=2)
         
         # 清理进程（在 _cleanup_processes 中完成）
-        print("[DEBUG] 终端已关闭")
+        self._debug(" 终端已关闭")

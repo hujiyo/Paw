@@ -20,6 +20,7 @@ class ChunkType(Enum):
     THOUGHT = "thought"        # AI内部思考
     TOOL_CALL = "tool_call"    # 工具调用
     TOOL_RESULT = "tool_result"  # 工具结果
+    SHELL = "shell"            # Shell终端输出（动态刷新）
 
 
 @dataclass
@@ -45,11 +46,12 @@ class Chunk:
         color_map = {
             ChunkType.SYSTEM: Fore.RED,       # 系统注入 - 红色
             ChunkType.MEMORY: Fore.RED,       # 记忆注入 - 红色
-            ChunkType.USER: Fore.YELLOW,      # 用户输入 - 黄色
+            ChunkType.USER: Fore.WHITE,       # 用户输入 - 白色
             ChunkType.ASSISTANT: Fore.GREEN,  # AI生成 - 绿色
             ChunkType.THOUGHT: Fore.CYAN,     # 内部思考 - 青色
-            ChunkType.TOOL_CALL: Fore.MAGENTA,    # 工具调用 - 紫色
-            ChunkType.TOOL_RESULT: Fore.BLUE,     # 工具结果 - 蓝色
+            ChunkType.TOOL_CALL: Fore.CYAN,       # 工具调用 - 青色
+            ChunkType.TOOL_RESULT: Fore.YELLOW,   # 工具结果 - 黄色
+            ChunkType.SHELL: Fore.MAGENTA,        # Shell输出 - 紫色
         }
         
         color = color_map.get(self.chunk_type, Fore.WHITE)
@@ -167,11 +169,57 @@ class ChunkManager:
             metadata['name'] = tool_name
         return self.add_chunk(result, ChunkType.TOOL_RESULT, metadata=metadata)
     
+    def add_shell_output(self, output: str) -> Chunk:
+        """添加Shell输出语块（首次创建）"""
+        return self.add_chunk(output, ChunkType.SHELL)
+    
+    def update_shell_output(self, output: str, move_to_end: bool = False) -> Chunk:
+        """更新Shell输出语块
+        
+        Args:
+            output: 终端屏幕内容
+            move_to_end: 是否移动到末尾（仅在终端操作后设为True）
+        
+        - move_to_end=False: 原地更新内容，位置不变（用于定时刷新）
+        - move_to_end=True: 删除旧的 + 追加到末尾（用于终端操作后）
+        """
+        if move_to_end:
+            # 删除旧的，追加到末尾
+            self.remove_shell_chunk()
+            return self.add_shell_output(output)
+        else:
+            # 原地更新内容
+            for chunk in self.chunks:
+                if chunk.chunk_type == ChunkType.SHELL:
+                    old_tokens = chunk.tokens
+                    chunk.content = output
+                    chunk.tokens = 0
+                    chunk.estimate_tokens()
+                    self.current_tokens += chunk.tokens - old_tokens
+                    chunk.timestamp = datetime.now()
+                    return chunk
+            # 不存在则创建（首次）
+            return self.add_shell_output(output)
+    
+    def has_shell_chunk(self) -> bool:
+        """检查是否存在Shell语块"""
+        return any(c.chunk_type == ChunkType.SHELL for c in self.chunks)
+    
+    def remove_shell_chunk(self) -> bool:
+        """移除Shell语块（终端关闭时调用）"""
+        for i, chunk in enumerate(self.chunks):
+            if chunk.chunk_type == ChunkType.SHELL:
+                self.current_tokens -= chunk.tokens
+                self.chunks.pop(i)
+                return True
+        return False
+    
     def get_context_for_llm(self) -> List[Dict[str, Any]]:
         """
         获取用于LLM的上下文（完整支持OpenAI Function Calling）
         
         将语块转换为OpenAI标准消息格式，支持tool_calls和tool角色
+        Shell输出按其在chunks中的位置出现，位置会随终端操作动态移动
         """
         messages = []
         
@@ -179,7 +227,7 @@ class ChunkManager:
         current_system_content = []
         
         for chunk in self.chunks:
-            # 跳过思考语块和工具调用语块（不发送给LLM）
+            # 跳过思考语块和工具调用语块
             if chunk.chunk_type in [ChunkType.THOUGHT, ChunkType.TOOL_CALL]:
                 continue
             
@@ -226,6 +274,13 @@ class ChunkManager:
                 if 'name' in chunk.metadata:
                     msg['name'] = chunk.metadata['name']
                 messages.append(msg)
+            
+            # Shell输出 - 作为 user 消息插入（表示环境反馈）
+            elif chunk.chunk_type == ChunkType.SHELL:
+                messages.append({
+                    "role": "user",
+                    "content": f"[当前终端屏幕]\n{chunk.content}\n[终端屏幕结束]"
+                })
         
         # 添加剩余的系统内容
         if current_system_content:
