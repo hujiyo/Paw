@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Paw - 数字生命体标准启动器
+Paw的启动器
 统一入口，上帝视角，完全可视化
+科幻风格的神经界面体验
 """
 
 import os
@@ -14,20 +15,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import re
-from colorama import init, Fore, Back, Style
 import yaml
 
 # 设置环境为UTF-8（Windows兼容）
 if sys.platform == "win32":
-    # 设置标准输出为UTF-8
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-    # 设置环境变量
     os.environ['PYTHONIOENCODING'] = 'utf-8'
-
-# 初始化颜色系统
-init(autoreset=True)
 
 # 导入核心组件
 from autostatus import AutoStatus
@@ -35,63 +30,7 @@ from tools import BaseTools
 from chunk_system import ChunkManager, ChunkType, Chunk
 from tools_schema import TOOLS_SCHEMA
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
-
-
-class ColoredOutput:
-    """简约输出管理器 - Claude Code风格"""
-    
-    # 颜色定义（柔和色调）
-    DIM = Style.DIM
-    BRIGHT = Style.BRIGHT
-    RESET = Style.RESET_ALL
-    
-    # 角色颜色
-    USER = Fore.WHITE + Style.BRIGHT
-    ASSISTANT = Fore.GREEN
-    TOOL = Fore.CYAN + Style.DIM  # 工具调用用青色
-    TOOL_NAME = Fore.CYAN  # 工具名称
-    TOOL_ARGS = Fore.WHITE + Style.DIM  # 工具参数
-    SYSTEM = Fore.YELLOW + Style.DIM
-    ERROR = Fore.RED
-    SUCCESS = Fore.GREEN + Style.DIM  # 成功状态
-    
-    @staticmethod
-    def user(text: str) -> str:
-        return f"{ColoredOutput.USER}{text}{ColoredOutput.RESET}"
-    
-    @staticmethod
-    def assistant(text: str) -> str:
-        return f"{ColoredOutput.ASSISTANT}{text}{ColoredOutput.RESET}"
-    
-    @staticmethod
-    def tool(text: str) -> str:
-        return f"{ColoredOutput.TOOL}{text}{ColoredOutput.RESET}"
-    
-    @staticmethod
-    def tool_call(name: str, args: str) -> str:
-        """格式化工具调用显示"""
-        return f"{ColoredOutput.TOOL_NAME}● {name}{ColoredOutput.RESET} {ColoredOutput.TOOL_ARGS}{args}{ColoredOutput.RESET}"
-    
-    @staticmethod
-    def tool_result(text: str, success: bool = True) -> str:
-        """格式化工具结果显示"""
-        if success:
-            return f"{ColoredOutput.SUCCESS}  ✓ {text}{ColoredOutput.RESET}"
-        else:
-            return f"{ColoredOutput.ERROR}  ✗ {text}{ColoredOutput.RESET}"
-    
-    @staticmethod
-    def system(text: str) -> str:
-        """系统消息（青色）"""
-        return f"{ColoredOutput.SYSTEM}{text}{ColoredOutput.RESET}"
-    
-    @staticmethod
-    def error(text: str) -> str:
-        return f"{ColoredOutput.ERROR}{text}{ColoredOutput.RESET}"
-    
-    @staticmethod
-    def dim(text: str) -> str:
-        return f"{ColoredOutput.DIM}{text}{ColoredOutput.RESET}"
+from ui import UI
 
 
 class Paw:
@@ -99,25 +38,28 @@ class Paw:
     Paw - 数字生命体主程序
     统一标准启动，完全可视化，上帝视角
     """
-    
-    def __init__(self, api_url: str = None, model: str = None, api_key: str = None):
+
+    def __init__(self, api_url: str = None, model: str = None, api_key: str = None, minimal: bool = False):
         """初始化
-        
+
         Args:
             api_url: API地址，如果为None则从config.yaml或环境变量读取
             model: 模型名称，如果为None则从config.yaml或环境变量读取
             api_key: API密钥，如果为None则从config.yaml或环境变量读取
+            minimal: 是否使用极简模式（减少状态栏等装饰）
         """
         # 基础配置
         self.name = "Paw"
         self.birth_time = datetime.now()
-        
+
+        # UI系统（统一入口）
+        self.ui = UI(minimal_mode=minimal)
+
         # 读取配置文件
         config = self._load_config()
-        
+
         # 核心组件（传递配置）
         self.tools = BaseTools(config=config)
-        self.output = ColoredOutput()
         
         # API配置（优先级：参数 > config.yaml > 环境变量 > 默认值）
         self.api_url = api_url or config.get('api', {}).get('url') or os.getenv("API_URL", "http://localhost:1234/v1/chat/completions")
@@ -150,7 +92,7 @@ class Paw:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     return yaml.safe_load(f) or {}
             except Exception as e:
-                print(self.output.error(f"警告: 无法读取config.yaml - {e}"))
+                self.ui.print_error(f"警告: 无法读取config.yaml - {e}")
                 return {}
         return {}
     
@@ -190,38 +132,113 @@ class Paw:
             self.chunk_manager.add_system_prompt(prompt)
         return prompt
     
-    def _get_brief_result(self, tool_name: str, result: str) -> str:
-        """生成简洁的工具结果摘要"""
-        # 根据工具类型生成不同的简洁描述
-        if tool_name in ["open_shell"]:
-            return "终端已就绪"
-        elif tool_name in ["execute_command"]:
-            return "已执行"
-        elif tool_name in ["interrupt_command"]:
-            return "已中断"
-        elif tool_name in ["read_file"]:
-            lines = result.count('\n') + 1
-            return f"读取 {lines} 行"
-        elif tool_name in ["write_file"]:
-            return "已写入"
-        elif tool_name in ["delete_file"]:
-            return "已删除"
-        elif tool_name in ["edit_file", "replace_in_file", "multi_edit"]:
-            return "已修改"
-        elif tool_name in ["list_directory"]:
-            items = len(result.split('\n')) if result else 0
-            return f"{items} 项"
-        elif tool_name in ["find_files", "grep_search", "search_in_file"]:
-            matches = result.count('\n') + 1 if result.strip() else 0
-            return f"找到 {matches} 处" if matches else "无匹配"
-        elif tool_name in ["run_script"]:
-            return "脚本完成"
-        elif tool_name in ["wait"]:
-            return "等待完成"
+    def _get_tool_display(self, tool_name: str, result: str, args: dict = None) -> dict:
+        """生成工具显示信息
+        
+        Returns:
+            {
+                'line1': 第一行内容,
+                'line2': 第二行内容(可选),
+                'has_line2': 是否有第二行
+            }
+        """
+        args = args or {}
+        
+        if tool_name == "open_shell":
+            cwd = args.get("working_directory", ".")
+            return {'line1': cwd, 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "run_command":
+            cmd = args.get("command", "")[:60]
+            return {'line1': cmd, 'line2': '', 'has_line2': False, 'is_command': True}
+        
+        elif tool_name == "interrupt_command":
+            return {'line1': '已中断', 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "read_file":
+            path = args.get("file_path", "")
+            filename = path.split('/')[-1].split('\\')[-1] if path else ""
+            total_lines = result.count('\n') + 1 if result else 0
+            offset = args.get("offset")
+            limit = args.get("limit")
+            if offset and limit:
+                end = offset + limit - 1
+                range_str = f"({offset}-{end}/{total_lines})"
+            elif offset:
+                range_str = f"({offset}-end/{total_lines})"
+            else:
+                range_str = f"(all {total_lines}行)"
+            return {'line1': f"{filename} {range_str}", 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "write_to_file":
+            path = args.get("file_path", "")
+            filename = path.split('/')[-1].split('\\')[-1] if path else ""
+            return {'line1': filename, 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "delete_file":
+            path = args.get("file_path", "")
+            filename = path.split('/')[-1].split('\\')[-1] if path else ""
+            return {'line1': filename, 'line2': '', 'has_line2': False}
+        
+        elif tool_name in ["edit", "multi_edit"]:
+            path = args.get("file_path", "")
+            filename = path.split('/')[-1].split('\\')[-1] if path else ""
+            return {'line1': filename, 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "list_dir":
+            path = args.get("directory_path", ".")
+            # 解析 list_dir 返回格式: "[dir] name/" 或 "[file] name (size)"
+            lines = result.strip().split('\n') if result.strip() else []
+            # 跳过第一行 "Contents of ..." 
+            items = [l for l in lines if l.startswith('[')]
+            count = len(items)
+            # 提取文件/目录名
+            names = []
+            for item in items[:3]:
+                # "[dir] name/" 或 "[file] name (size)"
+                if '] ' in item:
+                    name = item.split('] ')[1].split(' (')[0].rstrip('/')
+                    names.append(name)
+            preview = ', '.join(names)
+            if count > 3:
+                preview += f'... (+{count-3})'
+            return {'line1': path, 'line2': preview, 'has_line2': count > 0}
+        
+        elif tool_name == "find_by_name":
+            pattern = args.get("pattern", "")
+            search_dir = args.get("search_directory", ".")
+            items = result.strip().split('\n') if result.strip() else []
+            count = len(items) if items and items[0] else 0
+            if count == 0:
+                return {'line1': f'"{pattern}" 无匹配', 'line2': '', 'has_line2': False}
+            # 提取文件名
+            names = [i.split('/')[-1].split('\\')[-1] for i in items[:3]]
+            preview = ', '.join(names)
+            if count > 3:
+                preview += f'... (+{count-3})'
+            return {'line1': f'"{pattern}" {count}匹配', 'line2': preview, 'has_line2': True}
+        
+        elif tool_name == "grep_search":
+            query = args.get("query", "")
+            # 结果可能是 "Found X matches in Y files" 或具体匹配行
+            result_text = result.strip()
+            if not result_text or "no matches" in result_text.lower():
+                return {'line1': f'"{query}" 无匹配', 'line2': '', 'has_line2': False}
+            # 第一行显示搜索词，第二行显示结果摘要
+            lines = result_text.split('\n')
+            summary = lines[0][:60] + '...' if len(lines[0]) > 60 else lines[0]
+            if len(lines) > 1:
+                summary += f' (+{len(lines)-1})'
+            return {'line1': f'"{query}"', 'line2': summary, 'has_line2': True}
+        
+        elif tool_name == "wait":
+            seconds = args.get("seconds", 0)
+            return {'line1': f"{seconds}s", 'line2': '', 'has_line2': False}
+        
         else:
-            # 默认：截取前30字符
-            brief = result.replace('\n', ' ')[:30]
-            return brief + "..." if len(result) > 30 else brief
+            # 默认
+            brief = result.replace('\n', ' ')[:40]
+            return {'line1': brief, 'line2': '', 'has_line2': False}
     
     def _refresh_shell_chunk(self, move_to_end: bool = False):
         """刷新Shell输出到chunk（如果终端已打开）
@@ -318,7 +335,9 @@ class Paw:
                                         continue
                                     has_content = True
                                 content_chunks.append(content_text)
-                                print(self.output.assistant(content_text), end='', flush=True)
+
+                                # 流式输出
+                                self.ui.print_assistant(content_text, end='', flush=True)
                             
                             # 处理tool_calls（累积）
                             if 'tool_calls' in delta:
@@ -343,7 +362,10 @@ class Paw:
                             continue
                     
                     if has_content:
-                        print()  # 结束流式输出的换行
+                        # 只有当最后一行不是换行符时，才打印换行
+                        # 这样可以避免 tool call 前出现空行
+                        if not content_chunks[-1].endswith('\n'):
+                            print()
                     
                     # 组合完整内容
                     full_content = ''.join(content_chunks) if content_chunks else None
@@ -376,34 +398,30 @@ class Paw:
             # 文件读写
             if tool_name == "read_file":
                 result = self.tools.read_file(**args)
-            elif tool_name == "write_file":
-                result = self.tools.write_file(**args)
+            elif tool_name == "write_to_file":
+                result = self.tools.write_to_file(**args)
             elif tool_name == "delete_file":
                 result = self.tools.delete_file(**args)
             
             # 文件编辑
-            elif tool_name == "edit_file":
-                result = self.tools.edit_file(**args)
-            elif tool_name == "replace_in_file":
-                result = self.tools.replace_in_file(**args)
+            elif tool_name == "edit":
+                result = self.tools.edit(**args)
             elif tool_name == "multi_edit":
                 result = self.tools.multi_edit(**args)
             
             # 文件搜索
-            elif tool_name == "find_files":
-                result = self.tools.find_files(**args)
+            elif tool_name == "find_by_name":
+                result = self.tools.find_by_name(**args)
             elif tool_name == "grep_search":
                 result = self.tools.grep_search(**args)
-            elif tool_name == "search_in_file":
-                result = self.tools.search_in_file(**args)
             
             # 目录操作
-            elif tool_name == "list_directory":
-                result = self.tools.list_directory(**args)
+            elif tool_name == "list_dir":
+                result = self.tools.list_dir(**args)
             
             # 系统交互（终端操作后只刷新内容，移动逻辑由process_input控制）
-            elif tool_name == "execute_command":
-                result = self.tools.execute_command(**args)
+            elif tool_name == "run_command":
+                result = self.tools.run_command(**args)
                 self._refresh_shell_chunk(move_to_end=False)
             elif tool_name == "open_shell":
                 result = self.tools.open_shell()
@@ -411,8 +429,6 @@ class Paw:
             elif tool_name == "interrupt_command":
                 result = self.tools.interrupt_command()
                 self._refresh_shell_chunk(move_to_end=False)
-            elif tool_name == "run_script":
-                result = self.tools.run_script(**args)
             elif tool_name == "wait":
                 result = self.tools.wait(**args)
             
@@ -422,17 +438,15 @@ class Paw:
             
             # 统一返回格式
             if isinstance(result, str):
-                # 判断是成功还是失败 - 检查多种错误格式
-                error_keywords = ["错误", "失败", "Error", "error", "无法", "未找到", "不存在", "拒绝", "超时"]
-                success = not any(keyword in result for keyword in error_keywords)
+                # 判断是成功还是失败 - 只检查错误前缀，避免误判文件内容
+                error_prefixes = ["Error:", "Failed", "错误:", "失败:"]
+                is_error = any(result.startswith(prefix) for prefix in error_prefixes)
                 
-                if success and result.startswith("成功"):
-                    return {"success": True, "result": result}
-                elif not success:
+                if is_error:
                     return {"success": False, "error": result}
                 else:
-                    # 不明确的情况，根据内容判断
-                    return {"success": success, "result": result}
+                    # 默认视为成功（包括read_file返回的文件内容）
+                    return {"success": True, "result": result}
             elif isinstance(result, dict):
                 # 如果已经是字典格式（execute_command, run_script）
                 # 转换为统一的字符串结果
@@ -466,7 +480,7 @@ class Paw:
         # 重新添加系统提示词
         self.chunk_manager.add_system_prompt(self.system_prompt)
         status_msg = UIPrompts.get_status_messages()["history_cleared"]
-        print(self.output.dim(status_msg))
+        self.ui.print_dim(status_msg)
     
     async def process_input(self, user_input: str) -> str:
         """处理用户输入 - 完全符合OpenAI Function Calling标准"""
@@ -515,7 +529,7 @@ class Paw:
                     
                     # 显示工具调用（简洁格式，紧凑排列）
                     args_str = json.dumps(function_args, ensure_ascii=False) if function_args else ""
-                    print(self.output.tool_call(function_name, args_str))
+                    self.ui.show_tool_start(function_name, args_str)
                     
                     # 执行工具
                     result = await self._execute_tool({
@@ -529,13 +543,13 @@ class Paw:
                     # 确保result_text总是被定义
                     if success:
                         result_text = str(result.get("result", ""))
-                        # 简洁的成功提示
-                        brief = self._get_brief_result(function_name, result_text)
-                        print(self.output.tool_result(brief, success=True), flush=True)
+                        # 获取显示信息
+                        display = self._get_tool_display(function_name, result_text, function_args)
+                        self.ui.show_tool_result(function_name, display, success=True)
                     else:
                         error_msg = result.get('error', '未知错误')
                         result_text = f"错误: {error_msg}"
-                        print(self.output.tool_result(error_msg, success=False), flush=True)
+                        self.ui.show_tool_result(function_name, {'line1': error_msg, 'line2': '', 'has_line2': False}, success=False)
                     
                     # 添加工具结果到chunk_manager（OpenAI标准）
                     self.chunk_manager.add_tool_result(
@@ -547,7 +561,7 @@ class Paw:
                     # 如果是 Shell 相关工具，移动 Shell chunk 到末尾
                     # 确保 Shell Output 出现在 Tool Result 之后（作为下一轮对话的开始）
                     # 避免插在 Assistant 和 Tool Result 之间破坏 API 规范
-                    if function_name in ["execute_command", "open_shell", "interrupt_command"]:
+                    if function_name in ["run_command", "open_shell", "interrupt_command"]:
                         self._refresh_shell_chunk(move_to_end=True)
                     
                     # 收集工具结果用于状态评估
@@ -584,13 +598,13 @@ class Paw:
                 # 显示状态摘要
                 if self.show_debug:
                     status_summary = self.autostatus.get_summary()
-                    print(self.output.dim(status_summary))
+                    self.ui.print_dim(status_summary)
                     
             except Exception as e:
                 # 状态评估失败不影响主流程
                 if self.show_debug:
                     import traceback
-                    print(self.output.dim(f"状态评估失败: {e}"))
+                    self.ui.print_dim(f"状态评估失败: {e}")
                     traceback.print_exc()
         
         return final_response
@@ -624,35 +638,32 @@ class Paw:
                         return models
                     else:
                         error_text = await response.text()
-                        print(self.output.dim(f"模型检测失败 ({response.status}): {error_text[:100]}"))
+                        self.ui.print_dim(f"模型检测失败 ({response.status}): {error_text[:100]}")
                         return []
         except Exception as e:
-            print(self.output.dim(f"无法获取模型列表: {e}"))
+            self.ui.print_dim(f"无法获取模型列表: {e}")
             return []
     
     async def _select_model(self) -> str:
         """选择模型"""
-        status_msgs = UIPrompts.get_status_messages()
-        print(self.output.dim(status_msgs["checking_models"]))
+        self.ui.show_model_checking()
         models = await self._fetch_available_models()
         
         if not models:
-            print(self.output.system("无法自动检测模型，请手动输入模型名称"))
+            self.ui.show_model_input_prompt()
             while True:
-                model_name = input(self.output.user("模型名称 (如 glm-4-flash): ")).strip()
+                model_name = self.ui.get_input("模型名称 (如 glm-4-flash): ")
                 if model_name:
                     return model_name
-                print(self.output.error("模型名称不能为空"))
+                self.ui.print_error("模型名称不能为空")
         
-        print(self.output.dim(f"\n可用模型 ({len(models)}):"))
-        for i, model in enumerate(models, 1):
-            print(self.output.dim(f"  {i}. {model}"))
+        self.ui.show_model_list(models)
         
         # 让用户选择
         status_msgs = UIPrompts.get_status_messages()
         while True:
             try:
-                choice = input(self.output.user(status_msgs["model_prompt"])).strip()
+                choice = self.ui.get_model_choice(status_msgs["model_prompt"])
                 if not choice:
                     return models[0]
                 
@@ -660,11 +671,11 @@ class Paw:
                 if 0 <= idx < len(models):
                     return models[idx]
                 else:
-                    print(self.output.error(status_msgs["invalid_number"]))
+                    self.ui.print_error(status_msgs["invalid_number"])
             except ValueError:
-                print(self.output.error(status_msgs["please_enter_number"]))
+                self.ui.print_error(status_msgs["please_enter_number"])
             except KeyboardInterrupt:
-                print(self.output.dim(status_msgs["using_first_model"]))
+                self.ui.print_dim(status_msgs["using_first_model"])
                 return models[0]
     
     async def run(self):
@@ -672,27 +683,26 @@ class Paw:
         # 如果没有指定模型，自动选择
         if not self.model:
             self.model = await self._select_model()
+            
+        # 模型选择完毕，清屏准备进入主界面
+        self.ui.clear_screen()
         
         # 现在模型已确定，初始化AutoStatus
         if self.autostatus is None:
             self.autostatus = AutoStatus(self.api_url, self.model, self.api_key)
         
-        # 启动横幅（简约风格）
-        ui_msgs = UIPrompts.get_startup_messages()
-        print(f"\n{Style.BRIGHT}{ui_msgs['banner']}{Style.RESET_ALL} {self.output.dim(ui_msgs['version'])}")
-        print(self.output.dim(f"Model: {self.model}"))
-        print(self.output.dim("\n提示: 直接回车可唤醒Paw开始自主生活"))
+        # 启动横幅
+        self.ui.print_welcome()
+        self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
         
         # 主循环
         while True:
             try:
-                # 获取输入（简约提示符）
-                user_input = input(f"\n{self.output.user('> ')}").strip()
+                # 获取用户输入
+                user_input = self.ui.get_user_input()
                 
                 if user_input.lower() in ['exit', 'quit', 'bye']:
-                    # 保存状态（如果需要可以在这里添加持久化逻辑）
-                    goodbye_msg = UIPrompts.get_startup_messages()["goodbye"]
-                    print(self.output.dim(goodbye_msg))
+                    self.ui.print_goodbye()
                     break
                 
                 # 空输入处理
@@ -702,7 +712,7 @@ class Paw:
                     if len(user_chunks) == 0:  # 没有用户输入，是第一次空输入
                         # 发送系统唤醒消息，让AI开始自主生活
                         system_wake_msg = "[系统提示]: Paw闹铃启动... 请赶紧醒过来开始今天的生活。[系统提示]hujiyo状态：[离线]"
-                        print(self.output.system(system_wake_msg))
+                        self.ui.print_system(system_wake_msg)
                         user_input = system_wake_msg
                     else:
                         # 有对话历史，添加继续标记
@@ -717,49 +727,31 @@ class Paw:
                     self.chunk_manager.print_context(show_llm_view=True)
                     # 打印 autostatus 上下文
                     if self.autostatus is not None:
-                        print(self.output.dim("\n--- AutoStatus 调试信息 ---"))
-                        print(self.output.dim(f"对话轮次: {self.autostatus.conversation_rounds}"))
-                        print(self.output.dim(f"当前状态: {json.dumps(self.autostatus.current_state, ensure_ascii=False)}"))
-                        if self.autostatus.last_prompt:
-                            print(self.output.dim("\n[发送给LLM的提示词]"))
-                            print(self.output.dim(self.autostatus.last_prompt))
-                        if self.autostatus.last_response:
-                            print(self.output.dim(f"\n[LLM响应] {self.autostatus.last_response}"))
+                        self.ui.show_autostatus_debug(
+                            self.autostatus.conversation_rounds,
+                            self.autostatus.current_state,
+                            self.autostatus.last_prompt,
+                            self.autostatus.last_response
+                        )
                     continue
                 
                 if user_input == '/model':
                     # 重新选择模型
-                    print(self.output.dim(f"当前模型: {self.model}"))
+                    self.ui.print_dim(f"当前模型: {self.model}")
                     new_model = await self._select_model()
                     self.model = new_model
-                    print(self.output.system(f"已切换到模型: {self.model}"))
+                    self.ui.show_model_selected(self.model)
                     continue
                 
                 if user_input == '/messages':
                     # 显示完整的消息历史（调试用）
                     messages = self.chunk_manager.get_context_for_llm()
-                    print(self.output.dim(f"\n消息历史 ({len(messages)} 条):"))
-                    for i, msg in enumerate(messages):
-                        role = msg.get("role", "unknown")
-                        content = msg.get("content", "")
-                        tool_calls = msg.get("tool_calls")
-                        
-                        if role == "system":
-                            print(self.output.dim(f"\n[{i}] SYSTEM: {content[:100]}..."))
-                        elif role == "user":
-                            print(self.output.user(f"\n[{i}] USER: {content}"))
-                        elif role == "assistant":
-                            print(self.output.assistant(f"\n[{i}] ASSISTANT: {content or '[no content]'}"))
-                            if tool_calls:
-                                print(self.output.tool(f"    tool_calls: {len(tool_calls)} 个"))
-                        elif role == "tool":
-                            name = msg.get("name", "unknown")
-                            print(self.output.dim(f"\n[{i}] TOOL ({name}): {content[:100]}..."))
+                    self.ui.show_messages_debug(messages)
                     continue
                 
                 if user_input.startswith('/'):
                     help_msg = UIPrompts.get_command_help()
-                    print(self.output.dim(help_msg))
+                    self.ui.show_command_help(help_msg)
                     continue
                 
                 # 处理正常输入
@@ -767,10 +759,10 @@ class Paw:
                 
             except KeyboardInterrupt:
                 interrupted_msg = UIPrompts.get_startup_messages()["interrupted"]
-                print(self.output.dim(interrupted_msg))
+                self.ui.print_dim(interrupted_msg)
                 break
             except Exception as e:
-                print(self.output.error(f"\nError: {e}"))
+                self.ui.print_error(f"Error: {e}")
                 if self.show_debug:
                     import traceback
                     traceback.print_exc()

@@ -4,14 +4,14 @@
 api:
   # API密钥
   key: "3dae586b23fe4f19ab52a0152eebe182.luZt04U5Xbeu2sPl"
+  #key: "sk-W0rpStc95T7JVYVwDYc29IyirjtpPPby6SozFMQr17m8KWeo"
   
   # API 端点 URL
-  url: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  #url: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+  # url: "https://api.suanli.cn/v1/chat/completions"
   
   # 模型名称 - 留空 (null) 则在启动时选择
-  #model: GLM-4.6
-
-  #最近太穷了，只能先用本地模型做测试了
   #url: "http://localhost:1234/v1/chat/completions"
   model: null
 

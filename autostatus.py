@@ -400,8 +400,8 @@ if __name__ == "__main__":
         ]
         
         tools = [
-            {"tool": "write_file", "success": True},
-            {"tool": "execute_command", "success": False}
+            {"tool": "write_to_file", "success": True},
+            {"tool": "run_command", "success": False}
         ]
         
         # 评估状态

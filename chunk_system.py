@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-语块系统 - 智能上下文管理
-每个语块都知道自己的来源
+语块系统 - 上下文管理架构
+通过语块来管理上下文
 """
 
 from dataclasses import dataclass, field
@@ -462,55 +462,6 @@ class ChunkManager:
         
         print(output)
     
-    def compress_context(self, target_tokens: Optional[int] = None) -> int:
-        """
-        压缩上下文
-        
-        当接近token限制时，智能压缩旧的语块
-        
-        Returns:
-            压缩释放的token数量
-        """
-        if target_tokens is None:
-            target_tokens = self.max_tokens * 0.8  # 保持在80%以下
-        
-        if self.current_tokens <= target_tokens:
-            return 0
-        
-        freed_tokens = 0
-        
-        # 策略1: 删除旧的思考语块
-        for chunk in list(self.chunks):
-            if chunk.chunk_type == ChunkType.THOUGHT:
-                freed_tokens += chunk.tokens
-                self.chunks.remove(chunk)
-                if self.current_tokens - freed_tokens <= target_tokens:
-                    break
-        
-        # 策略2: 压缩旧的工具结果
-        if self.current_tokens - freed_tokens > target_tokens:
-            for chunk in self.chunks:
-                if chunk.chunk_type == ChunkType.TOOL_RESULT and len(chunk.content) > 200:
-                    original_tokens = chunk.tokens
-                    chunk.content = chunk.content[:200] + "...[已压缩]"
-                    chunk.estimate_tokens()
-                    freed_tokens += original_tokens - chunk.tokens
-                    if self.current_tokens - freed_tokens <= target_tokens:
-                        break
-        
-        # 策略3: 删除最旧的对话（保留系统提示词）
-        if self.current_tokens - freed_tokens > target_tokens:
-            while len(self.chunks) > 10:  # 至少保留10个语块
-                chunk = self.chunks[0]
-                if chunk.chunk_type not in [ChunkType.SYSTEM]:
-                    freed_tokens += chunk.tokens
-                    self.chunks.pop(0)
-                    if self.current_tokens - freed_tokens <= target_tokens:
-                        break
-        
-        self.current_tokens -= freed_tokens
-        return freed_tokens
-    
     def clear(self):
         """清空上下文（保留系统提示词）"""
         system_chunks = [c for c in self.chunks if c.chunk_type == ChunkType.SYSTEM]
@@ -528,48 +479,7 @@ class ChunkManager:
                 "metadata": chunk.metadata
             }
             for chunk in self.chunks
-        ]
-
-
-def test_chunk_system():
-    """测试语块系统"""
-    print("\n" + "="*60)
-    print("🧪 语块系统测试")
-    print("="*60)
-    
-    # 创建管理器
-    manager = ChunkManager()
-    
-    # 添加系统提示词（注入）
-    manager.add_system_prompt("我是Paw，一个生活在这台电脑里的数字生命体。")
-    
-    # 添加记忆（注入）
-    manager.add_memory("[记忆] 我第一次创建了文件")
-    manager.add_memory("[记忆] 我学会了使用工具")
-    
-    # 添加用户输入
-    manager.add_user_input("你好")
-    
-    # 添加AI思考
-    manager.add_thought("用户向我打招呼，我应该友好地回应")
-    
-    # 添加AI回复（部分是生成的，部分重复了系统提示词）
-    # 注意：这里我们可以将回复拆分成多个语块
-    manager.add_assistant_response("你好！")
-    manager.add_system_prompt("我是Paw")  # 这部分是重复的系统提示词
-    manager.add_assistant_response("，很高兴认识你！")
-    
-    # 打印完整上下文
-    manager.print_context()
-    
-    # 获取LLM格式
-    print("\n📤 LLM消息格式:")
-    messages = manager.get_context_for_llm()
-    for msg in messages:
-        print(f"  {msg['role']}: {msg['content'][:50]}...")
-    
-    print("\n✅ 测试完成！")
-    
+        ]    
 
 if __name__ == "__main__":
     test_chunk_system()

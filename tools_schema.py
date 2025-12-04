@@ -10,45 +10,45 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "读取文件内容，支持按行读取",
+            "description": "Reads a file at the specified path. The file_path parameter must be an absolute path. You can optionally specify offset and limit to read large files. Text files are returned with 1-indexed line numbers.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
-                        "description": "文件路径（相对于工作空间或绝对路径）"
+                        "description": "The path to the file to read. Must be an absolute path."
                     },
-                    "start_line": {
+                    "offset": {
                         "type": "integer",
-                        "description": "起始行号（可选，从1开始）"
+                        "description": "The 1-indexed line number to start reading from."
                     },
-                    "end_line": {
+                    "limit": {
                         "type": "integer",
-                        "description": "结束行号（可选）"
+                        "description": "The number of lines to read."
                     }
                 },
-                "required": ["path"]
+                "required": ["file_path"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "write_file",
-            "description": "创建或覆盖文件",
+            "name": "write_to_file",
+            "description": "Use this tool to create new files. The file and any parent directories will be created for you if they do not already exist. NEVER use this tool to modify or overwrite existing files. Always first confirm that file_path does not exist before calling this tool.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
-                        "description": "文件路径"
+                        "description": "The target file to create and write code to."
                     },
                     "content": {
                         "type": "string",
-                        "description": "文件内容"
+                        "description": "The code contents to write to the file."
                     }
                 },
-                "required": ["path", "content"]
+                "required": ["file_path", "content"]
             }
         }
     },
@@ -56,71 +56,45 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "delete_file",
-            "description": "删除文件或目录（包括目录下的所有内容）",
+            "description": "Delete a file or directory at the specified path. Use with caution as this operation cannot be undone. For directories, this will recursively delete all contents.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
-                        "description": "要删除的文件或目录路径"
+                        "description": "The path to the file or directory to delete"
                     }
                 },
-                "required": ["path"]
+                "required": ["file_path"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "edit_file",
-            "description": "编辑文件的指定行",
+            "name": "edit",
+            "description": "Performs exact string replacements in files. You must use read_file at least once before editing. The edit will FAIL if old_string is not unique in the file. Use replace_all to change every instance. The edit will FAIL if old_string and new_string are identical.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
-                        "description": "文件路径"
+                        "description": "The path to the file to modify, absolute path"
                     },
-                    "line_number": {
-                        "type": "integer",
-                        "description": "行号（从1开始）"
-                    },
-                    "new_content": {
+                    "old_string": {
                         "type": "string",
-                        "description": "新内容"
+                        "description": "The text to replace. MUST be unique in the file unless replace_all is true"
                     },
-                    "action": {
+                    "new_string": {
                         "type": "string",
-                        "enum": ["replace", "insert", "delete"],
-                        "description": "操作类型：replace(替换), insert(插入), delete(删除)"
+                        "description": "The text to replace it with (must be different from old_string)"
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "Replace all occurrences of old_string (default false)"
                     }
                 },
-                "required": ["path", "line_number", "new_content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "replace_in_file",
-            "description": "在文件中替换文本",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "文件路径"
-                    },
-                    "old_text": {
-                        "type": "string",
-                        "description": "要替换的文本"
-                    },
-                    "new_text": {
-                        "type": "string",
-                        "description": "新文本"
-                    }
-                },
-                "required": ["path", "old_text", "new_text"]
+                "required": ["file_path", "old_string", "new_string"]
             }
         }
     },
@@ -128,59 +102,68 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "multi_edit",
-            "description": "批量编辑文件",
+            "description": "This is a tool for making multiple edits to a single file in one operation. All edits are applied in sequence. Each edit operates on the result of the previous edit. All edits must be valid for the operation to succeed - if any edit fails, none will be applied.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
-                        "description": "文件路径"
+                        "description": "The path to the file to modify, absolute path"
                     },
                     "edits": {
                         "type": "array",
-                        "description": "编辑操作列表",
+                        "description": "Array of edit operations to perform sequentially on the file",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "old_string": {
                                     "type": "string",
-                                    "description": "要替换的文本"
+                                    "description": "The text to replace"
                                 },
                                 "new_string": {
                                     "type": "string",
-                                    "description": "新文本"
+                                    "description": "The text to replace it with (must be different from old_string)"
+                                },
+                                "replace_all": {
+                                    "type": "boolean",
+                                    "description": "Replace all occurrences of old_string (default false)"
                                 }
                             },
                             "required": ["old_string", "new_string"]
                         }
                     }
                 },
-                "required": ["path", "edits"]
+                "required": ["file_path", "edits"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "find_files",
-            "description": "按文件名搜索文件",
+            "name": "find_by_name",
+            "description": "Search for files and subdirectories within a specified directory. Pattern uses the glob format. Results are capped at 50 matches.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "search_directory": {
+                        "type": "string",
+                        "description": "The directory to search within"
+                    },
                     "pattern": {
                         "type": "string",
-                        "description": "搜索模式（支持通配符，如 *.py）"
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "搜索路径（默认为当前目录）"
+                        "description": "Pattern to search for, supports glob format"
                     },
                     "max_depth": {
                         "type": "integer",
-                        "description": "最大搜索深度"
+                        "description": "Optional, maximum depth to search"
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["file", "directory", "any"],
+                        "description": "Optional, type filter"
                     }
                 },
-                "required": ["pattern"]
+                "required": ["search_directory", "pattern"]
             }
         }
     },
@@ -188,81 +171,72 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "grep_search",
-            "description": "在文件内容中搜索文本",
+            "description": "A powerful search tool. Set is_regex to True to support full regex syntax. Filter files with includes parameter in glob format.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "搜索关键词"
+                        "description": "The search term or pattern to look for within files."
                     },
-                    "path": {
+                    "search_path": {
                         "type": "string",
-                        "description": "搜索路径"
+                        "description": "The path to search. This can be a directory or a file."
                     },
                     "includes": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "包含的文件模式列表"
+                        "description": "Glob patterns to filter files, e.g., '*.py' to only include Python files."
                     },
-                    "case_insensitive": {
+                    "case_sensitive": {
                         "type": "boolean",
-                        "description": "是否忽略大小写"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_in_file",
-            "description": "在单个文件中搜索",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "文件路径"
+                        "description": "If true, performs a case-sensitive search. Defaults to false."
                     },
-                    "pattern": {
-                        "type": "string",
-                        "description": "搜索模式"
+                    "is_regex": {
+                        "type": "boolean",
+                        "description": "If true, treats query as a regular expression pattern."
                     }
                 },
-                "required": ["path", "pattern"]
+                "required": ["query", "search_path"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "list_directory",
-            "description": "列出目录内容",
+            "name": "list_dir",
+            "description": "Lists files and directories in a given path. The path parameter must be an absolute path to a directory that exists. For each item, output will have: relative path, and size in bytes if file.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "directory_path": {
                         "type": "string",
-                        "description": "目录路径（默认为当前目录）"
+                        "description": "The absolute path to the directory to list (must be absolute, not relative)"
                     }
                 },
-                "required": []
+                "required": ["directory_path"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "execute_command",
-            "description": "向共享终端发送命令（如未打开会自动打开）。命令发送后会自动等待0.5秒，终端的输出会自动在[当前终端屏幕]区域刷新，无需手动查看。",
+            "name": "run_command",
+            "description": "PROPOSE a command to run on behalf of the user. Make sure to specify command exactly as it should be run in the shell.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "要执行的命令（如 'ls'、'cd data'、'python script.py'）"
+                        "description": "The exact command line string to execute."
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "The current working directory for the command"
+                    },
+                    "blocking": {
+                        "type": "boolean",
+                        "description": "If true, the command will block until finished. Default is true."
                     }
                 },
                 "required": ["command"]
@@ -273,7 +247,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "open_shell",
-            "description": "启动共享异步终端窗口。会等待命令提示符出现后才返回，确保终端完全就绪。终端输出会自动显示在上下文开头。",
+            "description": "Start a shared async terminal window. Will wait for the command prompt to appear before returning, ensuring the terminal is fully ready.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -285,7 +259,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "interrupt_command",
-            "description": "中断当前正在执行的长时间运行命令，相当于发送 Ctrl+C 信号。",
+            "description": "Interrupt the currently running long-running command, equivalent to sending Ctrl+C signal.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -297,43 +271,16 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "wait",
-            "description": "等待指定时间（秒），用于同步异步操作。",
+            "description": "Wait for a specified duration (in seconds), used for synchronizing async operations.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "seconds": {
                         "type": "number",
-                        "description": "等待的秒数，可为整数或小数"
+                        "description": "The number of seconds to wait, can be integer or decimal"
                     }
                 },
                 "required": ["seconds"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_script",
-            "description": "运行脚本代码",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "lang": {
-                        "type": "string",
-                        "enum": ["python", "bash", "javascript", "powershell"],
-                        "description": "脚本语言"
-                    },
-                    "code": {
-                        "type": "string",
-                        "description": "脚本代码"
-                    },
-                    "args": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "脚本参数"
-                    }
-                },
-                "required": ["lang", "code"]
             }
         }
     }

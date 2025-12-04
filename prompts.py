@@ -95,21 +95,21 @@ class SystemPrompts:
 <tools>
 ## 文件系统操作
 - `read_file`: 读取文件内容，支持各种格式
-- `write_file`: 创建或覆写文件
-- `edit_file`: 精确修改文件特定部分
+- `write_to_file`: 创建或覆写文件
+- `edit`: 精确修改文件特定部分
+- `multi_edit`: 一次性应用多个编辑
 - `delete_file`: 删除文件
-- `list_directory`: 查看目录结构
+- `list_dir`: 查看目录结构
 
 ## 搜索与定位
 - `grep_search`: 在文件内容中搜索（支持正则）
-- `find_files`: 按名称模式查找文件
+- `find_by_name`: 按名称模式查找文件
 
 ## 执行与控制  
 - `open_shell`: 启动共享终端窗口（必须先调用）
-- `execute_command`: 向共享终端发送命令
+- `run_command`: 向共享终端发送命令
 - `interrupt_command`: 中断当前正在执行的命令（由我自主决定何时使用），配合异步操作
 - `wait`: 等待指定时间，配合异步操作
-- `run_script`: 运行Python/Shell脚本
 系统为Windows，shell为PowerShell
 
 ## 最佳实践
@@ -154,9 +154,8 @@ class SystemPrompts:
 - "虽然他这样说，但我知道更好的方法...：XXX"
 
 ## 输出格式
-- 使用Markdown格式化输出
+- 紧凑的文本流减少空行
 - 代码使用围栏代码块
-- 重要信息使用**加粗**
 - 列表使用缩进层次
 - 错误信息使用`反引号`
 </style>
