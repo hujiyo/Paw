@@ -28,7 +28,8 @@ if sys.platform == "win32":
 from autostatus import AutoStatus
 from tools import BaseTools
 from chunk_system import ChunkManager, ChunkType, Chunk
-from tools_schema import TOOLS_SCHEMA
+from tool_definitions import TOOLS_SCHEMA, register_all_tools, get_tools_schema
+from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
 from ui import UI
 
@@ -60,6 +61,9 @@ class Paw:
 
         # 核心组件（传递配置）
         self.tools = BaseTools(config=config)
+        
+        # 注册所有工具到 ToolRegistry
+        register_all_tools(self.tools)
         
         # API配置（优先级：参数 > config.yaml > 环境变量 > 默认值）
         self.api_url = api_url or config.get('api', {}).get('url') or os.getenv("API_URL", "http://localhost:1234/v1/chat/completions")
@@ -388,53 +392,26 @@ class Paw:
             }
     
     async def _execute_tool(self, tool_call: Dict) -> Dict[str, Any]:
-        """执行工具调用"""
+        """执行工具调用 - 使用 ToolRegistry 统一管理"""
         tool_name = tool_call.get("tool")
         args = tool_call.get("args", {})
         
-        # 工具执行（静默，由process_input显示）
-        
         try:
-            # 文件读写
-            if tool_name == "read_file":
-                result = self.tools.read_file(**args)
-            elif tool_name == "write_to_file":
-                result = self.tools.write_to_file(**args)
-            elif tool_name == "delete_file":
-                result = self.tools.delete_file(**args)
+            # 从 ToolRegistry 获取工具配置
+            tool_config = ToolRegistry.get(tool_name)
             
-            # 文件编辑
-            elif tool_name == "edit":
-                result = self.tools.edit(**args)
-            elif tool_name == "multi_edit":
-                result = self.tools.multi_edit(**args)
-            
-            # 文件搜索
-            elif tool_name == "find_by_name":
-                result = self.tools.find_by_name(**args)
-            elif tool_name == "grep_search":
-                result = self.tools.grep_search(**args)
-            
-            # 目录操作
-            elif tool_name == "list_dir":
-                result = self.tools.list_dir(**args)
-            
-            # 系统交互（终端操作后只刷新内容，移动逻辑由process_input控制）
-            elif tool_name == "run_command":
-                result = self.tools.run_command(**args)
-                self._refresh_shell_chunk(move_to_end=False)
-            elif tool_name == "open_shell":
-                result = self.tools.open_shell()
-                self._refresh_shell_chunk(move_to_end=False)
-            elif tool_name == "interrupt_command":
-                result = self.tools.interrupt_command()
-                self._refresh_shell_chunk(move_to_end=False)
-            elif tool_name == "wait":
-                result = self.tools.wait(**args)
-            
-            else:
+            if tool_config is None:
+                # 工具未注册
                 error_msg = ToolPrompts.get_error_messages()["unknown_tool"].format(tool_name=tool_name)
-                result = error_msg
+                return {"success": False, "error": error_msg}
+            
+            # 调用工具的 handler
+            handler = tool_config.handler
+            result = handler(**args)
+            
+            # Shell 工具特殊处理：刷新终端 chunk
+            if tool_config.category == "shell":
+                self._refresh_shell_chunk(move_to_end=False)
             
             # 统一返回格式
             if isinstance(result, str):
@@ -551,17 +528,25 @@ class Paw:
                         result_text = f"错误: {error_msg}"
                         self.ui.show_tool_result(function_name, {'line1': error_msg, 'line2': '', 'has_line2': False}, success=False)
                     
+                    # 获取工具配置，检查上下文策略
+                    tool_config = ToolRegistry.get(function_name)
+                    
+                    # 获取 max_call_pairs 配置（用于配对清理）
+                    max_call_pairs = tool_config.max_call_pairs if tool_config else 0
+                    
                     # 添加工具结果到chunk_manager（OpenAI标准）
+                    # 如果设置了 max_call_pairs，会自动清理超出的旧配对
                     self.chunk_manager.add_tool_result(
                         result_text,
                         tool_call_id=tool_call_id,
-                        tool_name=function_name
+                        tool_name=function_name,
+                        max_call_pairs=max_call_pairs
                     )
                     
                     # 如果是 Shell 相关工具，移动 Shell chunk 到末尾
                     # 确保 Shell Output 出现在 Tool Result 之后（作为下一轮对话的开始）
                     # 避免插在 Assistant 和 Tool Result 之间破坏 API 规范
-                    if function_name in ["run_command", "open_shell", "interrupt_command"]:
+                    if tool_config and tool_config.category == "shell":
                         self._refresh_shell_chunk(move_to_end=True)
                     
                     # 收集工具结果用于状态评估

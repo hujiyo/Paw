@@ -1,7 +1,11 @@
 #!/usr/bin/env python
 """
-工具定义 - OpenAI Function Calling 格式
-符合 JSON Schema 规范
+[已废弃] 工具定义 - OpenAI Function Calling 格式
+
+注意：此文件已被 tool_definitions.py 替代
+请使用: from tool_definitions import TOOLS_SCHEMA
+
+保留此文件仅为向后兼容，将在后续版本删除
 """
 
 # 所有可用工具的 OpenAI 格式定义
@@ -171,7 +175,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "grep_search",
-            "description": "A powerful search tool. Set is_regex to True to support full regex syntax. Filter files with includes parameter in glob format.",
+            "description": "A powerful search tool(仅本地文件系统内搜索). Set is_regex to True to support full regex syntax. Filter files with includes parameter in glob format.",
             "parameters": {
                 "type": "object",
                 "properties": {

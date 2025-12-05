@@ -154,20 +154,90 @@ class ChunkManager:
         """添加工具调用"""
         return self.add_chunk(tool_info, ChunkType.TOOL_CALL)
     
-    def add_tool_result(self, result: str, tool_call_id: str = None, tool_name: str = None) -> Chunk:
+    def add_tool_result(self, result: str, tool_call_id: str = None, tool_name: str = None,
+                        max_call_pairs: int = 0) -> Chunk:
         """添加工具结果
         
         Args:
             result: 工具执行结果
             tool_call_id: 工具调用ID（OpenAI标准）
             tool_name: 工具名称
+            max_call_pairs: 最大配对数量，超出时删除最旧的 (tool_call + tool_result)
         """
         metadata = {}
         if tool_call_id:
             metadata['tool_call_id'] = tool_call_id
         if tool_name:
             metadata['name'] = tool_name
-        return self.add_chunk(result, ChunkType.TOOL_RESULT, metadata=metadata)
+        
+        # 添加新的 tool_result
+        chunk = self.add_chunk(result, ChunkType.TOOL_RESULT, metadata=metadata)
+        
+        # 如果设置了 max_call_pairs，执行配对清理
+        if max_call_pairs > 0 and tool_name:
+            self._enforce_max_call_pairs(tool_name, max_call_pairs)
+        
+        return chunk
+    
+    def _enforce_max_call_pairs(self, tool_name: str, max_pairs: int):
+        """
+        强制执行配对数量限制
+        
+        删除最旧的 (tool_call + tool_result) 配对，直到数量 <= max_pairs
+        """
+        # 1. 找出该工具的所有 tool_result 及其 tool_call_id
+        tool_results = []
+        for i, chunk in enumerate(self.chunks):
+            if (chunk.chunk_type == ChunkType.TOOL_RESULT and 
+                chunk.metadata.get('name') == tool_name):
+                tool_results.append({
+                    'index': i,
+                    'chunk': chunk,
+                    'tool_call_id': chunk.metadata.get('tool_call_id')
+                })
+        
+        # 2. 如果数量超过限制，删除最旧的配对
+        while len(tool_results) > max_pairs:
+            oldest = tool_results.pop(0)  # 最旧的
+            tool_call_id = oldest['tool_call_id']
+            
+            # 删除对应的 tool_call（在 assistant 消息的 tool_calls 中）
+            self._remove_tool_call_by_id(tool_call_id)
+            
+            # 删除 tool_result chunk
+            self._remove_chunk_by_tool_call_id(tool_call_id)
+    
+    def _remove_tool_call_by_id(self, tool_call_id: str):
+        """
+        从 assistant 消息中移除指定的 tool_call
+        
+        如果 assistant 消息的 tool_calls 变空，则删除整个 assistant 消息
+        """
+        for i, chunk in enumerate(self.chunks):
+            if chunk.chunk_type == ChunkType.ASSISTANT and 'tool_calls' in chunk.metadata:
+                tool_calls = chunk.metadata['tool_calls']
+                # 找到并移除匹配的 tool_call
+                new_tool_calls = [tc for tc in tool_calls if tc.get('id') != tool_call_id]
+                
+                if len(new_tool_calls) < len(tool_calls):
+                    # 找到了，更新或删除
+                    if len(new_tool_calls) == 0 and not chunk.content:
+                        # tool_calls 为空且无文本内容，删除整个 assistant chunk
+                        self.current_tokens -= chunk.tokens
+                        self.chunks.pop(i)
+                    else:
+                        # 还有其他 tool_calls 或有文本内容，只更新
+                        chunk.metadata['tool_calls'] = new_tool_calls
+                    return
+    
+    def _remove_chunk_by_tool_call_id(self, tool_call_id: str):
+        """删除指定 tool_call_id 的 tool_result chunk"""
+        for i, chunk in enumerate(self.chunks):
+            if (chunk.chunk_type == ChunkType.TOOL_RESULT and 
+                chunk.metadata.get('tool_call_id') == tool_call_id):
+                self.current_tokens -= chunk.tokens
+                self.chunks.pop(i)
+                return
     
     def add_shell_output(self, output: str) -> Chunk:
         """添加Shell输出语块（首次创建）"""
