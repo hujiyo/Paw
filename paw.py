@@ -11,6 +11,7 @@ import sys
 import json
 import asyncio
 import aiohttp
+import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -40,7 +41,7 @@ class Paw:
     统一标准启动，完全可视化，上帝视角
     """
 
-    def __init__(self, api_url: str = None, model: str = None, api_key: str = None, minimal: bool = False):
+    def __init__(self, api_url: str = None, model: str = None, api_key: str = None, minimal: bool = False, workspace_dir: str = None):
         """初始化
 
         Args:
@@ -48,6 +49,7 @@ class Paw:
             model: 模型名称，如果为None则从config.yaml或环境变量读取
             api_key: API密钥，如果为None则从config.yaml或环境变量读取
             minimal: 是否使用极简模式（减少状态栏等装饰）
+            workspace_dir: 工作目录路径，如果为None则从 PAW_HOME 环境变量读取
         """
         # 基础配置
         self.name = "Paw"
@@ -59,8 +61,12 @@ class Paw:
         # 读取配置文件
         config = self._load_config()
 
-        # 核心组件（传递配置）
-        self.tools = BaseTools(config=config)
+        # 核心组件（传递配置和工作目录）
+        self.tools = BaseTools(sandbox_dir=workspace_dir, config=config)
+        
+        # 保存工作目录信息（用于提示词）
+        self.workspace_dir = self.tools.sandbox_dir
+        self.workspace_name = self.workspace_dir.name
         
         # 注册所有工具到 ToolRegistry
         register_all_tools(self.tools)
@@ -115,8 +121,8 @@ class Paw:
         else:
             terminal_info = f"终端未启动 (工作目录: {terminal_status.get('working_directory')})"
         
-        # 使用提示词配置文件
-        main_prompt = SystemPrompts.get_main_system_prompt(self.name, self.birth_time)
+        # 使用提示词配置文件（传入工作目录名称）
+        main_prompt = SystemPrompts.get_main_system_prompt(self.name, self.birth_time, self.workspace_name)
         
         # 替换终端状态占位符
         main_prompt = main_prompt.replace("{terminal_status}", terminal_info)
@@ -502,7 +508,26 @@ class Paw:
                     # 提取工具信息
                     tool_call_id = tool_call.get("id")
                     function_name = tool_call["function"]["name"]
-                    function_args = json.loads(tool_call["function"]["arguments"])
+                    raw_args = tool_call["function"]["arguments"]
+                    
+                    # 安全解析工具参数（处理 API 返回的无效 JSON）
+                    try:
+                        function_args = json.loads(raw_args) if raw_args else {}
+                    except json.JSONDecodeError as e:
+                        self.ui.print_error(f"工具参数解析失败: {e}")
+                        self.ui.print_dim(f"原始参数: {raw_args[:200]}..." if len(raw_args) > 200 else f"原始参数: {raw_args}")
+                        # 尝试修复常见的 JSON 问题
+                        try:
+                            # 尝试补全被截断的 JSON
+                            fixed_args = raw_args.rstrip()
+                            if not fixed_args.endswith('}'):
+                                fixed_args += '}'
+                            function_args = json.loads(fixed_args)
+                            self.ui.print_dim("已自动修复 JSON 格式")
+                        except:
+                            # 无法修复，跳过此工具调用
+                            self.ui.print_error(f"跳过工具调用: {function_name}")
+                            continue
                     
                     # 显示工具调用（简洁格式，紧凑排列）
                     args_str = json.dumps(function_args, ensure_ascii=False) if function_args else ""
@@ -629,6 +654,63 @@ class Paw:
             self.ui.print_dim(f"无法获取模型列表: {e}")
             return []
     
+    async def _enter_edit_mode(self):
+        """进入对话编辑模式"""
+        # 获取可编辑的语块
+        editable_chunks = self.chunk_manager.get_editable_chunks()
+        
+        if not editable_chunks:
+            self.ui.print_dim("没有可编辑的对话内容")
+            return
+        
+        # 显示编辑器界面
+        current_index = len(editable_chunks) - 1  # 默认选中最后一条
+        
+        while True:
+            # 重新获取可编辑语块（因为可能被删除了）
+            editable_chunks = self.chunk_manager.get_editable_chunks()
+            if not editable_chunks:
+                self.ui.print_dim("所有对话内容已清空")
+                break
+            
+            # 确保索引有效
+            if current_index >= len(editable_chunks):
+                current_index = len(editable_chunks) - 1
+            if current_index < 0:
+                current_index = 0
+            
+            # 显示编辑器并获取用户操作
+            action, real_idx, new_content = self.ui.show_chunk_editor(editable_chunks, current_index)
+            
+            if action == 'quit':
+                break
+            
+            elif action == 'edit':
+                # 编辑语块内容
+                success = self.chunk_manager.edit_chunk_content(real_idx, new_content)
+                self.ui.show_edit_result('edit', success)
+            
+            elif action == 'delete':
+                # 删除单个语块
+                success = self.chunk_manager.delete_chunk(real_idx)
+                self.ui.show_edit_result('delete', success)
+                # 删除后调整索引
+                if success and current_index > 0:
+                    current_index -= 1
+            
+            elif action == 'delete_from':
+                # 回滚：删除此条及之后的所有
+                deleted_count = self.chunk_manager.delete_chunks_from(real_idx)
+                self.ui.show_edit_result('delete_from', deleted_count > 0, f"(删除了 {deleted_count} 条)")
+                # 删除后调整索引
+                if deleted_count > 0:
+                    current_index = max(0, len(self.chunk_manager.get_editable_chunks()) - 1)
+        
+        # 退出编辑模式，清屏恢复主界面
+        self.ui.clear_screen()
+        self.ui.print_welcome()
+        self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
+    
     async def _select_model(self) -> str:
         """选择模型"""
         self.ui.show_model_checking()
@@ -734,6 +816,11 @@ class Paw:
                     self.ui.show_messages_debug(messages)
                     continue
                 
+                if user_input == '/edit':
+                    # 进入对话编辑模式
+                    await self._enter_edit_mode()
+                    continue
+                
                 if user_input.startswith('/'):
                     help_msg = UIPrompts.get_command_help()
                     self.ui.show_command_help(help_msg)
@@ -755,6 +842,42 @@ class Paw:
 
 async def main():
     """主入口 - 唯一标准启动方式"""
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(
+        description='Paw - AGI级别的猫娘终端智能体',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+示例:
+  paw                      # 使用 PAW_HOME 环境变量指定的默认工作目录
+  paw my_project/          # 使用 my_project 作为工作目录
+  paw /path/to/workspace   # 使用绝对路径作为工作目录
+
+环境变量:
+  PAW_HOME                 # 默认工作目录路径
+'''
+    )
+    parser.add_argument(
+        'workspace',
+        nargs='?',
+        default=None,
+        help='工作目录路径 (默认: PAW_HOME 环境变量)'
+    )
+    parser.add_argument(
+        '--minimal', '-m',
+        action='store_true',
+        help='使用极简模式'
+    )
+    args = parser.parse_args()
+    
+    # 确定工作目录: 命令行参数 > PAW_HOME 环境变量
+    workspace_dir = args.workspace or os.getenv('PAW_HOME')
+    if not workspace_dir:
+        print("\033[31m错误: 未指定工作目录\033[0m")
+        print("\n请通过以下方式之一指定工作目录:")
+        print("  1. 命令行参数: paw <workspace_path>")
+        print("  2. 设置环境变量: set PAW_HOME=<workspace_path>")
+        return
+    
     # 检查依赖
     try:
         import colorama
@@ -763,7 +886,7 @@ async def main():
         return
     
     # 创建并运行Paw
-    paw = Paw()
+    paw = Paw(workspace_dir=workspace_dir, minimal=args.minimal)
     await paw.run()
 
 

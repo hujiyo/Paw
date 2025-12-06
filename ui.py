@@ -13,6 +13,13 @@ from datetime import datetime
 from typing import Optional, Dict, List, Any
 from colorama import init, Fore, Back, Style
 
+# 实时键盘输入支持
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import tty
+    import termios
+
 # 初始化colorama
 init(autoreset=True)
 
@@ -616,3 +623,338 @@ class UI:
                 self.print_dim(f"\n[{i}] TOOL ({name}): {content}")
         
         self.print_dim(self.draw_line())
+
+    # ==================== 对话编辑界面 ====================
+    
+    def show_chunk_editor(self, chunks: List[tuple], current_index: int = 0) -> tuple:
+        """显示语块编辑器界面（实时按键响应）
+        
+        Args:
+            chunks: [(real_index, chunk), ...] 可编辑的语块列表
+            current_index: 当前选中的索引（在 chunks 列表中的位置）
+            
+        Returns:
+            (action, real_index, new_content)
+            action: 'edit', 'delete', 'delete_from', 'quit', 'view'
+            real_index: 在 chunk_manager.chunks 中的真实索引
+            new_content: 编辑后的新内容（仅 action='edit' 时有效）
+        """
+        from chunk_system import ChunkType
+        
+        # 类型标签映射
+        type_labels = {
+            ChunkType.USER: ('USER', self.COLORS['user_text']),
+            ChunkType.ASSISTANT: ('PAW ', self.COLORS['assistant_text']),
+            ChunkType.TOOL_CALL: ('CALL', self.COLORS['tool_name']),
+            ChunkType.TOOL_RESULT: ('TOOL', self.COLORS['dim']),
+            ChunkType.SHELL: ('TERM', Fore.MAGENTA),
+            ChunkType.THOUGHT: ('MIND', Fore.CYAN),
+        }
+        
+        self.hide_cursor()  # 隐藏光标，更清爽
+        
+        try:
+            while True:
+                # 清屏并显示标题
+                self.clear_screen()
+                print()
+                title = "═══════════════════ 对话编辑器 ═══════════════════"
+                print(f"{self.COLORS['dim']}{self.center_text(title)}{Style.RESET_ALL}")
+                print()
+                
+                # 显示操作提示
+                hint = "↑↓ 选择  │  E 编辑  │  D 删除  │  R 回滚  │  V 查看  │  Q/Esc 退出"
+                print(f"{self.COLORS['dim']}{self.center_text(hint)}{Style.RESET_ALL}")
+                print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+                print()
+                
+                # 显示语块列表
+                if not chunks:
+                    print(f"{self.COLORS['dim']}  (没有可编辑的语块){Style.RESET_ALL}")
+                else:
+                    # 计算显示范围（滚动窗口）
+                    max_visible = 12
+                    start_idx = max(0, current_index - max_visible // 2)
+                    end_idx = min(len(chunks), start_idx + max_visible)
+                    if end_idx - start_idx < max_visible:
+                        start_idx = max(0, end_idx - max_visible)
+                    
+                    # 显示滚动指示
+                    if start_idx > 0:
+                        print(f"{self.COLORS['dim']}  ↑ 还有 {start_idx} 条...{Style.RESET_ALL}")
+                    
+                    for i in range(start_idx, end_idx):
+                        real_idx, chunk = chunks[i]
+                        is_selected = (i == current_index)
+                        
+                        # 获取类型标签和颜色
+                        label, color = type_labels.get(chunk.chunk_type, ('????', self.COLORS['dim']))
+                        
+                        # 获取预览内容
+                        preview = chunk.content.replace('\n', ' ').strip()
+                        # 计算可用宽度
+                        max_preview = self.WIDTH - 15
+                        if len(preview) > max_preview:
+                            preview = preview[:max_preview - 3] + "..."
+                        
+                        # 选中标记
+                        if is_selected:
+                            marker = f"{Fore.CYAN}›{Style.RESET_ALL}"
+                            line = f" {marker} {self.COLORS['bright']}{i:2d}{Style.RESET_ALL} {color}[{label}]{Style.RESET_ALL} {self.COLORS['bright']}{preview}{Style.RESET_ALL}"
+                        else:
+                            line = f"   {self.COLORS['dim']}{i:2d}{Style.RESET_ALL} {color}[{label}]{Style.RESET_ALL} {self.COLORS['dim']}{preview}{Style.RESET_ALL}"
+                        
+                        print(line)
+                    
+                    # 显示滚动指示
+                    if end_idx < len(chunks):
+                        print(f"{self.COLORS['dim']}  ↓ 还有 {len(chunks) - end_idx} 条...{Style.RESET_ALL}")
+                
+                print()
+                print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+                
+                # 显示当前选中项的详细信息
+                if chunks and 0 <= current_index < len(chunks):
+                    real_idx, chunk = chunks[current_index]
+                    label, color = type_labels.get(chunk.chunk_type, ('????', self.COLORS['dim']))
+                    print(f"\n{color}[{label}]{Style.RESET_ALL} #{real_idx} | {chunk.tokens} tokens | {chunk.timestamp.strftime('%H:%M:%S')}")
+                    
+                    # 显示内容预览（最多3行）
+                    lines = chunk.content.split('\n')[:3]
+                    for line in lines:
+                        if len(line) > self.CONTENT_WIDTH:
+                            line = line[:self.CONTENT_WIDTH - 3] + "..."
+                        print(f"  {self.COLORS['dim']}{line}{Style.RESET_ALL}")
+                    if len(chunk.content.split('\n')) > 3:
+                        print(f"  {self.COLORS['dim']}... (共 {len(chunk.content.split(chr(10)))} 行){Style.RESET_ALL}")
+                
+                # 实时获取按键
+                try:
+                    key = self._get_key()
+                    
+                    if not chunks:
+                        if key in ['q', 'Q', 'ESC', 'ENTER']:
+                            return ('quit', -1, None)
+                        continue
+                    
+                    real_idx, chunk = chunks[current_index]
+                    label, _ = type_labels.get(chunk.chunk_type, ('????', self.COLORS['dim']))
+                    
+                    # 方向键导航
+                    if key == 'UP' and current_index > 0:
+                        current_index -= 1
+                    elif key == 'DOWN' and current_index < len(chunks) - 1:
+                        current_index += 1
+                    elif key == 'PAGEUP':
+                        current_index = max(0, current_index - 5)
+                    elif key == 'PAGEDOWN':
+                        current_index = min(len(chunks) - 1, current_index + 5)
+                    elif key == 'HOME':
+                        current_index = 0
+                    elif key == 'END':
+                        current_index = len(chunks) - 1
+                    
+                    # 编辑
+                    elif key in ['e', 'E', 'ENTER']:
+                        self.show_cursor()
+                        new_content = self._show_chunk_edit_dialog(chunk)
+                        self.hide_cursor()
+                        if new_content is not None:
+                            return ('edit', real_idx, new_content)
+                    
+                    # 删除
+                    elif key in ['d', 'D', 'DELETE']:
+                        self.show_cursor()
+                        if self._confirm_action(f"确定删除这条 [{label}] 消息吗？"):
+                            return ('delete', real_idx, None)
+                        self.hide_cursor()
+                    
+                    # 回滚
+                    elif key in ['r', 'R']:
+                        self.show_cursor()
+                        if self._confirm_action(f"确定回滚到此处吗？将删除此条及之后的所有消息。"):
+                            return ('delete_from', real_idx, None)
+                        self.hide_cursor()
+                    
+                    # 查看完整内容
+                    elif key in ['v', 'V']:
+                        self.show_cursor()
+                        self._show_chunk_full_content(chunk)
+                        self.hide_cursor()
+                    
+                    # 退出
+                    elif key in ['q', 'Q', 'ESC']:
+                        return ('quit', -1, None)
+                        
+                except KeyboardInterrupt:
+                    return ('quit', -1, None)
+        
+        finally:
+            self.show_cursor()  # 确保退出时恢复光标
+        
+        return ('quit', -1, None)
+    
+    def _show_chunk_edit_dialog(self, chunk) -> Optional[str]:
+        """显示语块编辑对话框
+        
+        Returns:
+            编辑后的新内容，如果取消则返回 None
+        """
+        self.clear_screen()
+        print()
+        print(f"{self.COLORS['dim']}═══════════════════ 编辑内容 ═══════════════════{Style.RESET_ALL}")
+        print()
+        print(f"{self.COLORS['dim']}当前内容:{Style.RESET_ALL}")
+        print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+        
+        # 显示当前内容
+        for line in chunk.content.split('\n'):
+            print(f"  {line}")
+        
+        print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+        print()
+        print(f"{self.COLORS['dim']}输入新内容（输入空行结束，输入 /cancel 取消）:{Style.RESET_ALL}")
+        print()
+        
+        # 多行输入
+        lines = []
+        try:
+            while True:
+                line = input(f"{self.COLORS['user_text']}> {Style.RESET_ALL}")
+                if line == '/cancel':
+                    return None
+                if line == '' and lines:
+                    # 空行结束输入
+                    break
+                lines.append(line)
+        except KeyboardInterrupt:
+            return None
+        
+        if not lines:
+            return None
+        
+        return '\n'.join(lines)
+    
+    def _show_chunk_full_content(self, chunk):
+        """显示语块的完整内容"""
+        self.clear_screen()
+        print()
+        print(f"{self.COLORS['dim']}═══════════════════ 完整内容 ═══════════════════{Style.RESET_ALL}")
+        print()
+        print(f"{self.COLORS['dim']}类型: {chunk.chunk_type.value} | Tokens: {chunk.tokens} | 时间: {chunk.timestamp.strftime('%H:%M:%S')}{Style.RESET_ALL}")
+        print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+        print()
+        
+        # 显示完整内容
+        print(chunk.content)
+        
+        print()
+        print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+        print(f"{self.COLORS['dim']}按任意键返回...{Style.RESET_ALL}", end='', flush=True)
+        self._get_key()  # 任意键返回
+    
+    def _confirm_action(self, message: str) -> bool:
+        """确认操作（实时按键）
+        
+        Returns:
+            用户是否确认
+        """
+        print()
+        print(f"{self.COLORS['warning']}{message} (y/N): {Style.RESET_ALL}", end='', flush=True)
+        key = self._get_key()
+        print()  # 换行
+        return key.lower() in ['y', '是']
+    
+    def _get_key(self) -> str:
+        """获取单个按键（实时响应，无需回车）
+        
+        Returns:
+            按键字符，特殊键返回特定字符串：
+            - 'UP', 'DOWN', 'LEFT', 'RIGHT' 方向键
+            - 'ENTER' 回车键
+            - 'ESC' 退出键
+            - 'BACKSPACE' 退格键
+        """
+        if sys.platform == "win32":
+            # Windows 使用 msvcrt
+            key = msvcrt.getch()
+            
+            # 处理特殊键（方向键等以 0xe0 或 0x00 开头）
+            if key in (b'\xe0', b'\x00'):
+                key2 = msvcrt.getch()
+                key_map = {
+                    b'H': 'UP',
+                    b'P': 'DOWN',
+                    b'K': 'LEFT',
+                    b'M': 'RIGHT',
+                    b'S': 'DELETE',
+                    b'G': 'HOME',
+                    b'O': 'END',
+                    b'I': 'PAGEUP',
+                    b'Q': 'PAGEDOWN',
+                }
+                return key_map.get(key2, '')
+            
+            # 处理普通键
+            if key == b'\r':
+                return 'ENTER'
+            elif key == b'\x1b':
+                return 'ESC'
+            elif key == b'\x08':
+                return 'BACKSPACE'
+            elif key == b'\x03':  # Ctrl+C
+                raise KeyboardInterrupt
+            else:
+                try:
+                    return key.decode('utf-8')
+                except:
+                    return ''
+        else:
+            # Unix/Linux 使用 termios
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                key = sys.stdin.read(1)
+                
+                # 处理 ESC 序列（方向键等）
+                if key == '\x1b':
+                    key2 = sys.stdin.read(1)
+                    if key2 == '[':
+                        key3 = sys.stdin.read(1)
+                        key_map = {
+                            'A': 'UP',
+                            'B': 'DOWN',
+                            'C': 'RIGHT',
+                            'D': 'LEFT',
+                            '3': 'DELETE',  # 需要再读一个 ~
+                            '5': 'PAGEUP',
+                            '6': 'PAGEDOWN',
+                        }
+                        if key3 in ['3', '5', '6']:
+                            sys.stdin.read(1)  # 读取 ~
+                        return key_map.get(key3, 'ESC')
+                    return 'ESC'
+                elif key == '\r' or key == '\n':
+                    return 'ENTER'
+                elif key == '\x7f':
+                    return 'BACKSPACE'
+                elif key == '\x03':  # Ctrl+C
+                    raise KeyboardInterrupt
+                else:
+                    return key
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    
+    def show_edit_result(self, action: str, success: bool, detail: str = ""):
+        """显示编辑结果"""
+        if success:
+            action_names = {
+                'edit': '编辑',
+                'delete': '删除',
+                'delete_from': '回滚'
+            }
+            action_name = action_names.get(action, action)
+            self.print_success(f"✓ {action_name}成功 {detail}")
+        else:
+            self.print_error(f"✗ 操作失败 {detail}")

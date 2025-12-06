@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Optional, Literal, Tuple
 from enum import Enum
 from colorama import Fore, Style
 
@@ -537,6 +537,131 @@ class ChunkManager:
         system_chunks = [c for c in self.chunks if c.chunk_type == ChunkType.SYSTEM]
         self.chunks = system_chunks
         self.current_tokens = sum(c.tokens for c in system_chunks)
+    
+    # ==================== 对话编辑功能 ====================
+    
+    def get_editable_chunks(self) -> List[Tuple[int, 'Chunk']]:
+        """获取可编辑的语块列表（排除系统提示词）
+        
+        Returns:
+            [(index, chunk), ...] 列表，index 是在 self.chunks 中的真实索引
+        """
+        editable = []
+        for i, chunk in enumerate(self.chunks):
+            # 排除系统提示词和记忆（这些是注入的，不应该被用户编辑）
+            if chunk.chunk_type not in [ChunkType.SYSTEM, ChunkType.MEMORY]:
+                editable.append((i, chunk))
+        return editable
+    
+    def get_chunk_by_index(self, index: int) -> Optional['Chunk']:
+        """根据索引获取语块"""
+        if 0 <= index < len(self.chunks):
+            return self.chunks[index]
+        return None
+    
+    def delete_chunk(self, index: int) -> bool:
+        """删除指定索引的语块
+        
+        Args:
+            index: 在 self.chunks 中的真实索引
+            
+        Returns:
+            是否删除成功
+        """
+        if 0 <= index < len(self.chunks):
+            chunk = self.chunks[index]
+            # 不允许删除系统提示词
+            if chunk.chunk_type == ChunkType.SYSTEM:
+                return False
+            
+            # 如果是 assistant 消息且有 tool_calls，需要同时删除对应的 tool_result
+            if chunk.chunk_type == ChunkType.ASSISTANT and 'tool_calls' in chunk.metadata:
+                tool_call_ids = [tc.get('id') for tc in chunk.metadata['tool_calls']]
+                # 删除对应的 tool_result
+                self.chunks = [
+                    c for c in self.chunks 
+                    if not (c.chunk_type == ChunkType.TOOL_RESULT and 
+                           c.metadata.get('tool_call_id') in tool_call_ids)
+                ]
+            
+            # 如果是 tool_result，需要从对应的 assistant 消息中移除 tool_call
+            if chunk.chunk_type == ChunkType.TOOL_RESULT:
+                tool_call_id = chunk.metadata.get('tool_call_id')
+                if tool_call_id:
+                    self._remove_tool_call_by_id(tool_call_id)
+            
+            # 删除语块
+            self.current_tokens -= chunk.tokens
+            self.chunks = [c for i, c in enumerate(self.chunks) if i != index]
+            return True
+        return False
+    
+    def delete_chunks_from(self, index: int) -> int:
+        """删除从指定索引开始的所有语块（用于回滚到某个点）
+        
+        Args:
+            index: 在 self.chunks 中的真实索引
+            
+        Returns:
+            删除的语块数量
+        """
+        if index < 0 or index >= len(self.chunks):
+            return 0
+        
+        # 不允许删除系统提示词
+        if self.chunks[index].chunk_type == ChunkType.SYSTEM:
+            return 0
+        
+        # 计算要删除的 token 数
+        deleted_tokens = sum(c.tokens for c in self.chunks[index:])
+        deleted_count = len(self.chunks) - index
+        
+        # 截断
+        self.chunks = self.chunks[:index]
+        self.current_tokens -= deleted_tokens
+        
+        return deleted_count
+    
+    def edit_chunk_content(self, index: int, new_content: str) -> bool:
+        """编辑指定语块的内容
+        
+        Args:
+            index: 在 self.chunks 中的真实索引
+            new_content: 新内容
+            
+        Returns:
+            是否编辑成功
+        """
+        if 0 <= index < len(self.chunks):
+            chunk = self.chunks[index]
+            # 不允许编辑系统提示词
+            if chunk.chunk_type == ChunkType.SYSTEM:
+                return False
+            
+            # 更新内容和 token 数
+            old_tokens = chunk.tokens
+            chunk.content = new_content
+            chunk.tokens = 0
+            chunk.estimate_tokens()
+            self.current_tokens += chunk.tokens - old_tokens
+            
+            return True
+        return False
+    
+    def get_chunk_preview(self, chunk: 'Chunk', max_length: int = 50) -> str:
+        """获取语块的预览文本
+        
+        Args:
+            chunk: 语块
+            max_length: 最大长度
+            
+        Returns:
+            预览文本
+        """
+        content = chunk.content.replace('\n', ' ').strip()
+        if len(content) > max_length:
+            content = content[:max_length - 3] + "..."
+        return content
     
     def to_json(self) -> List[Dict[str, Any]]:
         """导出为JSON格式"""

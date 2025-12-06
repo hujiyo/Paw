@@ -3,13 +3,12 @@
 # API 配置
 api:
   # API密钥
-  key: "3dae586b23fe4f19ab52a0152eebe182.luZt04U5Xbeu2sPl"
+  key: "aef418d2241a4e008fcdd61370cef5cc.VDXiXUnwJLWHcliy"
   #key: "sk-W0rpStc95T7JVYVwDYc29IyirjtpPPby6SozFMQr17m8KWeo"
   
   # API 端点 URL
-  #url: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
-  url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-  # url: "https://api.suanli.cn/v1/chat/completions"
+  url: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  #url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
   
   # 模型名称 - 留空 (null) 则在启动时选择
   #url: "http://localhost:1234/v1/chat/completions"

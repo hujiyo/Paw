@@ -18,19 +18,17 @@ from terminal import ThreadedTerminal
 class BaseTools:
     """基础工具类 - 仅包含 3-5 个核心原子操作"""
     
-    def __init__(self, sandbox_dir: Optional[str] = None, config: Optional[dict] = None):
+    def __init__(self, sandbox_dir: str, config: Optional[dict] = None):
         """初始化工具集
         
         Args:
-            sandbox_dir: 沙盒目录路径，如果为 None 则使用 Paw-workspace
+            sandbox_dir: 沙盒目录路径（必需）
             config: 终端配置
         """
-        if sandbox_dir:
-            self.sandbox_dir = Path(sandbox_dir).resolve()
-        else:
-            # 默认使用桌面下的 Paw-workspace 目录
-            desktop_path = self._get_desktop_path()
-            self.sandbox_dir = desktop_path / "Paw-workspace"
+        if not sandbox_dir:
+            raise ValueError("sandbox_dir 是必需参数，请指定工作目录")
+        
+        self.sandbox_dir = Path(sandbox_dir).resolve()
         
         # 确保沙盒目录存在
         self.sandbox_dir.mkdir(parents=True, exist_ok=True)
@@ -593,14 +591,16 @@ class BaseTools:
 
 
 # 工具函数的简化接口
-def create_tools(sandbox_dir: Optional[str] = None) -> BaseTools:
+def create_tools(sandbox_dir: str) -> BaseTools:
     """创建工具实例"""
     return BaseTools(sandbox_dir)
 
 
 if __name__ == "__main__":
     # Test code
-    tools = create_tools()
+    import os
+    test_dir = os.getenv('PAW_HOME', './test_workspace')
+    tools = create_tools(test_dir)
     
     # Test file operations
     print("Testing write_to_file...")
