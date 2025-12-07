@@ -317,6 +317,64 @@ SCHEMA_WAIT = {
     }
 }
 
+# ============================================================
+# Web 工具 Schema
+# ============================================================
+
+SCHEMA_SEARCH_WEB = {
+    "type": "function",
+    "function": {
+        "name": "search_web",
+        "description": "Search the web. Returns 5 results with 4-char ID, title, URL and snippet. Use the ID with load_url_content to load a result.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query. Supports syntax: \"exact phrase\", -exclude, site:example.com"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}
+
+SCHEMA_LOAD_URL_CONTENT = {
+    "type": "function",
+    "function": {
+        "name": "load_url_content",
+        "description": "Load a webpage content into memory. Returns page IDs with summaries. Use read_page to read content.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "URL or 4-char ID from search_web results"
+                }
+            },
+            "required": ["url"]
+        }
+    }
+}
+
+SCHEMA_READ_PAGE = {
+    "type": "function",
+    "function": {
+        "name": "read_page",
+        "description": "Read the content of a loaded page by its 4-character page ID. Must call load_url_content first to get page IDs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "page_id": {
+                    "type": "string",
+                    "description": "The 4-character unique page ID returned by load_url_content"
+                }
+            },
+            "required": ["page_id"]
+        }
+    }
+}
+
 
 # ============================================================
 # 工具注册函数
@@ -443,6 +501,36 @@ def register_all_tools(tools_instance):
     )
 
 
+def register_web_tools(web_tools_instance):
+    """
+    注册 Web 工具到 ToolRegistry
+    
+    Args:
+        web_tools_instance: WebTools 实例
+    """
+    
+    register_tool(
+        name="search_web",
+        schema=SCHEMA_SEARCH_WEB,
+        handler=web_tools_instance.search_web,
+        category="web"
+    )
+    
+    register_tool(
+        name="load_url_content",
+        schema=SCHEMA_LOAD_URL_CONTENT,
+        handler=web_tools_instance.load_url_content,
+        category="web"
+    )
+    
+    register_tool(
+        name="read_page",
+        schema=SCHEMA_READ_PAGE,
+        handler=web_tools_instance.read_page,
+        category="web"
+    )
+
+
 def get_tools_schema():
     """获取所有工具的 OpenAI schema（用于 API 调用）"""
     return ToolRegistry.get_schemas()
@@ -478,6 +566,10 @@ TOOLS_SCHEMA = [
     SCHEMA_OPEN_SHELL,
     SCHEMA_INTERRUPT_COMMAND,
     SCHEMA_WAIT,
+    # Web 工具
+    SCHEMA_SEARCH_WEB,
+    SCHEMA_LOAD_URL_CONTENT,
+    SCHEMA_READ_PAGE,
 ]
 
 

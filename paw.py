@@ -29,7 +29,8 @@ if sys.platform == "win32":
 from autostatus import AutoStatus
 from tools import BaseTools
 from chunk_system import ChunkManager, ChunkType, Chunk
-from tool_definitions import TOOLS_SCHEMA, register_all_tools, get_tools_schema
+from tool_definitions import TOOLS_SCHEMA, register_all_tools, register_web_tools, get_tools_schema
+from web_tools import WebTools
 from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
 from ui import UI
@@ -75,6 +76,15 @@ class Paw:
         self.api_url = api_url or config.get('api', {}).get('url') or os.getenv("API_URL", "http://localhost:1234/v1/chat/completions")
         self.model = model or config.get('api', {}).get('model') or os.getenv("MODEL", None)
         self.api_key = api_key or config.get('api', {}).get('key') or os.getenv("OPENAI_API_KEY", None)
+        
+        # Web 工具（需要 API 配置来生成摘要）
+        self.web_tools = WebTools(
+            config=config.get('web', {}),
+            api_url=self.api_url,
+            model_getter=lambda: self.model,  # 动态获取当前模型
+            api_key=self.api_key
+        )
+        register_web_tools(self.web_tools)
         
         # 动态状态管理器（延迟初始化，等模型确定后）
         self.autostatus = None
@@ -245,6 +255,68 @@ class Paw:
             seconds = args.get("seconds", 0)
             return {'line1': f"{seconds}s", 'line2': '', 'has_line2': False}
         
+        elif tool_name == "search_web":
+            query = args.get("query", "")
+            # 解析 JSON 结果
+            try:
+                import json
+                data = json.loads(result) if isinstance(result, str) else result
+                results = data.get("results", [])
+                count = len(results)
+                if count == 0:
+                    return {'line1': f'无结果 "{query}"', 'line2': '', 'has_line2': False}
+                # 每行显示: [id] title
+                lines = []
+                for r in results:
+                    url_id = r.get("id", "????")
+                    title = r.get("title", "")
+                    if len(title) > 55:
+                        title = title[:52] + "..."
+                    lines.append(f"[{url_id}] {title}")
+                # 把条数放前面，query 放后面（会被截断）
+                return {'line1': f'{count}条 "{query}"', 'line2': '\n'.join(lines), 'has_line2': True}
+            except:
+                return {'line1': f'"{query}"', 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "load_url_content":
+            url_arg = args.get("url", "")
+            # 解析 JSON 结果
+            try:
+                import json
+                data = json.loads(result) if isinstance(result, str) else result
+                title = data.get("title", "无标题")[:40]
+                url_id = data.get("url_id", "")
+                pages = data.get("pages", [])
+                # line1 显示: [url_id] title 或 title
+                if url_id:
+                    line1 = f"[{url_id}] {title}"
+                else:
+                    line1 = title
+                if not pages:
+                    return {'line1': line1, 'line2': '(空内容)', 'has_line2': True}
+                # 每行显示一个 page: page_id + summary（摘要最多30字，不截断）
+                lines = []
+                for p in pages:
+                    pid = p.get("page_id", "????")
+                    summary = p.get("summary", "")
+                    lines.append(f"[{pid}] {summary}")
+                return {'line1': line1, 'line2': '\n'.join(lines), 'has_line2': True}
+            except:
+                return {'line1': url_arg[:40], 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "read_page":
+            page_id = args.get("page_id", "")
+            # 解析 JSON 结果
+            try:
+                import json
+                data = json.loads(result) if isinstance(result, str) else result
+                page_num = data.get("page_num", "?")
+                total = data.get("total_pages", "?")
+                size = data.get("size", 0)
+                return {'line1': f"[{page_id}] 第{page_num}/{total}页 ({size}字节)", 'line2': '', 'has_line2': False}
+            except:
+                return {'line1': f"[{page_id}]", 'line2': '', 'has_line2': False}
+        
         else:
             # 默认
             brief = result.replace('\n', ' ')[:40]
@@ -411,9 +483,13 @@ class Paw:
                 error_msg = ToolPrompts.get_error_messages()["unknown_tool"].format(tool_name=tool_name)
                 return {"success": False, "error": error_msg}
             
-            # 调用工具的 handler
+            # 调用工具的 handler（支持同步和异步）
             handler = tool_config.handler
             result = handler(**args)
+            
+            # 如果是协程（异步函数），需要 await
+            if asyncio.iscoroutine(result):
+                result = await result
             
             # Shell 工具特殊处理：刷新终端 chunk
             if tool_config.category == "shell":
@@ -431,15 +507,21 @@ class Paw:
                     # 默认视为成功（包括read_file返回的文件内容）
                     return {"success": True, "result": result}
             elif isinstance(result, dict):
-                # 如果已经是字典格式（execute_command, run_script）
-                # 转换为统一的字符串结果
+                # 如果已经是字典格式
                 if result.get("success"):
-                    output = result.get("stdout", "")
+                    # 优先使用 result 字段，其次 stdout，最后序列化整个字典
+                    output = result.get("result") or result.get("stdout")
                     if output:
                         return {"success": True, "result": output}
                     else:
-                        success_msg = ToolPrompts.get_error_messages()["command_success"]
-                        return {"success": True, "result": success_msg}
+                        # 将整个结果字典序列化为 JSON 字符串（Web 工具等）
+                        import json
+                        result_copy = {k: v for k, v in result.items() if k != "success"}
+                        if result_copy:
+                            return {"success": True, "result": json.dumps(result_copy, ensure_ascii=False, indent=2)}
+                        else:
+                            success_msg = ToolPrompts.get_error_messages()["command_success"]
+                            return {"success": True, "result": success_msg}
                 else:
                     default_error = ToolPrompts.get_error_messages()["unknown_error"]
                     error = result.get("error") or result.get("stderr", default_error)
@@ -706,44 +788,57 @@ class Paw:
                 if deleted_count > 0:
                     current_index = max(0, len(self.chunk_manager.get_editable_chunks()) - 1)
         
-        # 退出编辑模式，清屏恢复主界面
-        self.ui.clear_screen()
-        self.ui.print_welcome()
-        self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
+        # 退出编辑模式，备用屏幕已自动恢复主屏幕
+        # 重新渲染对话历史，同步编辑后的内容到主屏幕
+        self.ui.refresh_conversation_history(
+            self.chunk_manager.chunks,
+            self.model,
+            self.autostatus.current_state if self.autostatus else None
+        )
     
-    async def _select_model(self) -> str:
-        """选择模型"""
-        self.ui.show_model_checking()
-        models = await self._fetch_available_models()
+    async def _select_model(self, use_alternate_screen: bool = False) -> str:
+        """选择模型
         
-        if not models:
-            self.ui.show_model_input_prompt()
+        Args:
+            use_alternate_screen: 是否使用备用屏幕（运行时切换模型时为 True）
+        """
+        if use_alternate_screen:
+            self.ui.enter_alternate_screen()
+        
+        try:
+            models = await self._fetch_available_models()
+            
+            if not models:
+                self.ui.show_model_input_prompt()
+                while True:
+                    model_name = self.ui.get_input("模型名称 (如 glm-4-flash): ")
+                    if model_name:
+                        return model_name
+                    self.ui.print_error("模型名称不能为空")
+            
+            self.ui.show_model_list(models)
+            
+            # 让用户选择
+            status_msgs = UIPrompts.get_status_messages()
             while True:
-                model_name = self.ui.get_input("模型名称 (如 glm-4-flash): ")
-                if model_name:
-                    return model_name
-                self.ui.print_error("模型名称不能为空")
-        
-        self.ui.show_model_list(models)
-        
-        # 让用户选择
-        status_msgs = UIPrompts.get_status_messages()
-        while True:
-            try:
-                choice = self.ui.get_model_choice(status_msgs["model_prompt"])
-                if not choice:
+                try:
+                    choice = self.ui.get_model_choice(status_msgs["model_prompt"])
+                    if not choice:
+                        return models[0]
+                    
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(models):
+                        return models[idx]
+                    else:
+                        self.ui.print_error(status_msgs["invalid_number"])
+                except ValueError:
+                    self.ui.print_error(status_msgs["please_enter_number"])
+                except KeyboardInterrupt:
+                    self.ui.print_dim(status_msgs["using_first_model"])
                     return models[0]
-                
-                idx = int(choice) - 1
-                if 0 <= idx < len(models):
-                    return models[idx]
-                else:
-                    self.ui.print_error(status_msgs["invalid_number"])
-            except ValueError:
-                self.ui.print_error(status_msgs["please_enter_number"])
-            except KeyboardInterrupt:
-                self.ui.print_dim(status_msgs["using_first_model"])
-                return models[0]
+        finally:
+            if use_alternate_screen:
+                self.ui.leave_alternate_screen()
     
     async def run(self):
         """主运行循环"""
@@ -761,6 +856,9 @@ class Paw:
         # 启动横幅
         self.ui.print_welcome()
         self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
+        
+        # 标记对话区域起始位置（用于编辑后重渲染）
+        self.ui.mark_conversation_start()
         
         # 主循环
         while True:
@@ -803,9 +901,8 @@ class Paw:
                     continue
                 
                 if user_input == '/model':
-                    # 重新选择模型
-                    self.ui.print_dim(f"当前模型: {self.model}")
-                    new_model = await self._select_model()
+                    # 重新选择模型（使用备用屏幕，退出后恢复对话历史）
+                    new_model = await self._select_model(use_alternate_screen=True)
                     self.model = new_model
                     self.ui.show_model_selected(self.model)
                     continue

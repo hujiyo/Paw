@@ -25,6 +25,23 @@ terminal:
   # 字符编码
   encoding: 'utf-8'
 
+# Web 工具配置
+web:
+  # 搜索引擎: duckduckgo (免费，无需 API Key)
+  # 未来可扩展: google, bing (需要 API Key)
+  search_engine: 'duckduckgo'
+  
+  # 搜索结果数量（默认5条）
+  max_results: 5
+  
+  # 每页最大字节数 (4KB)
+  page_size: 4096
+  
+  # 使用 Jina Reader 代理获取网页（支持 JS 动态渲染）
+  # true: 通过 r.jina.ai 获取（推荐，免费，支持 SPA）
+  # false: 直接获取（仅支持静态页面）
+  use_jina_reader: true
+
 # 系统配置
 system:
   # 上下文窗口大小（token）

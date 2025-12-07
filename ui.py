@@ -8,6 +8,7 @@ UI系统 - Claude Code 风格重构版
 import os
 import sys
 import json
+import re
 import shutil
 from datetime import datetime
 from typing import Optional, Dict, List, Any
@@ -111,11 +112,98 @@ class UI:
         
         # 当前行号跟踪（用于 gotoxy 定位）
         self._current_row = 1
+        
+        # 主屏幕对话区域起始行号（logo 和状态栏之后）
+        # 用于编辑后重新渲染对话历史
+        self._conversation_start_row = 1
 
     def clear_screen(self):
         """清屏并复位光标"""
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
+    
+    def enter_alternate_screen(self):
+        """进入备用屏幕缓冲区（用于临时界面，如编辑器、模型选择等）
+        
+        退出后会自动恢复到原来的主屏幕内容，就像 vim/htop 那样
+        """
+        sys.stdout.write("\033[?1049h")  # 切换到备用屏幕
+        sys.stdout.write("\033[2J\033[H")  # 清屏并移动光标到左上角
+        sys.stdout.flush()
+    
+    def leave_alternate_screen(self):
+        """离开备用屏幕缓冲区，恢复主屏幕"""
+        sys.stdout.write("\033[?1049l")  # 返回主屏幕
+        sys.stdout.flush()
+    
+    def clear_from_row(self, row: int):
+        """清除从指定行到屏幕底部的所有内容
+        
+        Args:
+            row: 起始行号 (1-based)
+        """
+        self.move_cursor(row, 1)
+        sys.stdout.write("\033[J")  # 清除从光标到屏幕底部
+        sys.stdout.flush()
+    
+    def scroll_up(self, lines: int = 1):
+        """向上滚动屏幕"""
+        sys.stdout.write(f"\033[{lines}S")
+        sys.stdout.flush()
+    
+    def get_cursor_position(self) -> tuple:
+        """获取当前光标位置
+        
+        Returns:
+            (row, col) 元组，1-based
+        """
+        # 发送查询序列
+        sys.stdout.write("\033[6n")
+        sys.stdout.flush()
+        
+        # 读取响应（格式: ESC[row;colR）
+        if sys.platform == "win32":
+            import msvcrt
+            response = ""
+            while True:
+                ch = msvcrt.getwch()
+                response += ch
+                if ch == 'R':
+                    break
+        else:
+            import termios
+            import tty
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                response = ""
+                while True:
+                    ch = sys.stdin.read(1)
+                    response += ch
+                    if ch == 'R':
+                        break
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        
+        # 解析响应
+        try:
+            # 格式: \x1b[row;colR
+            match = re.search(r'\[(\d+);(\d+)R', response)
+            if match:
+                return (int(match.group(1)), int(match.group(2)))
+        except:
+            pass
+        return (1, 1)
+    
+    def mark_conversation_start(self):
+        """标记对话区域的起始位置（在 logo 和状态栏之后调用）"""
+        row, _ = self.get_cursor_position()
+        self._conversation_start_row = row
+    
+    def get_conversation_start_row(self) -> int:
+        """获取对话区域的起始行号"""
+        return self._conversation_start_row
 
     def move_cursor(self, row: int, col: int):
         """移动光标到指定位置 (1-based)"""
@@ -274,8 +362,6 @@ class UI:
         
         # 第二行可用宽度：80 - 6(缩进 "    ⎿ ")
         max_line2_width = self.WIDTH - 6
-        if len(line2) > max_line2_width:
-            line2 = line2[:max_line2_width - 3] + "..."
         
         if success:
             circle = f"{self.COLORS['success']}●{Style.RESET_ALL}"
@@ -286,7 +372,18 @@ class UI:
             else:
                 sys.stdout.write(f"\r{circle} {self.COLORS['tool_name']}{tool_name}{Style.RESET_ALL} {self.COLORS['dim']}{line1}{Style.RESET_ALL}\n")
             if has_line2 and line2:
-                sys.stdout.write(f"    {self.COLORS['dim']}⎿ {line2}{Style.RESET_ALL}\n")
+                # 支持多行显示
+                sub_lines = line2.split('\n')
+                for i, sub_line in enumerate(sub_lines):
+                    # 如果行以 │ 开头，保留原样（用于连接线）
+                    if sub_line.startswith('│'):
+                        if len(sub_line) > max_line2_width:
+                            sub_line = sub_line[:max_line2_width - 3] + "..."
+                        sys.stdout.write(f"    {self.COLORS['dim']}{sub_line}{Style.RESET_ALL}\n")
+                    else:
+                        if len(sub_line) > max_line2_width:
+                            sub_line = sub_line[:max_line2_width - 3] + "..."
+                        sys.stdout.write(f"    {self.COLORS['dim']}⎿ {sub_line}{Style.RESET_ALL}\n")
         else:
             circle = f"{self.COLORS['error']}●{Style.RESET_ALL}"
             sys.stdout.write(f"\r{circle} {self.COLORS['tool_name']}{tool_name}{Style.RESET_ALL}\n")
@@ -511,15 +608,55 @@ class UI:
         # 流式输出不截断，让终端自然换行
         print(f"{self.COLORS['assistant_text']}{text}{Style.RESET_ALL}", end=end, flush=flush)
 
-    # ==================== 模型选择界面 ====================
+    # ==================== 对话历史重渲染 ====================
     
-    def show_model_checking(self):
-        """显示正在检测模型"""
-        self.print_dim("检测可用模型...")
+    def refresh_conversation_history(self, chunks: List, model: str = None, autostatus: dict = None):
+        """从对话起始位置重新渲染整个对话历史
+        
+        用于编辑对话后同步更新主屏幕显示
+        
+        Args:
+            chunks: ChunkManager 的 chunks 列表
+            model: 当前模型名称（用于状态栏）
+            autostatus: AutoStatus 状态（用于状态栏）
+        """
+        from chunk_system import ChunkType
+        
+        # 移动到对话起始位置并清除之后的所有内容
+        self.clear_from_row(self._conversation_start_row)
+        
+        # 重新渲染每个 chunk（保持与原始打印一致的格式）
+        for chunk in chunks:
+            if chunk.chunk_type == ChunkType.USER:
+                # 用户消息：带 USER 徽章
+                header = self.format_message_header('user')
+                print(f"{header}{self.COLORS['user_text']}{chunk.content}{Style.RESET_ALL}")
+                
+            elif chunk.chunk_type == ChunkType.ASSISTANT:
+                # AI 回复：直接打印内容，无徽章（与流式输出一致）
+                print(f"{self.COLORS['assistant_text']}{chunk.content}{Style.RESET_ALL}")
+                
+            elif chunk.chunk_type == ChunkType.TOOL_CALL:
+                # 工具调用
+                content = chunk.content
+                if ':' in content:
+                    tool_name = content.split(':')[0].strip()
+                else:
+                    tool_name = content[:30] if len(content) > 30 else content
+                circle = f"{self.COLORS['success']}●{Style.RESET_ALL}"
+                print(f"{circle} {self.COLORS['tool_name']}{tool_name}{Style.RESET_ALL}")
+                
+            elif chunk.chunk_type == ChunkType.TOOL_RESULT:
+                # 工具结果
+                result_preview = chunk.content.replace('\n', ' ')[:50]
+                if len(chunk.content) > 50:
+                    result_preview += "..."
+                print(f"    {self.COLORS['dim']}⎿ {result_preview}{Style.RESET_ALL}")
 
+    # ==================== 模型选择界面 ====================
     def show_model_list(self, models: List[str]):
         """显示可用模型列表"""
-        self.print_dim(f"\n可用模型 ({len(models)}):")
+        self.print_dim(f"可用模型 ({len(models)}):")
         # 计算模型名最大宽度：80 - 5(缩进+序号+点+空格)
         max_model_width = self.WIDTH - 6
         for i, model in enumerate(models, 1):
@@ -651,11 +788,12 @@ class UI:
             ChunkType.THOUGHT: ('MIND', Fore.CYAN),
         }
         
+        self.enter_alternate_screen()  # 进入备用屏幕
         self.hide_cursor()  # 隐藏光标，更清爽
         
         try:
             while True:
-                # 清屏并显示标题
+                # 清屏并显示标题（在备用屏幕内）
                 self.clear_screen()
                 print()
                 title = "═══════════════════ 对话编辑器 ═══════════════════"
@@ -791,6 +929,7 @@ class UI:
         
         finally:
             self.show_cursor()  # 确保退出时恢复光标
+            self.leave_alternate_screen()  # 返回主屏幕
         
         return ('quit', -1, None)
     
@@ -800,6 +939,7 @@ class UI:
         Returns:
             编辑后的新内容，如果取消则返回 None
         """
+        # 注意：此时已经在备用屏幕中，只需清屏
         self.clear_screen()
         print()
         print(f"{self.COLORS['dim']}═══════════════════ 编辑内容 ═══════════════════{Style.RESET_ALL}")
@@ -837,6 +977,7 @@ class UI:
     
     def _show_chunk_full_content(self, chunk):
         """显示语块的完整内容"""
+        # 注意：此时已经在备用屏幕中，只需清屏
         self.clear_screen()
         print()
         print(f"{self.COLORS['dim']}═══════════════════ 完整内容 ═══════════════════{Style.RESET_ALL}")

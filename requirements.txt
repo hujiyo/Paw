@@ -4,3 +4,7 @@ tiktoken
 aiohttp
 requests
 colorama
+# Web 工具依赖
+ddgs>=8.0.0
+beautifulsoup4>=4.12.0
+html2text>=2024.2.26
