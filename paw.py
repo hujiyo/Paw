@@ -34,6 +34,7 @@ from web_tools import WebTools
 from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
 from ui import UI
+from memory import MemoryManager
 
 
 class Paw:
@@ -53,7 +54,6 @@ class Paw:
             workspace_dir: 工作目录路径，如果为None则从 PAW_HOME 环境变量读取
         """
         # 基础配置
-        self.name = "Paw"
         self.birth_time = datetime.now()
 
         # UI系统（统一入口）
@@ -61,6 +61,13 @@ class Paw:
 
         # 读取配置文件
         config = self._load_config()
+        
+        # 从配置读取身份信息（支持用户自定义名字和称谓）
+        # 变量命名: paw=Paw的名字, hujiyo=用户名, honey=用户昵称
+        identity = config.get('identity', {})
+        self.paw = identity.get('name', 'Paw')
+        self.hujiyo = identity.get('username', 'hujiyo')
+        self.honey = identity.get('honey', '老公')
 
         # 核心组件（传递配置和工作目录）
         self.tools = BaseTools(sandbox_dir=workspace_dir, config=config)
@@ -91,6 +98,17 @@ class Paw:
         
         # 上下文管理（使用语块系统，传入工具schema）
         self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+        
+        # 记忆系统（必须在 system_prompt 之前初始化）
+        # 使用多语言 embedding 模型，首次运行会自动下载
+        self.memory_manager = MemoryManager(
+            project_path=self.workspace_dir,
+            embedding_model="paraphrase-multilingual-MiniLM-L12-v2"
+        )
+        
+        # 会话ID（用于记忆整理）
+        import uuid
+        self.session_id = str(uuid.uuid4())[:8]
         
         # 系统提示词（第一人称）
         self.system_prompt = self._create_system_prompt()
@@ -131,14 +149,22 @@ class Paw:
         else:
             terminal_info = f"终端未启动 (工作目录: {terminal_status.get('working_directory')})"
         
-        # 使用提示词配置文件（传入工作目录名称）
-        main_prompt = SystemPrompts.get_main_system_prompt(self.name, self.birth_time, self.workspace_name)
+        # 使用提示词配置文件（传入工作目录名称和身份信息）
+        main_prompt = SystemPrompts.get_main_system_prompt(
+            self.paw, self.birth_time, self.workspace_name,
+            hujiyo=self.hujiyo, honey=self.honey
+        )
         
         # 替换终端状态占位符
         main_prompt = main_prompt.replace("{terminal_status}", terminal_info)
         
         # 组合基础系统提示词
         prompt = main_prompt
+        
+        # 注入记忆（如果有）
+        memory_prompt = self.memory_manager.get_memory_prompt()
+        if memory_prompt:
+            prompt = prompt + "\n\n" + memory_prompt
         
         # 如果需要，注入动态状态
         if include_state and self.autostatus is not None:
@@ -547,10 +573,76 @@ class Paw:
         status_msg = UIPrompts.get_status_messages()["history_cleared"]
         self.ui.print_dim(status_msg)
     
+    def _show_memory_status(self):
+        """显示记忆系统状态"""
+        stats = self.memory_manager.get_stats()
+        
+        print("\n" + "="*50)
+        print("记忆系统 (RAG)")
+        print("="*50)
+        
+        # 规则
+        rules = stats["rules"]
+        print(f"\n[规则] (永远注入)")
+        print(f"   用户规则: {rules['user_rules_count']} 条 ({self.memory_manager.user_rules_file})")
+        print(f"   项目规范: {rules['project_conventions_count']} 条 ({self.memory_manager.project_conventions_file})")
+        
+        # 对话存储
+        convs = stats["conversations"]
+        print(f"\n[对话记录] (RAG 检索)")
+        print(f"   总对话数: {convs['total_conversations']} 条")
+        print(f"   存储路径: {convs['storage_path']}")
+        print(f"   当前检索: {stats['recalled_count']} 条")
+        
+        # 显示规则内容
+        rules_prompt = self.memory_manager.get_rules_prompt()
+        if rules_prompt:
+            print(f"\n[规则内容]")
+            print("-"*50)
+            print(rules_prompt[:500])
+            if len(rules_prompt) > 500:
+                print(f"... (共 {len(rules_prompt)} 字符)")
+        
+        print("="*50 + "\n")
+    
+    def _save_conversation(self, user_message: str, assistant_message: str):
+        """保存一轮对话到记忆系统"""
+        if not user_message or not assistant_message:
+            return
+        # 过滤掉系统消息
+        if user_message.startswith("[系统"):
+            return
+        try:
+            self.memory_manager.save_conversation(
+                user_message=user_message,
+                assistant_message=assistant_message
+            )
+        except Exception as e:
+            self.ui.print_dim(f"[Memory] 保存对话失败: {e}")
+    
     async def process_input(self, user_input: str) -> str:
         """处理用户输入 - 完全符合OpenAI Function Calling标准"""
-        # 1. 添加用户输入到chunk_manager（唯一的上下文来源）
+        # 0. 添加用户输入
         self.chunk_manager.add_user_input(user_input)
+        
+        # 1. 生命值递减：衰减已有记忆
+        forgotten = self.memory_manager.tick_recall()
+        if forgotten:
+            self.ui.print_dim(f"[Memory] 遗忘了 {len(forgotten)} 条记忆")
+        
+        # 2. RAG 检索 + 唤醒记忆（生命值递减法）
+        # 新机制：高相关记忆持续被唤醒 -> 生命值高 -> 长期保留
+        #        临时记忆只被唤醒一次 -> 几轮后自然遗忘
+        if not user_input.startswith("[系统"):
+            new_recalled = self.memory_manager.recall(user_input, n_results=3, min_score=0.4)
+            if new_recalled:
+                self.ui.print_dim(f"[Memory] 新唤醒 {new_recalled} 条记忆")
+        
+        # 3. 获取当前活跃记忆的提示词
+        recalled_prefix = self.memory_manager.get_recalled_prompt()
+        if recalled_prefix:
+            stats = self.memory_manager.recall_manager.get_stats()
+            self.ui.print_dim(f"[Memory] 活跃记忆: {stats['active_count']} 条, {stats['capacity_ratio']}")
         
         # 2. 主循环（无步数限制）
         step_count = 0
@@ -570,6 +662,16 @@ class Paw:
             # 从chunk_manager获取上下文消息
             messages = self.chunk_manager.get_context_for_llm()
             
+            # 如果有活跃记忆，作为独立的 assistant 消息块添加（仅第一步）
+            # 注意：这是临时添加到 messages 中，不保存到历史记录
+            # 这样 LLM 不会学习模仿 <recall> 格式
+            use_recall = recalled_prefix and step_count == 1
+            if use_recall:
+                messages.append({
+                    "role": "assistant",
+                    "content": recalled_prefix
+                })
+            
             # 调用支持Function Calling的API
             assistant_message = await self._call_llm_with_tools(messages)
             
@@ -577,7 +679,7 @@ class Paw:
             content = assistant_message.get("content")
             tool_calls = assistant_message.get("tool_calls")
             
-            # 添加assistant消息到chunk_manager（包含tool_calls）
+            # 添加assistant消息到chunk_manager（不包含recall，保持历史干净）
             self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
             if content:
                 final_response = content
@@ -670,6 +772,10 @@ class Paw:
             else:
                 # 有工具调用，重置计数
                 no_action_count = 0
+        
+        # 保存对话到记忆系统
+        if final_response and not user_input.startswith("[系统"):
+            self._save_conversation(user_input, final_response)
         
         # 评估状态（使用独立的API调用）
         if self.autostatus is not None:
@@ -796,6 +902,82 @@ class Paw:
             self.autostatus.current_state if self.autostatus else None
         )
     
+    async def _enter_memory_edit_mode(self, search_keyword: str = None):
+        """进入记忆管理模式
+        
+        Args:
+            search_keyword: 搜索关键词（可选，用于过滤显示）
+        """
+        current_index = 0
+        
+        while True:
+            # 获取记忆列表
+            if search_keyword:
+                # 使用 RAG 搜索
+                conversations = self.memory_manager.conversation_store.search(
+                    query=search_keyword,
+                    n_results=50,
+                    min_score=0.2
+                )
+            else:
+                # 列出所有记忆
+                conversations = self.memory_manager.conversation_store.list_all(limit=100)
+            
+            if not conversations and not search_keyword:
+                self.ui.print_dim("没有记忆记录")
+                return
+            
+            # 确保索引有效
+            if current_index >= len(conversations):
+                current_index = max(0, len(conversations) - 1)
+            
+            # 显示记忆管理界面
+            action, doc_id, extra_data = self.ui.show_memory_editor(conversations, current_index)
+            
+            if action == 'quit':
+                break
+            
+            elif action == 'delete':
+                # 删除单条记忆
+                success = self.memory_manager.conversation_store.delete(doc_id)
+                self.ui.show_memory_result('delete', success)
+                if success and current_index > 0:
+                    current_index -= 1
+            
+            elif action == 'delete_batch':
+                # 批量删除
+                doc_ids = extra_data
+                deleted = self.memory_manager.conversation_store.delete_batch(doc_ids)
+                self.ui.show_memory_result('delete_batch', deleted > 0, f"(删除了 {deleted} 条)")
+                current_index = 0
+            
+            elif action == 'clean_duplicates':
+                # 清理重复记忆
+                duplicates = self.memory_manager.conversation_store.find_duplicates(threshold=0.9)
+                if not duplicates:
+                    self.ui.print_dim("没有发现重复记忆")
+                    continue
+                
+                # 每组保留第一条，删除其余
+                to_delete = []
+                for group in duplicates:
+                    to_delete.extend(group[1:])  # 保留第一条
+                
+                if to_delete:
+                    deleted = self.memory_manager.conversation_store.delete_batch(to_delete)
+                    self.ui.show_memory_result('clean_duplicates', deleted > 0, f"(清理了 {deleted} 条重复记忆)")
+                current_index = 0
+            
+            elif action == 'search':
+                # 搜索记忆
+                search_keyword = extra_data
+                current_index = 0
+                # 继续循环，使用新的搜索关键词
+        
+        # 退出记忆管理模式
+        if search_keyword:
+            self.ui.print_dim(f"已退出搜索模式")
+    
     async def _select_model(self, use_alternate_screen: bool = False) -> str:
         """选择模型
         
@@ -916,6 +1098,21 @@ class Paw:
                 if user_input == '/edit':
                     # 进入对话编辑模式
                     await self._enter_edit_mode()
+                    continue
+                
+                if user_input == '/memory edit':
+                    # 进入记忆管理模式
+                    await self._enter_memory_edit_mode()
+                    continue
+                
+                if user_input == '/memory':
+                    # 显示记忆系统状态
+                    self._show_memory_status()
+                    continue
+                
+                if user_input == '/save':
+                    # /save 命令已废弃，对话会自动保存
+                    self.ui.print_dim("[提示] 对话已自动保存，无需手动操作")
                     continue
                 
                 if user_input.startswith('/'):

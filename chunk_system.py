@@ -130,6 +130,31 @@ class ChunkManager:
         """添加记忆（注入）"""
         return self.add_chunk(memory, ChunkType.MEMORY)
     
+    def update_or_add_memory(self, memory: str) -> Chunk:
+        """更新或添加记忆 chunk
+        
+        如果已存在 MEMORY chunk，则替换其内容；否则新建。
+        确保上下文中只有一个记忆 chunk。
+        """
+        for chunk in self.chunks:
+            if chunk.chunk_type == ChunkType.MEMORY:
+                old_tokens = chunk.tokens
+                chunk.content = memory
+                chunk.tokens = 0
+                chunk.estimate_tokens()
+                self.current_tokens += chunk.tokens - old_tokens
+                return chunk
+        return self.add_memory(memory)
+    
+    def remove_memory(self):
+        """移除记忆 chunk"""
+        for i, chunk in enumerate(self.chunks):
+            if chunk.chunk_type == ChunkType.MEMORY:
+                self.current_tokens -= chunk.tokens
+                self.chunks.pop(i)
+                return True
+        return False
+    
     def add_user_input(self, input_text: str) -> Chunk:
         """添加用户输入"""
         return self.add_chunk(input_text, ChunkType.USER)

@@ -1099,3 +1099,218 @@ class UI:
             self.print_success(f"✓ {action_name}成功 {detail}")
         else:
             self.print_error(f"✗ 操作失败 {detail}")
+
+    # ==================== 记忆管理界面 ====================
+    
+    def show_memory_editor(self, conversations: List[Dict], current_index: int = 0) -> tuple:
+        """显示记忆管理界面
+        
+        Returns:
+            (action, doc_id, extra_data)
+        """
+        self.enter_alternate_screen()
+        self.hide_cursor()
+        selected_ids = set()
+        multi_select_mode = False
+        
+        try:
+            while True:
+                self.clear_screen()
+                print()
+                title = "═══════════════════ 记忆管理 ═══════════════════"
+                print(f"{self.COLORS['dim']}{self.center_text(title)}{Style.RESET_ALL}")
+                print()
+                
+                total = len(conversations)
+                selected_count = len(selected_ids)
+                stats = f"共 {total} 条记忆"
+                if multi_select_mode:
+                    stats += f" | 已选 {selected_count} 条 | [多选模式]"
+                print(f"{self.COLORS['dim']}{self.center_text(stats)}{Style.RESET_ALL}")
+                print()
+                
+                if multi_select_mode:
+                    hint = "↑↓选择 │ Space勾选 │ D删除已选 │ A全选 │ M退出多选 │ Q退出"
+                else:
+                    hint = "↑↓选择 │ V查看 │ D删除 │ M多选 │ C清理重复 │ /搜索 │ Q退出"
+                print(f"{self.COLORS['dim']}{self.center_text(hint)}{Style.RESET_ALL}")
+                print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+                print()
+                
+                if not conversations:
+                    print(f"{self.COLORS['dim']}  (没有记忆记录){Style.RESET_ALL}")
+                else:
+                    max_visible = 10
+                    start_idx = max(0, current_index - max_visible // 2)
+                    end_idx = min(len(conversations), start_idx + max_visible)
+                    if end_idx - start_idx < max_visible:
+                        start_idx = max(0, end_idx - max_visible)
+                    
+                    if start_idx > 0:
+                        print(f"{self.COLORS['dim']}  ↑ 还有 {start_idx} 条...{Style.RESET_ALL}")
+                    
+                    for i in range(start_idx, end_idx):
+                        conv = conversations[i]
+                        is_selected = (i == current_index)
+                        is_checked = conv['id'] in selected_ids
+                        
+                        user_msg = conv.get('metadata', {}).get('user_message', '')[:40]
+                        timestamp = conv.get('metadata', {}).get('timestamp', '')[:16]
+                        
+                        checkbox = "[✓]" if is_checked else "[ ]"
+                        if not multi_select_mode:
+                            checkbox = "   "
+                        
+                        max_msg_width = self.WIDTH - 25
+                        if len(user_msg) > max_msg_width:
+                            user_msg = user_msg[:max_msg_width - 3] + "..."
+                        
+                        if is_selected:
+                            marker = f"{Fore.CYAN}›{Style.RESET_ALL}"
+                            cb = f"{Fore.GREEN}[✓]{Style.RESET_ALL}" if is_checked else checkbox
+                            line = f" {marker} {cb} {self.COLORS['bright']}{user_msg:<{max_msg_width}}{Style.RESET_ALL} {self.COLORS['dim']}{timestamp}{Style.RESET_ALL}"
+                        else:
+                            cb = f"{Fore.GREEN}[✓]{Style.RESET_ALL}" if is_checked else checkbox
+                            line = f"   {cb} {self.COLORS['dim']}{user_msg:<{max_msg_width}} {timestamp}{Style.RESET_ALL}"
+                        print(line)
+                    
+                    if end_idx < len(conversations):
+                        print(f"{self.COLORS['dim']}  ↓ 还有 {len(conversations) - end_idx} 条...{Style.RESET_ALL}")
+                
+                print()
+                print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+                
+                if conversations and 0 <= current_index < len(conversations):
+                    conv = conversations[current_index]
+                    metadata = conv.get('metadata', {})
+                    print(f"\n{self.COLORS['info']}ID:{Style.RESET_ALL} {conv['id']} | {self.COLORS['info']}项目:{Style.RESET_ALL} {metadata.get('project', '(无)')}")
+                    
+                    user_msg = metadata.get('user_message', '')
+                    if user_msg:
+                        lines = user_msg.split('\n')[:2]
+                        print(f"{self.COLORS['user_text']}用户:{Style.RESET_ALL}")
+                        for line in lines:
+                            if len(line) > self.CONTENT_WIDTH - 4:
+                                line = line[:self.CONTENT_WIDTH - 7] + "..."
+                            print(f"  {self.COLORS['dim']}{line}{Style.RESET_ALL}")
+                
+                try:
+                    key = self._get_key()
+                    
+                    if not conversations:
+                        if key in ['q', 'Q', 'ESC']:
+                            return ('quit', None, None)
+                        continue
+                    
+                    conv = conversations[current_index]
+                    
+                    if key == 'UP' and current_index > 0:
+                        current_index -= 1
+                    elif key == 'DOWN' and current_index < len(conversations) - 1:
+                        current_index += 1
+                    elif key == 'PAGEUP':
+                        current_index = max(0, current_index - 5)
+                    elif key == 'PAGEDOWN':
+                        current_index = min(len(conversations) - 1, current_index + 5)
+                    elif key == 'HOME':
+                        current_index = 0
+                    elif key == 'END':
+                        current_index = len(conversations) - 1
+                    elif key == ' ' and multi_select_mode:
+                        if conv['id'] in selected_ids:
+                            selected_ids.remove(conv['id'])
+                        else:
+                            selected_ids.add(conv['id'])
+                        if current_index < len(conversations) - 1:
+                            current_index += 1
+                    elif key in ['a', 'A'] and multi_select_mode:
+                        if len(selected_ids) == len(conversations):
+                            selected_ids.clear()
+                        else:
+                            selected_ids = {c['id'] for c in conversations}
+                    elif key in ['m', 'M']:
+                        multi_select_mode = not multi_select_mode
+                        if not multi_select_mode:
+                            selected_ids.clear()
+                    elif key in ['d', 'D', 'DELETE']:
+                        self.show_cursor()
+                        if multi_select_mode and selected_ids:
+                            if self._confirm_action(f"确定删除选中的 {len(selected_ids)} 条记忆吗？"):
+                                return ('delete_batch', None, list(selected_ids))
+                        else:
+                            if self._confirm_action("确定删除这条记忆吗？"):
+                                return ('delete', conv['id'], None)
+                        self.hide_cursor()
+                    elif key in ['v', 'V', 'ENTER']:
+                        self.show_cursor()
+                        self._show_memory_full_content(conv)
+                        self.hide_cursor()
+                    elif key in ['c', 'C'] and not multi_select_mode:
+                        return ('clean_duplicates', None, None)
+                    elif key == '/' and not multi_select_mode:
+                        self.show_cursor()
+                        keyword = self._get_search_keyword()
+                        self.hide_cursor()
+                        if keyword:
+                            return ('search', None, keyword)
+                    elif key in ['q', 'Q', 'ESC']:
+                        return ('quit', None, None)
+                        
+                except KeyboardInterrupt:
+                    return ('quit', None, None)
+        finally:
+            self.show_cursor()
+            self.leave_alternate_screen()
+        
+        return ('quit', None, None)
+    
+    def _show_memory_full_content(self, conv: Dict):
+        """显示记忆的完整内容"""
+        self.clear_screen()
+        print()
+        print(f"{self.COLORS['dim']}═══════════════════ 记忆详情 ═══════════════════{Style.RESET_ALL}")
+        print()
+        
+        metadata = conv.get('metadata', {})
+        print(f"{self.COLORS['info']}ID:{Style.RESET_ALL} {conv['id']}")
+        print(f"{self.COLORS['info']}项目:{Style.RESET_ALL} {metadata.get('project', '(无)')}")
+        print(f"{self.COLORS['info']}时间:{Style.RESET_ALL} {metadata.get('timestamp', '(未知)')}")
+        print()
+        print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+        
+        user_msg = metadata.get('user_message', '')
+        assistant_msg = metadata.get('assistant_message', '')
+        
+        print(f"\n{self.COLORS['user_text']}[用户]{Style.RESET_ALL}")
+        print(user_msg or "(无内容)")
+        
+        print(f"\n{self.COLORS['assistant_text']}[AI]{Style.RESET_ALL}")
+        print(assistant_msg or "(无内容)")
+        
+        print()
+        print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+        print(f"{self.COLORS['dim']}按任意键返回...{Style.RESET_ALL}", end='', flush=True)
+        self._get_key()
+    
+    def _get_search_keyword(self) -> Optional[str]:
+        """获取搜索关键词"""
+        print()
+        print(f"{self.COLORS['dim']}输入搜索关键词 (回车取消):{Style.RESET_ALL}")
+        try:
+            keyword = input(f"{self.COLORS['user_text']}> {Style.RESET_ALL}").strip()
+            return keyword if keyword else None
+        except KeyboardInterrupt:
+            return None
+    
+    def show_memory_result(self, action: str, success: bool, detail: str = ""):
+        """显示记忆操作结果"""
+        if success:
+            action_names = {
+                'delete': '删除',
+                'delete_batch': '批量删除',
+                'clean_duplicates': '清理重复'
+            }
+            action_name = action_names.get(action, action)
+            self.print_success(f"✓ {action_name}成功 {detail}")
+        else:
+            self.print_error(f"✗ 操作失败 {detail}")

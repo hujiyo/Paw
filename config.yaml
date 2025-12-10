@@ -1,5 +1,14 @@
 # Paw 核心配置文件
 
+# 身份配置
+identity:
+  # 用户给 Paw 起的昵称
+  name: "Paw"
+  # 用户名
+  username: "hujiyo"
+  # 用户昵称
+  honey: "老公"
+
 # API 配置
 api:
   # API密钥

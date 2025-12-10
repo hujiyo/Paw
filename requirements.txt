@@ -1,10 +1,15 @@
+# 核心依赖
 requests>=2.31.0
-pyyaml
-tiktoken
-aiohttp
-requests
-colorama
+pyyaml>=6.0
+aiohttp>=3.9.0
+colorama>=0.4.6
+tiktoken>=0.5.0
+
 # Web 工具依赖
 ddgs>=8.0.0
 beautifulsoup4>=4.12.0
 html2text>=2024.2.26
+
+# 记忆系统依赖 (RAG)
+chromadb>=1.0.0
+sentence-transformers>=3.0.0
