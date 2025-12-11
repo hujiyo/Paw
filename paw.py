@@ -35,6 +35,7 @@ from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
 from ui import UI
 from memory import MemoryManager
+from branch_executor import AutoContextManager
 
 
 class Paw:
@@ -109,6 +110,9 @@ class Paw:
         # 会话ID（用于记忆整理）
         import uuid
         self.session_id = str(uuid.uuid4())[:8]
+        
+        # 上下文分支管理器（延迟初始化，等API配置确定后）
+        self.context_manager = None
         
         # 系统提示词（第一人称）
         self.system_prompt = self._create_system_prompt()
@@ -978,6 +982,82 @@ class Paw:
         if search_keyword:
             self.ui.print_dim(f"已退出搜索模式")
     
+    async def _enter_context_branch_mode(self, instruction: str = None):
+        """进入上下文编辑分支模式
+        
+        Args:
+            instruction: 自定义编辑指令（可选）
+        """
+        if self.context_manager is None:
+            self.ui.print_error("上下文管理器未初始化")
+            return
+        
+        self.ui.print_dim("\n" + "="*50)
+        self.ui.print_dim("进入上下文编辑分支...")
+        self.ui.print_dim("="*50)
+        
+        # 显示当前状态
+        current_tokens = self.chunk_manager.current_tokens
+        max_tokens = self.chunk_manager.max_tokens
+        usage_ratio = current_tokens / max_tokens * 100
+        
+        self.ui.print_dim(f"当前Token使用: {current_tokens}/{max_tokens} ({usage_ratio:.1f}%)")
+        self.ui.print_dim(f"当前Chunk数量: {len(self.chunk_manager.chunks)}")
+        
+        # 执行优化
+        try:
+            result = await self.context_manager.manual_optimize(instruction)
+            
+            if result.get("triggered"):
+                self.ui.print_dim("\n[优化结果]")
+                self.ui.print_dim(f"  触发原因: {result.get('trigger_reason', 'manual')}")
+                self.ui.print_dim(f"  迭代次数: {result.get('iterations', 0)}")
+                self.ui.print_dim(f"  操作数量: {result.get('operations', 0)}")
+                self.ui.print_dim(f"  已提交: {result.get('committed', False)}")
+                self.ui.print_dim(f"  节省Token: {result.get('tokens_saved', 0)}")
+                
+                # 显示优化后状态
+                new_tokens = self.chunk_manager.current_tokens
+                new_ratio = new_tokens / max_tokens * 100
+                self.ui.print_dim(f"\n优化后Token使用: {new_tokens}/{max_tokens} ({new_ratio:.1f}%)")
+            else:
+                self.ui.print_dim(f"\n未执行优化: {result.get('reason', result.get('error', '未知'))}")
+                
+        except Exception as e:
+            self.ui.print_error(f"上下文优化失败: {e}")
+            if self.show_debug:
+                import traceback
+                traceback.print_exc()
+        
+        self.ui.print_dim("="*50 + "\n")
+    
+    def _show_context_stats(self):
+        """显示上下文管理统计信息"""
+        if self.context_manager is None:
+            self.ui.print_error("上下文管理器未初始化")
+            return
+        
+        stats = self.context_manager.get_stats()
+        
+        print("\n" + "="*50)
+        print("上下文管理统计")
+        print("="*50)
+        print(f"自动触发次数: {stats['auto_triggers']}")
+        print(f"手动触发次数: {stats['manual_triggers']}")
+        print(f"累计节省Token: {stats['total_tokens_saved']}")
+        
+        if stats['branch_history']:
+            print(f"\n最近分支历史 (最多5条):")
+            for i, record in enumerate(stats['branch_history'][-5:], 1):
+                print(f"  {i}. {record['timestamp'][:19]} - {record['trigger']} - {record['operations']}次操作")
+        
+        # 当前状态
+        current_tokens = self.chunk_manager.current_tokens
+        max_tokens = self.chunk_manager.max_tokens
+        print(f"\n当前Token使用: {current_tokens}/{max_tokens} ({current_tokens/max_tokens*100:.1f}%)")
+        print(f"当前Chunk数量: {len(self.chunk_manager.chunks)}")
+        print("="*50 + "\n")
+    
     async def _select_model(self, use_alternate_screen: bool = False) -> str:
         """选择模型
         
@@ -1034,6 +1114,19 @@ class Paw:
         # 现在模型已确定，初始化AutoStatus
         if self.autostatus is None:
             self.autostatus = AutoStatus(self.api_url, self.model, self.api_key)
+        
+        # 初始化上下文分支管理器
+        if self.context_manager is None:
+            self.context_manager = AutoContextManager(
+                chunk_manager=self.chunk_manager,
+                system_prompt_getter=lambda: self.system_prompt,
+                api_url=self.api_url,
+                model=self.model,
+                api_key=self.api_key,
+                ui_callback=self.ui.print_dim,
+                token_threshold=0.7,  # 70% token使用率触发
+                turn_threshold=20     # 20轮对话触发
+            )
         
         # 启动横幅
         self.ui.print_welcome()
@@ -1113,6 +1206,16 @@ class Paw:
                 if user_input == '/save':
                     # /save 命令已废弃，对话会自动保存
                     self.ui.print_dim("[提示] 对话已自动保存，无需手动操作")
+                    continue
+                
+                if user_input == '/context' or user_input == '/ctx':
+                    # 手动触发上下文优化
+                    await self._enter_context_branch_mode()
+                    continue
+                
+                if user_input == '/context stats':
+                    # 显示上下文管理统计
+                    self._show_context_stats()
                     continue
                 
                 if user_input.startswith('/'):
