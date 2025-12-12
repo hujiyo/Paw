@@ -19,12 +19,13 @@ from urllib.parse import quote_plus, urlparse
 from bs4 import BeautifulSoup
 import html2text
 
+from call import LLMClient, LLMConfig
+
 
 class WebTools:
     """
     Web 工具类 - 提供搜索和网页阅读功能
     """
-    
     def __init__(self, config: dict, api_url: str, model_getter, api_key: Optional[str] = None):
         """
         初始化 Web 工具
@@ -402,45 +403,36 @@ class WebTools:
 总结:"""
         
         try:
-            headers = {"Content-Type": "application/json"}
-            if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
+            llm = LLMClient(LLMConfig(
+                api_url=self.api_url,
+                model=self.model,
+                api_key=self.api_key,
+                timeout=15
+            ))
             
-            # 禁用推理模式，直接输出摘要
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": "你是一个精简的摘要生成器。只输出10-30字的中文摘要，不要任何其他内容。"},
-                    {"role": "user", "content": prompt}
-                ],
-                "thinking": "disabled",  # 禁用推理模式
-                "temperature": 0.3,
-                "max_tokens": 50
-            }
+            messages = [
+                {"role": "system", "content": "你是一个精简的摘要生成器。只输出10-30字的中文摘要，不要任何其他内容。"},
+                {"role": "user", "content": prompt}
+            ]
             
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.api_url, 
-                    headers=headers, 
-                    json=payload, 
-                    timeout=aiohttp.ClientTimeout(total=15)  # 禁用推理后更快
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        # 直接提取 content，不管 reasoning_content
-                        summary = result["choices"][0]["message"].get("content", "").strip()
-                        if summary:
-                            return summary[:30] if len(summary) > 30 else summary
-                        else:
-                            return self._simple_summary(content)
-                    else:
-                        return self._simple_summary(content)
+            response = await llm.chat(
+                messages,
+                temperature=0.3,
+                max_tokens=50,
+                extra_params={"thinking": "disabled"}  # 禁用推理模式
+            )
+            
+            if not response.is_error and response.content:
+                summary = response.content.strip()
+                return summary[:30] if len(summary) > 30 else summary
+            else:
+                return self._simple_summary(content)
                         
         except Exception as e:
             # 出错时使用简单摘要
             pass
         
-        # 兜底：确保返回非空
+        # 兆底：确保返回非空
         fallback = self._simple_summary(content)
         return fallback if fallback else f"第{page_num}页内容"
     
@@ -515,32 +507,3 @@ class WebTools:
             "success": True,
             "cleared_pages": count
         }
-
-
-# 测试代码
-if __name__ == "__main__":
-    async def test():
-        # 创建实例
-        web = WebTools(
-            config={"search_engine": "duckduckgo", "max_results": 3},
-            api_url="http://localhost:1234/v1/chat/completions",
-            model="test"
-        )
-        
-        print("=== 测试 search_web ===")
-        result = await web.search_web("Python asyncio tutorial")
-        print(f"搜索结果: {result}")
-        
-        if result["success"] and result["results"]:
-            url = result["results"][0]["url"]
-            print(f"\n=== 测试 load_url_content: {url} ===")
-            load_result = await web.load_url_content(url)
-            print(f"加载结果: {load_result}")
-            
-            if load_result["success"] and load_result["pages"]:
-                page_id = load_result["pages"][0]["page_id"]
-                print(f"\n=== 测试 read_page: {page_id} ===")
-                page_result = web.read_page(page_id)
-                print(f"页面内容前200字: {page_result.get('content', '')[:200]}")
-    
-    asyncio.run(test())

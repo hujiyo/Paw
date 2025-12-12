@@ -27,6 +27,9 @@ class ToolConfig:
     schema: Dict[str, Any]                 # OpenAI function calling schema
     handler: Callable                      # 执行函数引用
     
+    # === 动态激活控制 ===
+    enabled: bool = True                   # 是否启用（支持运行时动态切换）
+    
     # === 上下文策略 ===
     
     singleton_key: Optional[Callable] = None
@@ -71,7 +74,7 @@ class ToolRegistry:
     """
     工具注册表 - 单例模式
     
-    管理所有已注册的工具配置
+    管理所有已注册的工具配置，支持动态激活/卸载
     """
     
     _instance = None
@@ -90,18 +93,18 @@ class ToolRegistry:
     
     @classmethod
     def get(cls, name: str) -> Optional[ToolConfig]:
-        """获取工具配置"""
+        """获取工具配置（无论是否启用）"""
         return cls._tools.get(name)
     
     @classmethod
     def get_all(cls) -> Dict[str, ToolConfig]:
-        """获取所有工具配置"""
+        """获取所有工具配置（无论是否启用）"""
         return cls._tools.copy()
     
     @classmethod
     def get_schemas(cls) -> List[Dict[str, Any]]:
-        """获取所有工具的 OpenAI schema（用于 API 调用）"""
-        return [config.schema for config in cls._tools.values()]
+        """获取所有已启用工具的 OpenAI schema（用于 API 调用）"""
+        return [config.schema for config in cls._tools.values() if config.enabled]
     
     @classmethod
     def clear(cls) -> None:
@@ -112,12 +115,106 @@ class ToolRegistry:
     def is_registered(cls, name: str) -> bool:
         """检查工具是否已注册"""
         return name in cls._tools
+    
+    # === 动态激活/卸载 ===
+    
+    @classmethod
+    def enable(cls, name: str) -> bool:
+        """启用指定工具
+        
+        Args:
+            name: 工具名称
+            
+        Returns:
+            是否成功（工具不存在返回 False）
+        """
+        if name in cls._tools:
+            cls._tools[name].enabled = True
+            return True
+        return False
+    
+    @classmethod
+    def disable(cls, name: str) -> bool:
+        """禁用指定工具
+        
+        Args:
+            name: 工具名称
+            
+        Returns:
+            是否成功（工具不存在返回 False）
+        """
+        if name in cls._tools:
+            cls._tools[name].enabled = False
+            return True
+        return False
+    
+    @classmethod
+    def enable_only(cls, names: List[str]) -> None:
+        """只启用指定的工具，禁用其他所有工具
+        
+        Args:
+            names: 要启用的工具名称列表
+        """
+        for tool_name, config in cls._tools.items():
+            config.enabled = tool_name in names
+    
+    @classmethod
+    def enable_all(cls) -> None:
+        """启用所有工具"""
+        for config in cls._tools.values():
+            config.enabled = True
+    
+    @classmethod
+    def disable_all(cls) -> None:
+        """禁用所有工具"""
+        for config in cls._tools.values():
+            config.enabled = False
+    
+    @classmethod
+    def is_enabled(cls, name: str) -> bool:
+        """检查工具是否已启用
+        
+        Args:
+            name: 工具名称
+            
+        Returns:
+            是否启用（工具不存在也返回 False）
+        """
+        config = cls._tools.get(name)
+        return config.enabled if config else False
+    
+    @classmethod
+    def get_enabled_names(cls) -> List[str]:
+        """获取所有已启用工具的名称列表"""
+        return [name for name, config in cls._tools.items() if config.enabled]
+    
+    @classmethod
+    def get_disabled_names(cls) -> List[str]:
+        """获取所有已禁用工具的名称列表"""
+        return [name for name, config in cls._tools.items() if not config.enabled]
+    
+    @classmethod
+    def get_by_category(cls, category: str, enabled_only: bool = True) -> List[ToolConfig]:
+        """按分类获取工具
+        
+        Args:
+            category: 工具分类
+            enabled_only: 是否只返回已启用的工具
+            
+        Returns:
+            工具配置列表
+        """
+        return [
+            config for config in cls._tools.values()
+            if config.category == category and (not enabled_only or config.enabled)
+        ]
 
 
 def register_tool(
     name: str,
     schema: Dict[str, Any],
     handler: Callable,
+    enabled: bool = True,
     singleton_key: Optional[Callable] = None,
     max_instances: int = 0,
     max_call_pairs: int = 0,
@@ -131,6 +228,7 @@ def register_tool(
         name: 工具名称
         schema: OpenAI function schema
         handler: 执行函数
+        enabled: 是否默认启用（默认 True）
         singleton_key: 单例 key 生成函数（相同 key 覆盖）
         max_instances: tool_result 最大数量（仅删 result）
         max_call_pairs: 配对最大数量（同时删 call + result）
@@ -144,6 +242,7 @@ def register_tool(
         name=name,
         schema=schema,
         handler=handler,
+        enabled=enabled,
         singleton_key=singleton_key,
         max_instances=max_instances,
         max_call_pairs=max_call_pairs,
@@ -171,7 +270,6 @@ def key_constant(key: str) -> Callable:
 
 
 # === 常用的 result_transform 函数 ===
-
 def transform_to_summary(template: str) -> Callable:
     """
     将结果转换为摘要
@@ -185,7 +283,6 @@ def transform_to_summary(template: str) -> Callable:
         except KeyError:
             return template
     return _transform
-
 
 def transform_truncate(max_lines: int = 10, max_chars: int = 2000) -> Callable:
     """截断过长的结果"""
@@ -204,26 +301,3 @@ def transform_truncate(max_lines: int = 10, max_chars: int = 2000) -> Callable:
         
         return result
     return _transform
-
-
-if __name__ == "__main__":
-    # 简单测试
-    print("=== 工具注册系统测试 ===")
-    
-    # 模拟注册一个工具
-    test_config = register_tool(
-        name="test_tool",
-        schema={"type": "function", "function": {"name": "test_tool"}},
-        handler=lambda: "test",
-        singleton_key=key_constant("test"),
-        max_instances=3
-    )
-    
-    print(f"注册工具: {test_config.name}")
-    print(f"已注册: {ToolRegistry.is_registered('test_tool')}")
-    print(f"获取配置: {ToolRegistry.get('test_tool')}")
-    print(f"所有 schema: {ToolRegistry.get_schemas()}")
-    
-    # 清理
-    ToolRegistry.clear()
-    print("测试完成")

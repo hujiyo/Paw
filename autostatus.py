@@ -5,9 +5,10 @@ AutoStatus - 动态状态评估模块
 """
 
 import json
-import aiohttp
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+
+from call import LLMClient, LLMConfig
 
 
 class AutoStatus:
@@ -159,15 +160,8 @@ class AutoStatus:
     
     async def _call_api_for_state(self, prompt: str) -> Dict[str, Any]:
         """
-        调用API获取状态评估
+        调用API获取状态评估（使用统一的 LLMClient）
         """
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        
         # 系统提示词：明确角色和输出要求
         system_content = """你是一个JSON状态生成器。你的唯一任务是根据输入信息输出一个JSON对象。
 
@@ -180,83 +174,67 @@ class AutoStatus:
 示例输出：
 {"cognitive_load": "medium", "execution_mode": "executing", "confidence": 0.7, "recent_focus": "代码修复"}"""
 
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.2,  # 更低温度，保证稳定输出
-            "max_tokens": 150  # 稍微增加，避免截断
-        }
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": prompt}
+        ]
         
+        llm = LLMClient(LLMConfig(
+            api_url=self.api_url,
+            model=self.model,
+            api_key=self.api_key,
+            timeout=10
+        ))
+        
+        response = await llm.chat(
+            messages,
+            temperature=0.2,  # 更低温度，保证稳定输出
+            max_tokens=150
+        )
+        
+        if response.is_error:
+            raise Exception(f"API调用失败: {response.content}")
+        
+        content = response.content
+        
+        # 保存响应（调试用）
+        self.last_response = content
+        
+        # 检查content是否为空
+        if not content or not content.strip():
+            return self._auto_decay()
+        
+        # 解析JSON
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.api_url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise Exception(f"API调用失败 [{response.status}]: {error_text[:200]}")
-                    
-                    result = await response.json()
-                    
-                    # 检查响应结构
-                    if result is None:
-                        raise Exception("API返回了None响应")
-                    
-                    if "choices" not in result:
-                        raise Exception(f"API响应缺少choices字段，实际响应: {json.dumps(result, ensure_ascii=False)[:200]}")
-                    
-                    if not result["choices"]:
-                        raise Exception("API响应的choices数组为空")
-                    
-                    if "message" not in result["choices"][0]:
-                        raise Exception(f"choices[0]缺少message字段: {json.dumps(result['choices'][0], ensure_ascii=False)[:200]}")
-                    
-                    content = result["choices"][0]["message"].get("content")
-                    
-                    # 保存响应（调试用）
-                    self.last_response = content
-                    
-                    # 检查content是否为空
-                    if not content or not content.strip():
-                        # API返回空内容，使用自动衰减
-                        return self._auto_decay()
-                    
-                    # 解析JSON
-                    try:
-                        # 清理可能的markdown标记
-                        content = content.strip()
-                        json_text = content
-                        
-                        # 移除 markdown 代码块
-                        if "```" in content:
-                            parts = content.split("```")
-                            for part in parts:
-                                part = part.strip()
-                                if part.startswith("json"):
-                                    part = part[4:].strip()
-                                if part.startswith("{") and part.endswith("}"):
-                                    json_text = part
-                                    break
-                        
-                        # 查找第一个 { 和最后一个 }
-                        if not (json_text.startswith("{") and json_text.endswith("}")):
-                            start = json_text.find("{")
-                            end = json_text.rfind("}")
-                            if start != -1 and end != -1 and end > start:
-                                json_text = json_text[start:end+1]
-                        
-                        new_state = json.loads(json_text)
-                        new_state = self._validate_state(new_state)
-                        return new_state
-                        
-                    except (json.JSONDecodeError, ValueError, KeyError) as e:
-                        print(f"JSON解析失败: {content[:200]}")
-                        print(f"错误详情: {e}")
-                        return self._auto_decay()
-                        
-        except aiohttp.ClientError as e:
-            raise Exception(f"网络请求失败: {str(e)}. 请确认本地模型服务器 ({self.api_url}) 已启动")
+            content = content.strip()
+            json_text = content
+            
+            # 移除 markdown 代码块
+            if "```" in content:
+                parts = content.split("```")
+                for part in parts:
+                    part = part.strip()
+                    if part.startswith("json"):
+                        part = part[4:].strip()
+                    if part.startswith("{") and part.endswith("}"):
+                        json_text = part
+                        break
+            
+            # 查找第一个 { 和最后一个 }
+            if not (json_text.startswith("{") and json_text.endswith("}")):
+                start = json_text.find("{")
+                end = json_text.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    json_text = json_text[start:end+1]
+            
+            new_state = json.loads(json_text)
+            new_state = self._validate_state(new_state)
+            return new_state
+            
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            print(f"JSON解析失败: {content[:200]}")
+            print(f"错误详情: {e}")
+            return self._auto_decay()
     
     def _validate_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -377,42 +355,3 @@ class AutoStatus:
         return (f"[状态] 模式:{self.current_state['execution_mode']} | "
                 f"负载:{self.current_state['cognitive_load']} | "
                 f"置信:{self.current_state['confidence']:.1f}")
-
-
-# 测试
-if __name__ == "__main__":
-    import asyncio
-    
-    async def test():
-        # 创建状态管理器
-        status = AutoStatus(
-            api_url="http://localhost:1234/v1/chat/completions",
-            model="test-model"
-        )
-        
-        print("初始状态:")
-        print(json.dumps(status.current_state, ensure_ascii=False, indent=2))
-        
-        # 模拟对话
-        history = [
-            {"role": "user", "content": "帮我写个Python脚本"},
-            {"role": "assistant", "content": "好的，我来帮您写脚本"}
-        ]
-        
-        tools = [
-            {"tool": "write_to_file", "success": True},
-            {"tool": "run_command", "success": False}
-        ]
-        
-        # 评估状态
-        new_state = await status.evaluate_state(history, tools)
-        print("\n评估后的状态:")
-        print(json.dumps(new_state, ensure_ascii=False, indent=2))
-        
-        # 注入到提示词
-        base = "# 身份与角色\n我是Paw\n\n# 环境认知\n工作目录..."
-        enhanced = status.inject_to_prompt(base)
-        print("\n增强后的提示词:")
-        print(enhanced)
-    
-    # asyncio.run(test())

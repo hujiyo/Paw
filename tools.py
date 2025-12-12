@@ -594,30 +594,3 @@ class BaseTools:
 def create_tools(sandbox_dir: str) -> BaseTools:
     """创建工具实例"""
     return BaseTools(sandbox_dir)
-
-
-if __name__ == "__main__":
-    # Test code
-    import os
-    test_dir = os.getenv('PAW_HOME', './test_workspace')
-    tools = create_tools(test_dir)
-    
-    # Test file operations
-    print("Testing write_to_file...")
-    result = tools.write_to_file("test.txt", "Hello, Agent!")
-    print(result)
-    
-    print("\nTesting read_file...")
-    result = tools.read_file("test.txt")
-    print(result)
-    
-    print("\nTesting list_dir...")
-    result = tools.list_dir(".")
-    print(result)
-    
-    print("\nTesting run_command...")
-    result = tools.run_command("echo 'Hello from command'")
-    print(result)
-    
-    # Cleanup
-    tools.cleanup()

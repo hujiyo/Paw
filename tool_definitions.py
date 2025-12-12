@@ -548,6 +548,273 @@ def get_legacy_tools_schema():
 
 
 # ============================================================
+# 分支编辑工具 Schema（上下文编辑模式专用）
+# ============================================================
+
+SCHEMA_VIEW_CHUNK_DETAIL = {
+    "type": "function",
+    "function": {
+        "name": "view_chunk_detail",
+        "description": "查看指定chunk的完整内容（概览已在系统提示词中）",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "description": "chunk索引"
+                }
+            },
+            "required": ["index"]
+        }
+    }
+}
+
+SCHEMA_COMPRESS_CHUNKS = {
+    "type": "function",
+    "function": {
+        "name": "compress_chunks",
+        "description": "将多个chunk压缩为一个摘要。适用于冗长的对话历史",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "indices": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "要压缩的chunk索引列表"
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "压缩后的摘要内容"
+                },
+                "keep_original": {
+                    "type": "boolean",
+                    "description": "是否在metadata中保留原始内容",
+                    "default": False
+                }
+            },
+            "required": ["indices", "summary"]
+        }
+    }
+}
+
+SCHEMA_REMOVE_CHUNKS = {
+    "type": "function",
+    "function": {
+        "name": "remove_chunks",
+        "description": "移除指定的chunks。适用于不再需要的对话内容",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "indices": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "要移除的chunk索引列表"
+                }
+            },
+            "required": ["indices"]
+        }
+    }
+}
+
+SCHEMA_REWRITE_CHUNK = {
+    "type": "function",
+    "function": {
+        "name": "rewrite_chunk",
+        "description": "重写指定chunk的内容。适用于优化冗长或不清晰的内容",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "description": "chunk索引"
+                },
+                "new_content": {
+                    "type": "string",
+                    "description": "新内容"
+                }
+            },
+            "required": ["index", "new_content"]
+        }
+    }
+}
+
+SCHEMA_PREVIEW_CHANGES = {
+    "type": "function",
+    "function": {
+        "name": "preview_changes",
+        "description": "预览所有待提交的修改",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+}
+
+SCHEMA_COMMIT_CHANGES = {
+    "type": "function",
+    "function": {
+        "name": "commit_changes",
+        "description": "提交所有待处理的修改到主分支",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+}
+
+SCHEMA_ROLLBACK_CHANGES = {
+    "type": "function",
+    "function": {
+        "name": "rollback_changes",
+        "description": "回滚所有待提交的修改",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+}
+
+SCHEMA_EXIT_BRANCH = {
+    "type": "function",
+    "function": {
+        "name": "exit_branch",
+        "description": "退出上下文编辑模式，返回主对话",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+}
+
+
+def register_branch_tools(branch_instance):
+    """
+    注册分支编辑工具到 ToolRegistry
+    
+    注意：这些工具默认禁用（enabled=False），只在进入分支编辑模式时激活
+    
+    Args:
+        branch_instance: ContextBranch 实例，提供工具的执行函数
+    """
+    
+    register_tool(
+        name="view_chunk_detail",
+        schema=SCHEMA_VIEW_CHUNK_DETAIL,
+        handler=branch_instance.view_chunk_detail,
+        enabled=False,  # 默认禁用，进入分支模式时激活
+        category="branch"
+    )
+    
+    register_tool(
+        name="compress_chunks",
+        schema=SCHEMA_COMPRESS_CHUNKS,
+        handler=branch_instance.compress_chunks,
+        enabled=False,
+        category="branch"
+    )
+    
+    register_tool(
+        name="remove_chunks",
+        schema=SCHEMA_REMOVE_CHUNKS,
+        handler=branch_instance.remove_chunks,
+        enabled=False,
+        category="branch"
+    )
+    
+    register_tool(
+        name="rewrite_chunk",
+        schema=SCHEMA_REWRITE_CHUNK,
+        handler=branch_instance.rewrite_chunk,
+        enabled=False,
+        category="branch"
+    )
+    
+    register_tool(
+        name="preview_changes",
+        schema=SCHEMA_PREVIEW_CHANGES,
+        handler=branch_instance.preview_changes,
+        enabled=False,
+        category="branch"
+    )
+    
+    register_tool(
+        name="commit_changes",
+        schema=SCHEMA_COMMIT_CHANGES,
+        handler=branch_instance.commit_changes,
+        enabled=False,
+        category="branch"
+    )
+    
+    register_tool(
+        name="rollback_changes",
+        schema=SCHEMA_ROLLBACK_CHANGES,
+        handler=branch_instance.rollback_changes,
+        enabled=False,
+        category="branch"
+    )
+    
+    register_tool(
+        name="exit_branch",
+        schema=SCHEMA_EXIT_BRANCH,
+        handler=branch_instance.exit_branch,
+        enabled=False,
+        category="branch"
+    )
+
+
+# 分支工具名称列表（便于批量激活/禁用）
+BRANCH_TOOL_NAMES = [
+    "view_chunk_detail",
+    "compress_chunks",
+    "remove_chunks",
+    "rewrite_chunk",
+    "preview_changes",
+    "commit_changes",
+    "rollback_changes",
+    "exit_branch",
+]
+
+# 主工具名称列表（便于批量激活/禁用）
+MAIN_TOOL_NAMES = [
+    "read_file",
+    "write_to_file",
+    "delete_file",
+    "edit",
+    "multi_edit",
+    "find_by_name",
+    "grep_search",
+    "list_dir",
+    "run_command",
+    "open_shell",
+    "interrupt_command",
+    "wait",
+    "search_web",
+    "load_url_content",
+    "read_page",
+]
+
+
+def activate_branch_mode():
+    """
+    激活分支编辑模式：禁用主工具，启用分支工具
+    """
+    for name in MAIN_TOOL_NAMES:
+        ToolRegistry.disable(name)
+    for name in BRANCH_TOOL_NAMES:
+        ToolRegistry.enable(name)
+
+
+def deactivate_branch_mode():
+    """
+    退出分支编辑模式：启用主工具，禁用分支工具
+    """
+    for name in MAIN_TOOL_NAMES:
+        ToolRegistry.enable(name)
+    for name in BRANCH_TOOL_NAMES:
+        ToolRegistry.disable(name)
+
+
+# ============================================================
 # 向后兼容：静态 TOOLS_SCHEMA
 # ============================================================
 # 在工具未注册时，提供静态 schema 供导入使用
@@ -571,39 +838,3 @@ TOOLS_SCHEMA = [
     SCHEMA_LOAD_URL_CONTENT,
     SCHEMA_READ_PAGE,
 ]
-
-
-if __name__ == "__main__":
-    # 测试
-    print("=== 工具定义测试 ===")
-    print(f"静态 TOOLS_SCHEMA 数量: {len(TOOLS_SCHEMA)}")
-    
-    # 模拟注册（需要 tools 实例）
-    class MockTools:
-        def read_file(self, **kwargs): pass
-        def write_to_file(self, **kwargs): pass
-        def delete_file(self, **kwargs): pass
-        def edit(self, **kwargs): pass
-        def multi_edit(self, **kwargs): pass
-        def find_by_name(self, **kwargs): pass
-        def grep_search(self, **kwargs): pass
-        def list_dir(self, **kwargs): pass
-        def run_command(self, **kwargs): pass
-        def open_shell(self, **kwargs): pass
-        def interrupt_command(self, **kwargs): pass
-        def wait(self, **kwargs): pass
-    
-    mock_tools = MockTools()
-    register_all_tools(mock_tools)
-    
-    print(f"注册后 schema 数量: {len(get_tools_schema())}")
-    
-    # 检查 wait 工具的 no_context 设置
-    wait_config = ToolRegistry.get("wait")
-    print(f"wait.no_context = {wait_config.no_context}")
-    
-    # 检查 shell 工具的 singleton_key
-    run_cmd_config = ToolRegistry.get("run_command")
-    print(f"run_command.singleton_key = {run_cmd_config.singleton_key}")
-    
-    print("测试完成")

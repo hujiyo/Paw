@@ -700,6 +700,3 @@ class ChunkManager:
             }
             for chunk in self.chunks
         ]    
-
-if __name__ == "__main__":
-    test_chunk_system()

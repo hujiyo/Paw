@@ -1,62 +1,145 @@
 # Paw 🐾
 
-Paw 是一个基于大语言模型（LLM）的智能终端助手，旨在成为你开发环境中的“数字生命体”。它提供了一个统一的、上帝视角的命令行入口，通过简约的可视化界面和强大的工具集，协助你完成编码、系统管理和自动化任务。
+**Paw** 是一个基于大语言模型的智能终端 Agent，支持任意兼容 OpenAI API 的模型（智谱 GLM、本地 LLM 等）。它通过 Function Calling 实现文件操作、终端控制、Web 搜索等能力，并配备 RAG 记忆系统，让 AI 真正成为你的编程伙伴。
 
 ## ✨ 核心特性
 
-*   **统一交互入口**: 极简的 CLI 界面，Claude Code 风格的色彩输出，清晰区分用户、AI、工具和系统状态。
-*   **MCP 标准工具集**: 内置遵循 Model Context Protocol (MCP) 标准的原子工具，支持文件操作、搜索、Shell 命令执行和多语言脚本运行（Python, Bash, Node, PowerShell）。
-*   **智能上下文管理**: 采用独特的 Chunk System（语块系统），高效管理长上下文（支持 64k+ tokens），确保 AI 始终了解项目全貌。
-*   **动态状态评估**: 内置 `AutoStatus` 系统，实时评估任务执行状态并动态调整系统提示词。
-*   **全功能终端**: 支持持久化的 Shell 会话，实时捕获输出，就像与一位即时响应的结对程序员并肩工作。
+### 🔧 完整的工具链
+- **文件操作**: `read_file`, `write_to_file`, `edit`, `multi_edit`, `delete_file`
+- **目录搜索**: `list_dir`, `find_by_name`, `grep_search`
+- **终端控制**: `open_shell`, `run_command`, `interrupt_command` - 持久化 Shell 会话
+- **Web 能力**: `search_web` (DuckDuckGo), `load_url_content`, `read_page` - 支持 Jina Reader 代理
+
+### 🧠 RAG 记忆系统
+- **规则层**: 用户规则 (`~/.paw/rules.yaml`) + 项目规范 (`{project}/.paw/conventions.yaml`)
+- **对话存储**: 基于 ChromaDB 的向量检索，自动召回相关历史对话
+- **生命值机制**: 高相关记忆持续被唤醒保留，临时记忆自然遗忘
+
+### 📦 语块系统 (Chunk System)
+- 智能管理 64K+ tokens 上下文窗口
+- 支持 System / User / Assistant / Tool / Shell 等多种语块类型
+- 动态刷新终端输出，AI 实时感知 Shell 状态
+
+### 🎨 现代化 UI
+- Claude Code 风格的彩色终端输出
+- 流式响应，实时显示 AI 思考过程
+- 工具调用状态可视化
 
 ## 🚀 快速开始
 
-### 1. 环境准备
-*   Python 3.8+
-*   Git
+### 环境要求
+- Python 3.8+
+- Windows (目前终端功能仅支持 Windows)
 
-### 2. 安装
+### 安装
+
 ```bash
-git clone https://github.com/yourusername/Paw.git
+git clone https://github.com/hujiyo/Paw.git
 cd Paw
 pip install -r requirements.txt
 ```
 
-### 3. 配置
-在项目根目录找到 `config.yaml`，根据你的 LLM 提供商（如 OpenAI, 智谱 AI, 本地模型等）配置 API 信息：
+首次运行会自动下载多语言 Embedding 模型 (`paraphrase-multilingual-MiniLM-L12-v2`)。
+
+### 配置
+
+编辑 `config.yaml`：
 
 ```yaml
+# 身份配置（可选，自定义 AI 称呼）
+identity:
+  name: "Paw"
+  username: "your_name"
+  honey: "主人"
+
+# API 配置（必填）
 api:
   key: "your-api-key"
-  url: "https://open.bigmodel.cn/api/paas/v4/chat/completions" # 示例地址
-  model: null # 留空则在启动时自动检测选择
+  url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+  model: null  # 留空则启动时选择
+
+# 终端配置
+terminal:
+  shell: 'powershell'  # 或 'cmd'
+  encoding: 'utf-8'
+
+# Web 工具配置
+web:
+  search_engine: 'duckduckgo'
+  max_results: 5
+  use_jina_reader: true  # 推荐开启，支持 JS 动态渲染
 ```
 
-### 4. 运行
-**Windows 用户:**
-*   直接运行 `scripts/paw.bat`
-*   或者运行 `python paw.py`
+### 运行
 
-**添加至 PATH (推荐):**
-运行 `scripts/add_to_path.ps1` 将 Paw 添加到环境变量，之后可在任意位置通过 `paw` 命令启动。
+```bash
+# 直接运行
+python paw.py
+
+# 或使用批处理脚本
+scripts/paw.bat
+
+# 添加到 PATH（推荐）
+# 运行 scripts/add_to_path.ps1 后，可在任意位置使用 paw 命令
+```
 
 ## 📖 使用指南
 
-启动 Paw 后，你可以直接用自然语言描述你的任务。此外，Paw 还支持以下内置指令：
+启动后直接用自然语言描述任务即可。内置指令：
 
-*   `/clear`: 清除当前对话历史和上下文。
-*   `/model`: 重新扫描并切换 AI 模型。
-*   `/chunks`: 查看当前的上下文语块详情（调试用）。
-*   `/messages`: 查看完整的消息历史（调试用）。
+| 指令 | 说明 |
+|------|------|
+| `/clear` | 清空对话历史和上下文 |
+| `/model` | 重新选择 AI 模型 |
+| `/chunks` | 查看当前语块详情（调试） |
+| `/messages` | 查看完整消息历史（调试） |
+| `/memory` | 查看记忆系统状态 |
 
-## 🛠️ 项目结构
+## 🏗️ 项目架构
 
-*   `paw.py`: 主程序入口与生命周期管理。
-*   `tools.py`: 核心工具集实现 (File I/O, Terminal, Search)。
-*   `chunk_system.py`: 智能上下文语块管理器。
-*   `autostatus.py`: 动态状态评估系统。
-*   `config.yaml`: 核心配置文件。
+```
+Paw/
+├── paw.py              # 主程序入口，生命周期管理
+├── config.yaml         # 核心配置文件
+│
+├── tools.py            # 基础工具集（文件/搜索）
+├── terminal.py         # 线程化终端管理器
+├── web_tools.py        # Web 搜索与网页阅读
+├── tool_definitions.py # 工具 Schema 定义与注册
+├── tool_registry.py    # 工具注册中心
+│
+├── chunk_system.py     # 语块系统，上下文管理
+├── memory.py           # RAG 记忆系统
+├── autostatus.py       # 动态状态评估
+│
+├── context_branch.py   # 上下文分支管理
+├── branch_executor.py  # 分支执行器
+│
+├── prompts.py          # 提示词配置
+├── ui.py               # 终端 UI 系统
+│
+└── scripts/
+    ├── paw.bat         # Windows 启动脚本
+    └── add_to_path.ps1 # PATH 环境变量配置
+```
+
+## 📦 依赖
+
+```
+# 核心
+aiohttp, pyyaml, colorama, tiktoken
+
+# Web 工具
+ddgs, beautifulsoup4, html2text
+
+# 记忆系统
+chromadb, sentence-transformers
+```
+
+## 📄 License
+
+MIT License
 
 ---
-*Paw - 你的数字生命体终端助手*
+
+*Paw - 你的 AGI 级终端伙伴* 🐱

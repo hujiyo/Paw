@@ -10,7 +10,6 @@ import os
 import sys
 import json
 import asyncio
-import aiohttp
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +35,7 @@ from prompts import SystemPrompts, UIPrompts, ToolPrompts
 from ui import UI
 from memory import MemoryManager
 from branch_executor import AutoContextManager
+from call import LLMClient, LLMConfig
 
 
 class Paw:
@@ -84,6 +84,13 @@ class Paw:
         self.api_url = api_url or config.get('api', {}).get('url') or os.getenv("API_URL", "http://localhost:1234/v1/chat/completions")
         self.model = model or config.get('api', {}).get('model') or os.getenv("MODEL", None)
         self.api_key = api_key or config.get('api', {}).get('key') or os.getenv("OPENAI_API_KEY", None)
+        
+        # LLM 客户端（统一的 API 调用）
+        self.llm = LLMClient(LLMConfig(
+            api_url=self.api_url,
+            model=self.model,
+            api_key=self.api_key
+        ))
         
         # Web 工具（需要 API 配置来生成摘要）
         self.web_tools = WebTools(
@@ -382,122 +389,52 @@ class Paw:
                 "finish_reason": str
             }
         """
-        try:
-            # 准备请求头
-            headers = {"Content-Type": "application/json"}
-            if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.api_url,
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "tools": TOOLS_SCHEMA,
-                        "tool_choice": "auto",
-                        "temperature": 0.7,
-                        "max_tokens": 4000,
-                        "stream": True  # 启用流式输出
-                    },
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=60)
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        error_template = ToolPrompts.get_error_messages()["api_error"]
-                        error_msg = error_template.format(status=response.status, error=error_text)
-                        return {
-                            "content": error_msg,
-                            "tool_calls": [],
-                            "finish_reason": "error"
-                        }
-                    
-                    # 流式处理
-                    content_chunks = []
-                    tool_calls_dict = {}  # 累积tool_calls
-                    finish_reason = "stop"
-                    has_content = False
-                    
-                    async for line in response.content:
-                        line = line.decode('utf-8').strip()
-                        if not line or not line.startswith('data: '):
-                            continue
-                        
-                        if line == 'data: [DONE]':
-                            break
-                        
-                        try:
-                            json_str = line[6:]  # 移除 'data: ' 前缀
-                            chunk = json.loads(json_str)
-                            
-                            if 'choices' not in chunk or len(chunk['choices']) == 0:
-                                continue
-                            
-                            delta = chunk['choices'][0].get('delta', {})
-                            finish_reason = chunk['choices'][0].get('finish_reason', finish_reason)
-                            
-                            # 处理内容（流式打印）
-                            if 'content' in delta and delta['content']:
-                                content_text = delta['content']
-                                # 首次输出时去除前导换行
-                                if not has_content:
-                                    content_text = content_text.lstrip('\n')
-                                    if not content_text:
-                                        continue
-                                    has_content = True
-                                content_chunks.append(content_text)
-
-                                # 流式输出
-                                self.ui.print_assistant(content_text, end='', flush=True)
-                            
-                            # 处理tool_calls（累积）
-                            if 'tool_calls' in delta:
-                                for tc_delta in delta['tool_calls']:
-                                    idx = tc_delta.get('index', 0)
-                                    if idx not in tool_calls_dict:
-                                        tool_calls_dict[idx] = {
-                                            'id': '',
-                                            'type': 'function',
-                                            'function': {'name': '', 'arguments': ''}
-                                        }
-                                    
-                                    if 'id' in tc_delta:
-                                        tool_calls_dict[idx]['id'] = tc_delta['id']
-                                    if 'function' in tc_delta:
-                                        if 'name' in tc_delta['function']:
-                                            tool_calls_dict[idx]['function']['name'] += tc_delta['function']['name']
-                                        if 'arguments' in tc_delta['function']:
-                                            tool_calls_dict[idx]['function']['arguments'] += tc_delta['function']['arguments']
-                        
-                        except json.JSONDecodeError:
-                            continue
-                    
-                    if has_content:
-                        # 只有当最后一行不是换行符时，才打印换行
-                        # 这样可以避免 tool call 前出现空行
-                        if not content_chunks[-1].endswith('\n'):
-                            print()
-                    
-                    # 组合完整内容
-                    full_content = ''.join(content_chunks) if content_chunks else None
-                    tool_calls = list(tool_calls_dict.values()) if tool_calls_dict else None
-                    
-                    return {
-                        "role": "assistant",
-                        "content": full_content,
-                        "tool_calls": tool_calls,
-                        "finish_reason": finish_reason
-                    }
-                    
-        except Exception as e:
-            error_template = ToolPrompts.get_error_messages()["connection_error"]
-            error_msg = error_template.format(error=str(e))
+        # 用于跟踪是否有内容输出（控制换行）
+        has_content = [False]
+        last_chunk = ['']
+        
+        def on_content(text: str):
+            """流式内容回调"""
+            if not has_content[0]:
+                has_content[0] = True
+            last_chunk[0] = text
+            self.ui.print_assistant(text, end='', flush=True)
+        
+        # 使用统一的 LLM 客户端
+        response = await self.llm.chat(
+            messages,
+            tools=TOOLS_SCHEMA,
+            tool_choice="auto",
+            temperature=0.7,
+            max_tokens=4000,
+            stream=True,
+            on_content=on_content
+        )
+        
+        # 处理换行（只有当最后一行不是换行符时才打印换行）
+        if has_content[0] and last_chunk[0] and not last_chunk[0].endswith('\n'):
+            print()
+        
+        # 错误处理
+        if response.is_error:
+            if "API错误" in (response.content or ""):
+                error_template = ToolPrompts.get_error_messages()["api_error"]
+                error_msg = error_template.format(status="", error=response.content)
+            else:
+                error_template = ToolPrompts.get_error_messages()["connection_error"]
+                error_msg = error_template.format(error=response.content)
             return {
                 "content": error_msg,
                 "tool_calls": [],
                 "finish_reason": "error"
             }
+        
+        return {
+            "role": "assistant",
+            "content": response.content,
+            "tool_calls": response.tool_calls,
+            "finish_reason": response.finish_reason
+        }
     
     async def _execute_tool(self, tool_call: Dict) -> Dict[str, Any]:
         """执行工具调用 - 使用 ToolRegistry 统一管理"""

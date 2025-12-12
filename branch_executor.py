@@ -8,12 +8,14 @@
 
 import json
 import asyncio
-import aiohttp
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 
 from context_branch import ContextBranch, ContextBranchManager, BranchTrigger
 from chunk_system import ChunkType
+from tool_registry import ToolRegistry
+from tool_definitions import register_branch_tools, activate_branch_mode, deactivate_branch_mode
+from call import LLMClient, LLMConfig
 
 
 @dataclass
@@ -50,115 +52,79 @@ class BranchExecutor:
         self.config = config
         self.ui_callback = ui_callback or print
         
-        # 工具映射（精简后的6个核心工具）
-        self.tool_handlers = {
-            "view_chunk_detail": self._handle_view_chunk_detail,
-            "compress_chunks": self._handle_compress_chunks,
-            "remove_chunks": self._handle_remove_chunks,
-            "rewrite_chunk": self._handle_rewrite_chunk,
-            "preview_changes": self._handle_preview_changes,
-            "commit_changes": self._handle_commit_changes,
-            "rollback_changes": self._handle_rollback_changes,
-            "exit_branch": self._handle_exit_branch,
-        }
+        # 注册分支工具到 ToolRegistry（如果还没注册）
+        if not ToolRegistry.is_registered("view_chunk_detail"):
+            register_branch_tools(branch)
+        else:
+            # 已注册，更新 handler 指向新的 branch 实例
+            self._update_branch_handlers(branch)
+        
+        # 激活分支模式（禁用主工具，启用分支工具）
+        activate_branch_mode()
     
     def _log(self, message: str):
         """输出日志"""
         self.ui_callback(f"[分支] {message}")
     
-    # ==================== 工具处理器 ====================
-    
-    def _handle_view_chunk_detail(self, **kwargs) -> str:
-        result = self.branch.view_chunk_detail(**kwargs)
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
-    def _handle_compress_chunks(self, **kwargs) -> str:
-        result = self.branch.compress_chunks(**kwargs)
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
-    def _handle_remove_chunks(self, **kwargs) -> str:
-        result = self.branch.remove_chunks(**kwargs)
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
-    def _handle_rewrite_chunk(self, **kwargs) -> str:
-        result = self.branch.rewrite_chunk(**kwargs)
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
-    def _handle_preview_changes(self, **kwargs) -> str:
-        result = self.branch.preview_changes()
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
-    def _handle_commit_changes(self, **kwargs) -> str:
-        result = self.branch.commit_changes()
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
-    def _handle_rollback_changes(self, **kwargs) -> str:
-        result = self.branch.rollback_changes()
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
-    def _handle_exit_branch(self, **kwargs) -> str:
-        result = self.branch.exit_branch()
-        return json.dumps(result, ensure_ascii=False, indent=2)
+    def _update_branch_handlers(self, branch: ContextBranch):
+        """更新分支工具的 handler 指向新的 branch 实例"""
+        handler_map = {
+            "view_chunk_detail": branch.view_chunk_detail,
+            "compress_chunks": branch.compress_chunks,
+            "remove_chunks": branch.remove_chunks,
+            "rewrite_chunk": branch.rewrite_chunk,
+            "preview_changes": branch.preview_changes,
+            "commit_changes": branch.commit_changes,
+            "rollback_changes": branch.rollback_changes,
+            "exit_branch": branch.exit_branch,
+        }
+        for name, handler in handler_map.items():
+            config = ToolRegistry.get(name)
+            if config:
+                config.handler = handler
     
     def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> str:
-        """执行工具调用"""
-        handler = self.tool_handlers.get(tool_name)
-        if handler is None:
+        """执行工具调用（统一使用 ToolRegistry）"""
+        config = ToolRegistry.get(tool_name)
+        if config is None:
             return json.dumps({"error": f"未知工具: {tool_name}"})
         
+        if not config.enabled:
+            return json.dumps({"error": f"工具未启用: {tool_name}"})
+        
         try:
-            return handler(**args)
+            result = config.handler(**args)
+            # 结果统一转为 JSON 字符串
+            if isinstance(result, dict):
+                return json.dumps(result, ensure_ascii=False, indent=2)
+            return str(result)
         except Exception as e:
             return json.dumps({"error": f"工具执行失败: {str(e)}"})
     
     # ==================== LLM调用 ====================
     
     async def _call_llm(self, messages: List[Dict], tools: List[Dict]) -> Dict[str, Any]:
-        """调用LLM"""
-        headers = {"Content-Type": "application/json"}
-        if self.config.api_key:
-            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        """调用LLM（使用统一的 LLMClient）"""
+        llm = LLMClient(LLMConfig(
+            api_url=self.config.api_url,
+            model=self.config.model,
+            api_key=self.config.api_key
+        ))
         
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.api_url,
-                    json={
-                        "model": self.config.model,
-                        "messages": messages,
-                        "tools": tools,
-                        "tool_choice": "auto",
-                        "temperature": self.config.temperature,
-                        "max_tokens": 2000,
-                        "stream": False  # 分支执行不需要流式
-                    },
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=60)
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        return {
-                            "content": f"API错误 [{response.status}]: {error_text}",
-                            "tool_calls": None,
-                            "finish_reason": "error"
-                        }
-                    
-                    data = await response.json()
-                    choice = data.get("choices", [{}])[0]
-                    message = choice.get("message", {})
-                    
-                    return {
-                        "content": message.get("content"),
-                        "tool_calls": message.get("tool_calls"),
-                        "finish_reason": choice.get("finish_reason", "stop")
-                    }
-                    
-        except Exception as e:
-            return {
-                "content": f"连接错误: {str(e)}",
-                "tool_calls": None,
-                "finish_reason": "error"
-            }
+        response = await llm.chat(
+            messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=self.config.temperature,
+            max_tokens=2000,
+            stream=False  # 分支执行不需要流式
+        )
+        
+        return {
+            "content": response.content,
+            "tool_calls": response.tool_calls,
+            "finish_reason": response.finish_reason
+        }
     
     # ==================== 主执行流程 ====================
     
@@ -177,12 +143,8 @@ class BranchExecutor:
         """
         self._log("进入上下文编辑模式")
         
-        # 获取分支专用工具
-        branch_manager = ContextBranchManager(
-            main_chunk_manager=self.branch.main_chunk_manager,
-            system_prompt_getter=lambda: self.branch.original_system_prompt
-        )
-        tools = branch_manager.get_branch_tools_schema()
+        # 获取当前启用的工具 schema（分支工具已在 __init__ 中激活）
+        tools = ToolRegistry.get_schemas()
         
         # 初始指令
         if initial_instruction:
@@ -257,6 +219,8 @@ class BranchExecutor:
                         result_data = json.loads(result)
                         if result_data.get("success"):
                             self._log("编辑完成，退出分支")
+                            # 恢复主工具模式
+                            deactivate_branch_mode()
                             return {
                                 "success": True,
                                 "iterations": iteration,
@@ -276,6 +240,9 @@ class BranchExecutor:
         
         # 达到最大迭代或异常退出
         self._log(f"分支执行结束（迭代{iteration}次）")
+        
+        # 恢复主工具模式
+        deactivate_branch_mode()
         
         return {
             "success": self.branch.changes_committed,
@@ -426,10 +393,3 @@ class AutoContextManager:
             "total_tokens_saved": self.total_tokens_saved,
             "branch_history": self.branch_manager.branch_history
         }
-
-
-# ==================== 测试代码 ====================
-
-if __name__ == "__main__":
-    print("=== 分支执行器测试 ===")
-    print("请通过 paw.py 集成测试")

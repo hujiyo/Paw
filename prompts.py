@@ -267,25 +267,3 @@ __all__ = [
     'UIPrompts',
     'ToolPrompts'
 ]
-
-
-# 使用示例
-if __name__ == "__main__":
-    print("="*60)
-    print("提示词配置示例")
-    print("="*60)
-    
-    # 系统提示词
-    from datetime import datetime, timedelta
-    birth = datetime.now() - timedelta(hours=1)
-    system_prompt = SystemPrompts.get_main_system_prompt("Paw", birth)
-    print("\n【系统提示词】")
-    print(system_prompt)
-    
-    # UI提示
-    print("\n【UI消息】")
-    ui_msgs = UIPrompts.get_startup_messages()
-    for key, msg in ui_msgs.items():
-        print(f"  {key}: {msg}")
-    
-    print("\n" + "="*60)
