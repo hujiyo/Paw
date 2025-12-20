@@ -19,14 +19,16 @@ import os
 import yaml
 import json
 import hashlib
+import time
+import sqlite3
+import math
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+import aiohttp
 
 
 # ============================================================
@@ -62,6 +64,234 @@ class ConversationChunk:
 LOCAL_MODEL_DIR = Path(__file__).parent / "models"
 
 
+class LMStudioEmbeddingClient:
+    def __init__(self, *, url: str, model: str, api_key: Optional[str] = None, timeout_s: float = 2.0):
+        self.url = url
+        self.model = model
+        self.api_key = api_key
+        self.timeout_s = timeout_s
+
+    async def embed(self, text: str) -> List[float]:
+        # 严格匹配 LM Studio 官方示例：
+        # curl http://127.0.0.1:1234/v1/embeddings -H "Content-Type: application/json" -d '{"model":..., "input": ...}'
+        headers = {"Content-Type": "application/json"}
+        # LM Studio 本地默认无需 key，但保留兼容
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        payload = {"model": self.model, "input": text}
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout_s)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(self.url, headers=headers, json=payload) as resp:
+                raw_text = await resp.text()
+                if resp.status != 200:
+                    raise RuntimeError(f"embeddings 请求失败({resp.status}): {raw_text[:500]}")
+                try:
+                    data = json.loads(raw_text)
+                except Exception as e:
+                    raise RuntimeError(f"embeddings 返回不是 JSON: {e}; body={raw_text[:200]}")
+                emb = (((data or {}).get("data") or [{}])[0]).get("embedding")
+                if not isinstance(emb, list) or not emb:
+                    raise RuntimeError(f"embeddings 返回格式异常: {str(data)[:200]}")
+                return emb
+
+
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    denom = math.sqrt(na) * math.sqrt(nb)
+    if denom == 0.0:
+        return 0.0
+    return dot / denom
+
+
+class SQLiteConversationStore:
+    def __init__(self, storage_path: Path, embedding_client: LMStudioEmbeddingClient):
+        self.storage_path = Path(storage_path)
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+        self.db_path = self.storage_path / "conversations.sqlite3"
+        self.embedding_client = embedding_client
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    project TEXT,
+                    timestamp TEXT,
+                    user_message TEXT,
+                    assistant_message TEXT,
+                    embedding_json TEXT,
+                    metadata_json TEXT
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_timestamp ON conversations(timestamp)")
+
+    def _generate_id(self, content: str, timestamp: str) -> str:
+        hash_input = f"{timestamp}_{content[:100]}"
+        return hashlib.md5(hash_input.encode()).hexdigest()[:12]
+
+    async def add_conversation(self,
+                               user_message: str,
+                               assistant_message: str,
+                               project: str = "",
+                               metadata: Optional[Dict] = None) -> str:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        embed_text = f"用户: {user_message}"
+
+        embedding = await self.embedding_client.embed(embed_text)
+        doc_id = self._generate_id(user_message, timestamp)
+        doc_metadata = {
+            "project": project,
+            "timestamp": timestamp,
+            "user_message": user_message[:1000],
+            "assistant_message": assistant_message[:2000],
+            **(metadata or {})
+        }
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO conversations
+                (id, project, timestamp, user_message, assistant_message, embedding_json, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    doc_id,
+                    project,
+                    timestamp,
+                    user_message[:1000],
+                    assistant_message[:2000],
+                    json.dumps(embedding, ensure_ascii=False),
+                    json.dumps(doc_metadata, ensure_ascii=False)
+                )
+            )
+        return doc_id
+
+    async def search(self,
+                     query: str,
+                     project: Optional[str] = None,
+                     n_results: int = 5,
+                     min_score: float = 0.3) -> List[Dict[str, Any]]:
+        if not query:
+            return []
+
+        query_embedding = await self.embedding_client.embed(f"用户: {query}")
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if project:
+                rows = conn.execute(
+                    "SELECT id, project, timestamp, user_message, assistant_message, embedding_json, metadata_json FROM conversations WHERE project = ?",
+                    (project,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, project, timestamp, user_message, assistant_message, embedding_json, metadata_json FROM conversations"
+                ).fetchall()
+
+        scored: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                emb = json.loads(r["embedding_json"] or "[]")
+            except Exception:
+                emb = []
+            sim = _cosine_similarity(query_embedding, emb)
+            if sim >= min_score:
+                try:
+                    meta = json.loads(r["metadata_json"] or "{}")
+                except Exception:
+                    meta = {}
+                scored.append({
+                    "id": r["id"],
+                    "similarity": round(sim, 3),
+                    "document": f"用户: {r['user_message']}\nAI: {r['assistant_message']}",
+                    "metadata": meta
+                })
+
+        scored.sort(key=lambda x: x.get("similarity", 0.0), reverse=True)
+        return scored[: max(1, n_results)]
+
+    def get_stats(self) -> Dict[str, Any]:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT COUNT(1) FROM conversations").fetchone()
+            total = int(row[0]) if row else 0
+        return {"total_conversations": total, "storage_path": str(self.db_path)}
+
+    def list_all(self, project: Optional[str] = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if project:
+                rows = conn.execute(
+                    """
+                    SELECT id, project, timestamp, user_message, assistant_message, metadata_json
+                    FROM conversations
+                    WHERE project = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (project, limit, offset)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, project, timestamp, user_message, assistant_message, metadata_json
+                    FROM conversations
+                    ORDER BY timestamp DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset)
+                ).fetchall()
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                meta = json.loads(r["metadata_json"] or "{}")
+            except Exception:
+                meta = {}
+            out.append({
+                "id": r["id"],
+                "similarity": 1.0,
+                "document": f"用户: {r['user_message']}\nAI: {r['assistant_message']}",
+                "metadata": meta
+            })
+        return out
+
+    def delete(self, doc_id: str) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cur = conn.execute("DELETE FROM conversations WHERE id = ?", (doc_id,))
+                return cur.rowcount > 0
+        except Exception:
+            return False
+
+    def delete_batch(self, doc_ids: List[str]) -> int:
+        if not doc_ids:
+            return 0
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cur = conn.executemany("DELETE FROM conversations WHERE id = ?", [(i,) for i in doc_ids])
+                return cur.rowcount or 0
+        except Exception:
+            return 0
+
+    def find_duplicates(self, threshold: float = 0.95) -> List[List[str]]:
+        # 轻量后端先返回空，避免引入额外 O(n^2) 计算
+        return []
+
+
 class ConversationStore:
     """
     对话存储 - 使用 ChromaDB 进行向量检索
@@ -85,12 +315,15 @@ class ConversationStore:
         
         # 初始化 embedding 模型（优先从本地加载）
         self._model_name = model_name
+        t0 = time.perf_counter()
         self._embedding_model = self._load_embedding_model(model_name)
+        print(f"[Memory] embedding 模型加载耗时: {time.perf_counter() - t0:.2f}s")
         
         # 初始化 ChromaDB
-        self.client = chromadb.PersistentClient(
+        t1 = time.perf_counter()
+        self.client = self._chromadb.PersistentClient(
             path=str(self.storage_path),
-            settings=Settings(anonymized_telemetry=False)
+            settings=self._Settings(anonymized_telemetry=False)
         )
         
         # 获取或创建 collection
@@ -98,10 +331,12 @@ class ConversationStore:
             name="conversations",
             metadata={"hnsw:space": "cosine"}  # 使用余弦相似度
         )
+
+        print(f"[Memory] ChromaDB 初始化耗时: {time.perf_counter() - t1:.2f}s")
         
         print(f"[Memory] 对话存储已加载，当前记录数: {self.collection.count()}")
     
-    def _load_embedding_model(self, model_name: str) -> SentenceTransformer:
+    def _load_embedding_model(self, model_name: str) -> "SentenceTransformer":
         """
         加载 embedding 模型
         
@@ -113,21 +348,21 @@ class ConversationStore:
         # 优先从本地加载（离线模式）
         if local_path.exists():
             print(f"[Memory] 从本地加载模型: {local_path}")
-            return SentenceTransformer(str(local_path), local_files_only=True)
+            return self._SentenceTransformer(str(local_path), local_files_only=True)
         
         # 本地不存在，从网络下载并保存到本地
         print(f"[Memory] 首次使用，下载模型: {model_name}")
         print(f"[Memory] 模型将保存到: {local_path}")
         
         LOCAL_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        model = SentenceTransformer(model_name)
+        model = self._SentenceTransformer(model_name)
         model.save(str(local_path))
         
         print(f"[Memory] 模型已保存，下次启动将直接从本地加载")
         return model
     
     @property
-    def embedding_model(self) -> SentenceTransformer:
+    def embedding_model(self) -> "SentenceTransformer":
         """获取 embedding 模型"""
         if self._embedding_model is None:
             self._embedding_model = self._load_embedding_model(self._model_name)
@@ -596,7 +831,10 @@ class MemoryManager:
     
     def __init__(self, 
                  project_path: Path,
-                 embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"):
+                 embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2",
+                 embeddings_url: Optional[str] = None,
+                 embeddings_model: Optional[str] = None,
+                 embeddings_api_key: Optional[str] = None):
         """
         初始化记忆管理器
         
@@ -623,10 +861,22 @@ class MemoryManager:
         
         # 初始化对话存储
         conversations_dir = self.user_dir / "conversations"
-        self.conversation_store = ConversationStore(
-            storage_path=conversations_dir,
-            model_name=embedding_model
-        )
+        if embeddings_url and embeddings_model:
+            embedding_client = LMStudioEmbeddingClient(
+                url=embeddings_url,
+                model=embeddings_model,
+                api_key=embeddings_api_key,
+                timeout_s=2.0
+            )
+            self.conversation_store = SQLiteConversationStore(
+                storage_path=conversations_dir,
+                embedding_client=embedding_client
+            )
+        else:
+            self.conversation_store = ConversationStore(
+                storage_path=conversations_dir,
+                model_name=embedding_model
+            )
         
         # 初始化回忆管理器（生命值递减法）
         self.recall_manager = RecallManager(
@@ -774,12 +1024,27 @@ class MemoryManager:
         Returns:
             对话 ID
         """
+        if hasattr(self.conversation_store, "add_conversation") and asyncio.iscoroutinefunction(getattr(self.conversation_store, "add_conversation")):
+            raise RuntimeError("SQLiteConversationStore 需要异步保存，请调用 save_conversation_async")
         return self.conversation_store.add_conversation(
             user_message=user_message,
             assistant_message=assistant_message,
             project=self.project_path.name,
             metadata=metadata
         )
+
+    async def save_conversation_async(self,
+                                     user_message: str,
+                                     assistant_message: str,
+                                     metadata: Optional[Dict] = None) -> str:
+        if asyncio.iscoroutinefunction(getattr(self.conversation_store, "add_conversation", None)):
+            return await self.conversation_store.add_conversation(
+                user_message=user_message,
+                assistant_message=assistant_message,
+                project=self.project_path.name,
+                metadata=metadata
+            )
+        return self.save_conversation(user_message, assistant_message, metadata)
     
     # ==================== 记忆回忆（生命值递减法）====================
     
@@ -803,6 +1068,8 @@ class MemoryManager:
         project = self.project_path.name if project_only else None
         
         # RAG 检索
+        if asyncio.iscoroutinefunction(getattr(self.conversation_store, "search", None)):
+            raise RuntimeError("SQLiteConversationStore 需要异步检索，请调用 recall_async")
         results = self.conversation_store.search(
             query=query,
             project=project,
@@ -827,6 +1094,40 @@ class MemoryManager:
             if self.recall_manager.awaken(doc_id, content, similarity, timestamp):
                 new_count += 1
         
+        return new_count
+
+    async def recall_async(self,
+                           query: str,
+                           n_results: int = 3,
+                           min_score: float = 0.35,
+                           project_only: bool = True) -> int:
+        project = self.project_path.name if project_only else None
+        if asyncio.iscoroutinefunction(getattr(self.conversation_store, "search", None)):
+            results = await self.conversation_store.search(
+                query=query,
+                project=project,
+                n_results=n_results,
+                min_score=min_score
+            )
+        else:
+            results = self.conversation_store.search(
+                query=query,
+                project=project,
+                n_results=n_results,
+                min_score=min_score
+            )
+
+        new_count = 0
+        for conv in results:
+            doc_id = conv.get('id', '')
+            similarity = conv.get('similarity', 0.5)
+            meta = conv.get('metadata', {})
+            timestamp = meta.get('timestamp', '')
+            user_msg = meta.get('user_message', '')[:200]
+            assistant_msg = meta.get('assistant_message', '')[:300]
+            content = f"[{timestamp[:10]}] 用户问: {user_msg}\n我答: {assistant_msg}{'...' if len(meta.get('assistant_message', '')) > 300 else ''}"
+            if self.recall_manager.awaken(doc_id, content, similarity, timestamp):
+                new_count += 1
         return new_count
     
     def tick_recall(self) -> List[str]:

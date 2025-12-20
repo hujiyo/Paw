@@ -551,6 +551,92 @@ class BaseTools:
         except Exception as e:
             return f"Failed to multi-edit: {e}"
     
+    # ============================================================
+    # TODO-list 工具
+    # ============================================================
+    
+    def update_plan(self, plan: list, explanation: str = None) -> dict:
+        """Updates the task plan with a list of steps and their statuses.
+        
+        Args:
+            plan: List of plan items, each with 'step' (description) and 'status' (pending/in_progress/completed)
+            explanation: Optional explanation for the plan update
+            
+        Returns:
+            Dict with success status and plan data
+        """
+        # 初始化 plan 存储（如果不存在）
+        if not hasattr(self, '_todo_plan'):
+            self._todo_plan = []
+        
+        # 验证 plan 格式
+        if not isinstance(plan, list):
+            return {"success": False, "error": "plan must be a list of items"}
+        
+        # 验证每个 item
+        valid_statuses = {"pending", "in_progress", "completed"}
+        in_progress_count = 0
+        validated_plan = []
+        
+        for i, item in enumerate(plan):
+            if not isinstance(item, dict):
+                return {"success": False, "error": f"plan item {i} must be an object with 'step' and 'status'"}
+            
+            step = item.get("step", "").strip()
+            status = item.get("status", "pending")
+            
+            if not step:
+                return {"success": False, "error": f"plan item {i} has empty step description"}
+            
+            if status not in valid_statuses:
+                return {"success": False, "error": f"plan item {i} has invalid status '{status}'"}
+            
+            if status == "in_progress":
+                in_progress_count += 1
+            
+            validated_plan.append({
+                "step": step,
+                "status": status
+            })
+        
+        # 检查是否有多个 in_progress
+        if in_progress_count > 1:
+            return {"success": False, "error": f"At most one step can be in_progress (found {in_progress_count})"}
+        
+        # 更新计划
+        self._todo_plan = validated_plan
+        
+        # 统计
+        completed = sum(1 for item in validated_plan if item["status"] == "completed")
+        total = len(validated_plan)
+        
+        return {
+            "success": True,
+            "explanation": explanation,
+            "plan": validated_plan,
+            "completed": completed,
+            "total": total
+        }
+    
+    def get_plan(self) -> dict:
+        """Get the current task plan.
+        
+        Returns:
+            Dict with plan data or error if no plan exists
+        """
+        if not hasattr(self, '_todo_plan') or not self._todo_plan:
+            return {"success": True, "plan": [], "completed": 0, "total": 0}
+        
+        completed = sum(1 for item in self._todo_plan if item["status"] == "completed")
+        total = len(self._todo_plan)
+        
+        return {
+            "success": True,
+            "plan": self._todo_plan,
+            "completed": completed,
+            "total": total
+        }
+    
     def _resolve_path(self, path: str) -> Path:
         """解析路径（强制限制在沙盒目录内）
         

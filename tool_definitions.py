@@ -213,7 +213,7 @@ SCHEMA_GREP_SEARCH = {
                 "includes": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Glob patterns to filter files, e.g., '*.py' to only include Python files."
+                    "description": "Glob patterns to filter files. Example: [\"*.py\"] or [\"*.js\", \"*.ts\"]"
                 },
                 "case_sensitive": {
                     "type": "boolean",
@@ -313,6 +313,60 @@ SCHEMA_WAIT = {
                 }
             },
             "required": ["seconds"]
+        }
+    }
+}
+
+# ============================================================
+# TODO-list 工具 Schema
+# ============================================================
+
+SCHEMA_UPDATE_PLAN = {
+    "type": "function",
+    "function": {
+        "name": "update_plan",
+        "description": "Updates the task plan. Provide an optional explanation and a list of plan items, each with a non-empty step description and status. At most one step can be in_progress at a time.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plan": {
+                    "type": "array",
+                    "description": "List of plan items",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "step": {
+                                "type": "string",
+                                "description": "Description of the step"
+                            },
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "completed"],
+                                "description": "Status of the step"
+                            }
+                        },
+                        "required": ["step", "status"]
+                    }
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "Optional explanation for the plan update"
+                }
+            },
+            "required": ["plan"]
+        }
+    }
+}
+
+SCHEMA_GET_PLAN = {
+    "type": "function",
+    "function": {
+        "name": "get_plan",
+        "description": "Get the current task plan to see progress and remaining steps.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
         }
     }
 }
@@ -497,6 +551,24 @@ def register_all_tools(tools_instance):
         schema=SCHEMA_WAIT,
         handler=tools_instance.wait,
         max_call_pairs=3,  # 只保留最近3次调用（tool_call + tool_result 配对）
+        category="utility"
+    )
+    
+    # === TODO-list 工具 ===
+    
+    register_tool(
+        name="update_plan",
+        schema=SCHEMA_UPDATE_PLAN,
+        handler=tools_instance.update_plan,
+        singleton_key=key_constant("plan"),  # 只保留最新的计划
+        category="utility"
+    )
+    
+    register_tool(
+        name="get_plan",
+        schema=SCHEMA_GET_PLAN,
+        handler=tools_instance.get_plan,
+        max_call_pairs=1,  # 只保留最近一次查询
         category="utility"
     )
 
@@ -791,6 +863,9 @@ MAIN_TOOL_NAMES = [
     "search_web",
     "load_url_content",
     "read_page",
+    # TODO-list 工具
+    "update_plan",
+    "get_plan",
 ]
 
 
@@ -837,4 +912,7 @@ TOOLS_SCHEMA = [
     SCHEMA_SEARCH_WEB,
     SCHEMA_LOAD_URL_CONTENT,
     SCHEMA_READ_PAGE,
+    # TODO-list 工具
+    SCHEMA_UPDATE_PLAN,
+    SCHEMA_GET_PLAN,
 ]

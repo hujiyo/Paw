@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import re
 import yaml
+import aiohttp
+import time
 
 # 设置环境为UTF-8（Windows兼容）
 if sys.platform == "win32":
@@ -56,12 +58,20 @@ class Paw:
         """
         # 基础配置
         self.birth_time = datetime.now()
+        self._startup_t0 = time.perf_counter()
+        self._startup_marks = []
+
+        def _mark(label: str):
+            now = time.perf_counter()
+            self._startup_marks.append((label, now - self._startup_t0))
 
         # UI系统（统一入口）
         self.ui = UI(minimal_mode=minimal)
+        _mark("UI 初始化")
 
         # 读取配置文件
         config = self._load_config()
+        _mark("读取 config.yaml")
         
         # 从配置读取身份信息（支持用户自定义名字和称谓）
         # 变量命名: paw=Paw的名字, hujiyo=用户名, honey=用户昵称
@@ -72,6 +82,7 @@ class Paw:
 
         # 核心组件（传递配置和工作目录）
         self.tools = BaseTools(sandbox_dir=workspace_dir, config=config)
+        _mark("BaseTools 初始化")
         
         # 保存工作目录信息（用于提示词）
         self.workspace_dir = self.tools.sandbox_dir
@@ -79,6 +90,7 @@ class Paw:
         
         # 注册所有工具到 ToolRegistry
         register_all_tools(self.tools)
+        _mark("注册工具")
         
         # API配置（优先级：参数 > config.yaml > 环境变量 > 默认值）
         self.api_url = api_url or config.get('api', {}).get('url') or os.getenv("API_URL", "http://localhost:1234/v1/chat/completions")
@@ -100,19 +112,18 @@ class Paw:
             api_key=self.api_key
         )
         register_web_tools(self.web_tools)
+        _mark("WebTools 初始化")
         
         # 动态状态管理器（延迟初始化，等模型确定后）
         self.autostatus = None
         
         # 上下文管理（使用语块系统，传入工具schema）
         self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
-        
-        # 记忆系统（必须在 system_prompt 之前初始化）
-        # 使用多语言 embedding 模型，首次运行会自动下载
-        self.memory_manager = MemoryManager(
-            project_path=self.workspace_dir,
-            embedding_model="paraphrase-multilingual-MiniLM-L12-v2"
-        )
+        _mark("ChunkManager 初始化")
+
+        # 记忆系统：延迟初始化到 run() 里
+        # 避免首次运行下载/加载 embedding 导致冷启动卡住进不了首屏
+        self.memory_manager = None
         
         # 会话ID（用于记忆整理）
         import uuid
@@ -123,15 +134,15 @@ class Paw:
         
         # 系统提示词（第一人称）
         self.system_prompt = self._create_system_prompt()
+        _mark("构建 system_prompt")
         
         # 注意：消息历史现在完全由chunk_manager管理
         # 不再使用self.messages
         
-        # 可视化配置
-        self.show_debug = True  # 显示调试信息
-        
         # 工具调用结果收集（用于状态评估）
         self.last_tool_results = []
+
+        # 启动耗时记录仅供内部排查，不对用户输出
     
     def _load_config(self) -> dict:
         """加载config.yaml配置文件"""
@@ -173,9 +184,10 @@ class Paw:
         prompt = main_prompt
         
         # 注入记忆（如果有）
-        memory_prompt = self.memory_manager.get_memory_prompt()
-        if memory_prompt:
-            prompt = prompt + "\n\n" + memory_prompt
+        if self.memory_manager is not None:
+            memory_prompt = self.memory_manager.get_memory_prompt()
+            if memory_prompt:
+                prompt = prompt + "\n\n" + memory_prompt
         
         # 如果需要，注入动态状态
         if include_state and self.autostatus is not None:
@@ -188,6 +200,54 @@ class Paw:
         else:
             self.chunk_manager.add_system_prompt(prompt)
         return prompt
+    
+    def _try_fix_json(self, raw_json: str) -> dict:
+        """尝试修复常见的 JSON 格式问题
+        
+        Args:
+            raw_json: 原始的无效 JSON 字符串
+            
+        Returns:
+            修复后的 dict，如果无法修复则返回 None
+        """
+        import re
+        
+        fixed = raw_json.strip()
+        
+        # 1. 补全被截断的 JSON（缺少结尾 }）
+        if not fixed.endswith('}'):
+            fixed += '}'
+        
+        # 2. 修复未加引号的值，如 "includes":*.py -> "includes":"*.py"
+        # 匹配 :"值" 或 :值 的模式，值不是 { [ " 数字 true false null 开头的
+        fixed = re.sub(
+            r':(\s*)([^"\[\]{}\s,][^,}\]]*?)(\s*[,}])',
+            r':"\2"\3',
+            fixed
+        )
+        
+        # 3. 修复数组中未加引号的值，如 [*.py] -> ["*.py"]
+        fixed = re.sub(
+            r'\[(\s*)([^"\[\]{}\s,][^,\]]*?)(\s*)\]',
+            r'["\2"]',
+            fixed
+        )
+        
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+        
+        # 4. 更激进的修复：尝试用 ast.literal_eval（处理单引号等）
+        try:
+            import ast
+            # 把单引号替换成双引号
+            fixed2 = raw_json.replace("'", '"')
+            return json.loads(fixed2)
+        except:
+            pass
+        
+        return None
     
     def _get_tool_display(self, tool_name: str, result: str, args: dict = None) -> dict:
         """生成工具显示信息
@@ -291,6 +351,55 @@ class Paw:
         elif tool_name == "wait":
             seconds = args.get("seconds", 0)
             return {'line1': f"{seconds}s", 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "update_plan":
+            # 解析 JSON 结果
+            try:
+                data = json.loads(result) if isinstance(result, str) else result
+                if not data.get("success"):
+                    return {'line1': data.get("error", "未知错误"), 'line2': '', 'has_line2': False}
+                completed = data.get("completed", 0)
+                total = data.get("total", 0)
+                explanation = data.get("explanation", "")
+                plan = data.get("plan", [])
+                # line1: 进度摘要
+                line1 = f"{completed}/{total} completed"
+                if explanation:
+                    line1 = f"{explanation} ({line1})"
+                # line2: 每个步骤一行
+                if plan:
+                    status_icons = {"pending": "○", "in_progress": "◉", "completed": "●"}
+                    lines = []
+                    for item in plan:
+                        icon = status_icons.get(item["status"], "○")
+                        step = item["step"][:50] + "..." if len(item["step"]) > 50 else item["step"]
+                        lines.append(f"{icon} {step}")
+                    return {'line1': line1, 'line2': '\n'.join(lines), 'has_line2': True}
+                return {'line1': line1, 'line2': '', 'has_line2': False}
+            except:
+                return {'line1': '计划已更新', 'line2': '', 'has_line2': False}
+        
+        elif tool_name == "get_plan":
+            # 解析 JSON 结果
+            try:
+                data = json.loads(result) if isinstance(result, str) else result
+                plan = data.get("plan", [])
+                completed = data.get("completed", 0)
+                total = data.get("total", 0)
+                if not plan:
+                    return {'line1': '无计划', 'line2': '', 'has_line2': False}
+                # line1: 进度
+                line1 = f"{completed}/{total} completed"
+                # line2: 步骤列表
+                status_icons = {"pending": "○", "in_progress": "◉", "completed": "●"}
+                lines = []
+                for item in plan:
+                    icon = status_icons.get(item["status"], "○")
+                    step = item["step"][:50] + "..." if len(item["step"]) > 50 else item["step"]
+                    lines.append(f"{icon} {step}")
+                return {'line1': line1, 'line2': '\n'.join(lines), 'has_line2': True}
+            except:
+                return {'line1': '查询计划', 'line2': '', 'has_line2': False}
         
         elif tool_name == "search_web":
             query = args.get("query", "")
@@ -400,9 +509,10 @@ class Paw:
             last_chunk[0] = text
             self.ui.print_assistant(text, end='', flush=True)
         
-        # 使用统一的 LLM 客户端
+        # 使用统一的 LLM 客户端（传入当前 model，因为可能在运行时选择）
         response = await self.llm.chat(
             messages,
+            model=self.model,
             tools=TOOLS_SCHEMA,
             tool_choice="auto",
             temperature=0.7,
@@ -533,7 +643,11 @@ class Paw:
         print(f"\n[对话记录] (RAG 检索)")
         print(f"   总对话数: {convs['total_conversations']} 条")
         print(f"   存储路径: {convs['storage_path']}")
-        print(f"   当前检索: {stats['recalled_count']} 条")
+        
+        # 活跃记忆统计（从 recall_manager 获取）
+        recall_stats = stats.get("recall", {})
+        if recall_stats:
+            print(f"   活跃记忆: {recall_stats.get('active_count', 0)} 条")
         
         # 显示规则内容
         rules_prompt = self.memory_manager.get_rules_prompt()
@@ -554,10 +668,18 @@ class Paw:
         if user_message.startswith("[系统"):
             return
         try:
-            self.memory_manager.save_conversation(
-                user_message=user_message,
-                assistant_message=assistant_message
-            )
+            # 新记忆后端可能需要异步保存（LM Studio embeddings + SQLite）
+            # 这里保持接口不阻塞主流程：失败则降级跳过
+            if hasattr(self.memory_manager, "save_conversation_async"):
+                asyncio.create_task(self.memory_manager.save_conversation_async(
+                    user_message=user_message,
+                    assistant_message=assistant_message
+                ))
+            else:
+                self.memory_manager.save_conversation(
+                    user_message=user_message,
+                    assistant_message=assistant_message
+                )
         except Exception as e:
             self.ui.print_dim(f"[Memory] 保存对话失败: {e}")
     
@@ -567,23 +689,38 @@ class Paw:
         self.chunk_manager.add_user_input(user_input)
         
         # 1. 生命值递减：衰减已有记忆
-        forgotten = self.memory_manager.tick_recall()
-        if forgotten:
-            self.ui.print_dim(f"[Memory] 遗忘了 {len(forgotten)} 条记忆")
+        try:
+            forgotten = self.memory_manager.tick_recall() if self.memory_manager else []
+            if forgotten:
+                self.ui.print_dim(f"[Memory] 遗忘了 {len(forgotten)} 条记忆")
+        except Exception as e:
+            self.ui.print_dim(f"[Memory] 记忆衰减失败(已跳过): {e}")
         
         # 2. RAG 检索 + 唤醒记忆（生命值递减法）
         # 新机制：高相关记忆持续被唤醒 -> 生命值高 -> 长期保留
         #        临时记忆只被唤醒一次 -> 几轮后自然遗忘
-        if not user_input.startswith("[系统"):
-            new_recalled = self.memory_manager.recall(user_input, n_results=3, min_score=0.4)
-            if new_recalled:
-                self.ui.print_dim(f"[Memory] 新唤醒 {new_recalled} 条记忆")
+        if self.memory_manager and (not user_input.startswith("[系统")):
+            try:
+                if hasattr(self.memory_manager, "recall_async"):
+                    new_recalled = await self.memory_manager.recall_async(user_input, n_results=3, min_score=0.4)
+                else:
+                    new_recalled = self.memory_manager.recall(user_input, n_results=3, min_score=0.4)
+                if new_recalled:
+                    self.ui.print_dim(f"[Memory] 新唤醒 {new_recalled} 条记忆")
+            except Exception as e:
+                # embeddings 服务不可用/超时等，直接降级，不影响对话
+                self.ui.print_dim(f"[Memory] 记忆检索失败(已降级跳过): {e}")
         
         # 3. 获取当前活跃记忆的提示词
-        recalled_prefix = self.memory_manager.get_recalled_prompt()
-        if recalled_prefix:
-            stats = self.memory_manager.recall_manager.get_stats()
-            self.ui.print_dim(f"[Memory] 活跃记忆: {stats['active_count']} 条, {stats['capacity_ratio']}")
+        recalled_prefix = ""
+        if self.memory_manager:
+            try:
+                recalled_prefix = self.memory_manager.get_recalled_prompt()
+                if recalled_prefix:
+                    stats = self.memory_manager.recall_manager.get_stats()
+                    self.ui.print_dim(f"[Memory] 活跃记忆: {stats['active_count']} 条, {stats['capacity_ratio']}")
+            except Exception as e:
+                self.ui.print_dim(f"[Memory] 获取活跃记忆失败(已跳过): {e}")
         
         # 2. 主循环（无步数限制）
         step_count = 0
@@ -620,6 +757,7 @@ class Paw:
             content = assistant_message.get("content")
             tool_calls = assistant_message.get("tool_calls")
             
+            
             # 添加assistant消息到chunk_manager（不包含recall，保持历史干净）
             self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
             if content:
@@ -642,14 +780,10 @@ class Paw:
                         self.ui.print_error(f"工具参数解析失败: {e}")
                         self.ui.print_dim(f"原始参数: {raw_args[:200]}..." if len(raw_args) > 200 else f"原始参数: {raw_args}")
                         # 尝试修复常见的 JSON 问题
-                        try:
-                            # 尝试补全被截断的 JSON
-                            fixed_args = raw_args.rstrip()
-                            if not fixed_args.endswith('}'):
-                                fixed_args += '}'
-                            function_args = json.loads(fixed_args)
+                        function_args = self._try_fix_json(raw_args)
+                        if function_args is not None:
                             self.ui.print_dim("已自动修复 JSON 格式")
-                        except:
+                        else:
                             # 无法修复，跳过此工具调用
                             self.ui.print_error(f"跳过工具调用: {function_name}")
                             continue
@@ -708,7 +842,9 @@ class Paw:
             # 检查是否完成
             if not tool_calls:
                 # 没有工具调用，立即停止
-                # 如果用户觉得没说完，可以主动回车继续
+                # 如果 LLM 完全没响应（无内容、无工具调用），提示用户
+                if not content and step_count == 1:
+                    self.ui.print_dim("[LLM 无响应，可能是模型问题或上下文过长]")
                 break
             else:
                 # 有工具调用，重置计数
@@ -734,17 +870,9 @@ class Paw:
                     tool_results=self.last_tool_results
                 )
                 
-                # 显示状态摘要
-                if self.show_debug:
-                    status_summary = self.autostatus.get_summary()
-                    self.ui.print_dim(status_summary)
-                    
             except Exception as e:
                 # 状态评估失败不影响主流程
-                if self.show_debug:
-                    import traceback
-                    self.ui.print_dim(f"状态评估失败: {e}")
-                    traceback.print_exc()
+                pass
         
         return final_response
     
@@ -962,9 +1090,6 @@ class Paw:
                 
         except Exception as e:
             self.ui.print_error(f"上下文优化失败: {e}")
-            if self.show_debug:
-                import traceback
-                traceback.print_exc()
         
         self.ui.print_dim("="*50 + "\n")
     
@@ -1068,6 +1193,28 @@ class Paw:
         # 启动横幅
         self.ui.print_welcome()
         self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
+
+        # 记忆系统延迟初始化：确保先进入首屏
+        if self.memory_manager is None:
+            try:
+                self.ui.print_dim("[Memory] 正在初始化记忆系统（首次可能较慢）...")
+                config = self._load_config()
+                emb_cfg = (config.get('embeddings') or {})
+                embedding_model = emb_cfg.get('model') or "paraphrase-multilingual-MiniLM-L12-v2"
+                embeddings_url = emb_cfg.get('url')
+                embeddings_model = emb_cfg.get('model')
+                self.memory_manager = MemoryManager(
+                    project_path=self.workspace_dir,
+                    embedding_model=embedding_model,
+                    embeddings_url=embeddings_url,
+                    embeddings_model=embeddings_model,
+                    embeddings_api_key=self.api_key
+                )
+                # 记忆系统初始化完成后，重建 system_prompt 以注入记忆
+                self.system_prompt = self._create_system_prompt()
+            except Exception as e:
+                self.ui.print_error(f"[Memory] 初始化失败，将以无记忆模式运行: {e}")
+                self.memory_manager = None
         
         # 标记对话区域起始位置（用于编辑后重渲染）
         self.ui.mark_conversation_start()
@@ -1169,9 +1316,6 @@ class Paw:
                 break
             except Exception as e:
                 self.ui.print_error(f"Error: {e}")
-                if self.show_debug:
-                    import traceback
-                    traceback.print_exc()
 
 
 async def main():

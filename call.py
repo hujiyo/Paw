@@ -86,6 +86,7 @@ class LLMClient:
         self,
         messages: List[Dict],
         *,
+        model: Optional[str] = None,
         tools: Optional[List[Dict]] = None,
         tool_choice: str = "auto",
         temperature: float = 0.7,
@@ -100,6 +101,7 @@ class LLMClient:
         
         Args:
             messages: 消息列表
+            model: 模型名称（可选，覆盖 config 中的默认值）
             tools: 工具定义（可选）
             tool_choice: 工具选择策略（"auto", "none", "required"）
             temperature: 温度（0-2）
@@ -113,7 +115,7 @@ class LLMClient:
             LLMResponse: 统一的响应对象
         """
         payload = {
-            "model": self.config.model,
+            "model": model or self.config.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -187,7 +189,7 @@ class LLMClient:
         response: aiohttp.ClientResponse,
         on_content: Optional[Callable[[str], None]]
     ) -> LLMResponse:
-        """处理流式响应"""
+        """处理流式响应 - 与原版 paw.py 保持一致"""
         content_chunks: List[str] = []
         tool_calls_dict: Dict[int, Dict] = {}
         finish_reason = "stop"
@@ -197,21 +199,21 @@ class LLMClient:
             line = line.decode('utf-8').strip()
             if not line or not line.startswith('data: '):
                 continue
+            
             if line == 'data: [DONE]':
                 break
             
             try:
-                chunk = json.loads(line[6:])  # 移除 'data: ' 前缀
+                json_str = line[6:]  # 移除 'data: ' 前缀
+                chunk = json.loads(json_str)
                 
-                if 'choices' not in chunk or not chunk['choices']:
+                if 'choices' not in chunk or len(chunk['choices']) == 0:
                     continue
                 
                 delta = chunk['choices'][0].get('delta', {})
-                chunk_finish = chunk['choices'][0].get('finish_reason')
-                if chunk_finish:
-                    finish_reason = chunk_finish
+                finish_reason = chunk['choices'][0].get('finish_reason', finish_reason)
                 
-                # 处理内容
+                # 处理内容（流式打印）
                 if 'content' in delta and delta['content']:
                     content_text = delta['content']
                     # 首次输出时去除前导换行
@@ -220,8 +222,8 @@ class LLMClient:
                         if not content_text:
                             continue
                         has_content = True
-                    
                     content_chunks.append(content_text)
+                    
                     if on_content:
                         on_content(content_text)
                 
@@ -239,12 +241,11 @@ class LLMClient:
                         if 'id' in tc_delta:
                             tool_calls_dict[idx]['id'] = tc_delta['id']
                         if 'function' in tc_delta:
-                            func = tc_delta['function']
-                            if 'name' in func:
-                                tool_calls_dict[idx]['function']['name'] += func['name']
-                            if 'arguments' in func:
-                                tool_calls_dict[idx]['function']['arguments'] += func['arguments']
-                
+                            if 'name' in tc_delta['function']:
+                                tool_calls_dict[idx]['function']['name'] += tc_delta['function']['name']
+                            if 'arguments' in tc_delta['function']:
+                                tool_calls_dict[idx]['function']['arguments'] += tc_delta['function']['arguments']
+            
             except json.JSONDecodeError:
                 continue
         

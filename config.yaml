@@ -23,6 +23,13 @@ api:
   #url: "http://localhost:1234/v1/chat/completions"
   model: null
 
+# Embeddings 配置（用于记忆系统向量化）
+embeddings:
+  # Embeddings 端点（LM Studio OpenAI 兼容）
+  url: "http://127.0.0.1:1234/v1/embeddings"
+  # Embeddings 模型名称
+  model: "text-embedding-qwen3-embedding-0.6b"
+
 # 终端配置
 terminal:
   # Shell 类型选择:
