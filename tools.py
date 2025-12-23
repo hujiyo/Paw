@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import time
 import sys
-from tool_errors import ToolError
 from terminal import ThreadedTerminal
-
 
 class BaseTools:
     """基础工具类 - 仅包含 3-5 个核心原子操作"""
@@ -141,8 +139,7 @@ class BaseTools:
             resolved_path = self._resolve_path(file_path)
             
             if not resolved_path.exists():
-                return ToolError.file_not_found(str(resolved_path))
-            
+                return f"Error：File {str(resolved_path)} not found"
             if resolved_path.is_file():
                 resolved_path.unlink()
                 return f"Success: Deleted file {resolved_path.name}"

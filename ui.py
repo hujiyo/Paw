@@ -328,7 +328,7 @@ class UI:
         sys.stdout.write(f"\r{text}")
         sys.stdout.flush()
 
-    def show_tool_start(self, tool_name: str, args_str: str):
+    def show_tool_start(self, tool_call_id: str, tool_name: str, args_str: str):
         """显示工具开始执行"""
         # 计算可用宽度：80 - 2(缩进) - 2(图标+空格) - len(tool_name) - 1(空格)
         max_args_width = self.WIDTH - 5 - len(tool_name)
@@ -340,7 +340,7 @@ class UI:
         text = f"{circle} {self.COLORS['tool_name']}{tool_name}{Style.RESET_ALL} {self.COLORS['tool_args']}{args_str}{Style.RESET_ALL}"
         self.print_overwrite(text)
 
-    def show_tool_result(self, tool_name: str, display: dict, success: bool = True):
+    def show_tool_result(self, tool_call_id: str, tool_name: str, display: dict, success: bool = True):
         """显示工具执行结果 - Claude Code 风格
         
         Args:

@@ -10,7 +10,6 @@ import json
 import asyncio
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
-
 from context_branch import ContextBranch, ContextBranchManager, BranchTrigger
 from chunk_system import ChunkType
 from tool_registry import ToolRegistry

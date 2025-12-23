@@ -19,7 +19,6 @@ import os
 import yaml
 import json
 import hashlib
-import time
 import sqlite3
 import math
 import asyncio
@@ -28,7 +27,9 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
-import aiohttp
+from llama_cpp import Llama
+
+EMBED_MAX_LEN = 2048
 
 
 # ============================================================
@@ -60,41 +61,35 @@ class ConversationChunk:
 # 对话存储（基于 ChromaDB）
 # ============================================================
 
-# 本地模型存储路径
-LOCAL_MODEL_DIR = Path(__file__).parent / "models"
+class LlamaCppEmbeddingClient:
+    """
+    本地 llama-cpp-python embedding 客户端，加载 embedding/*.gguf
+    """
 
+    def __init__(self, *, model_path: Path, n_ctx: int = 32768, verbose: bool = False):
+        self.model_path = Path(model_path)
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"未找到 embedding 模型文件: {self.model_path}")
+        # 静音底层日志
+        os.environ.setdefault("LLAMA_LOG_LEVEL", "fatal")
+        os.environ.setdefault("LLAMA_CPP_LOG_LEVEL", "fatal")
+        # 预加载模型，避免每次调用重复加载
+        self.llama = Llama(
+            model_path=str(self.model_path),
+            embedding=True,
+            n_ctx=n_ctx,
+            verbose=verbose,  # 关闭底层加载日志
+        )
 
-class LMStudioEmbeddingClient:
-    def __init__(self, *, url: str, model: str, api_key: Optional[str] = None, timeout_s: float = 2.0):
-        self.url = url
-        self.model = model
-        self.api_key = api_key
-        self.timeout_s = timeout_s
+    def _embed_sync(self, text: str) -> List[float]:
+        # llama-cpp-python 的 embed 同步接口
+        result = self.llama.embed(text)
+        if not isinstance(result, list) or not result:
+            raise RuntimeError(f"embedding 结果异常: {result}")
+        return result
 
     async def embed(self, text: str) -> List[float]:
-        # 严格匹配 LM Studio 官方示例：
-        # curl http://127.0.0.1:1234/v1/embeddings -H "Content-Type: application/json" -d '{"model":..., "input": ...}'
-        headers = {"Content-Type": "application/json"}
-        # LM Studio 本地默认无需 key，但保留兼容
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        payload = {"model": self.model, "input": text}
-
-        timeout = aiohttp.ClientTimeout(total=self.timeout_s)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(self.url, headers=headers, json=payload) as resp:
-                raw_text = await resp.text()
-                if resp.status != 200:
-                    raise RuntimeError(f"embeddings 请求失败({resp.status}): {raw_text[:500]}")
-                try:
-                    data = json.loads(raw_text)
-                except Exception as e:
-                    raise RuntimeError(f"embeddings 返回不是 JSON: {e}; body={raw_text[:200]}")
-                emb = (((data or {}).get("data") or [{}])[0]).get("embedding")
-                if not isinstance(emb, list) or not emb:
-                    raise RuntimeError(f"embeddings 返回格式异常: {str(data)[:200]}")
-                return emb
+        return await asyncio.to_thread(self._embed_sync, text)
 
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
@@ -114,7 +109,7 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
 
 
 class SQLiteConversationStore:
-    def __init__(self, storage_path: Path, embedding_client: LMStudioEmbeddingClient):
+    def __init__(self, storage_path: Path, embedding_client: LlamaCppEmbeddingClient):
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.db_path = self.storage_path / "conversations.sqlite3"
@@ -149,7 +144,7 @@ class SQLiteConversationStore:
                                project: str = "",
                                metadata: Optional[Dict] = None) -> str:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        embed_text = f"用户: {user_message}"
+        embed_text = f"用户: {user_message[:EMBED_MAX_LEN]}"
 
         embedding = await self.embedding_client.embed(embed_text)
         doc_id = self._generate_id(user_message, timestamp)
@@ -188,7 +183,7 @@ class SQLiteConversationStore:
         if not query:
             return []
 
-        query_embedding = await self.embedding_client.embed(f"用户: {query}")
+        query_embedding = await self.embedding_client.embed(f"用户: {query[:EMBED_MAX_LEN]}")
 
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -287,364 +282,84 @@ class SQLiteConversationStore:
         except Exception:
             return 0
 
-    def find_duplicates(self, threshold: float = 0.95) -> List[List[str]]:
-        # 轻量后端先返回空，避免引入额外 O(n^2) 计算
-        return []
-
-
-class ConversationStore:
-    """
-    对话存储 - 使用 ChromaDB 进行向量检索
-    
-    存储粒度: 单轮对话（一问一答）
-    检索方式: 用户输入 -> 向量相似度 -> 返回相关历史对话
-    """
-    
-    def __init__(self, storage_path: Path, model_name: str = "all-MiniLM-L6-v2"):
+    def find_duplicates(self, threshold: float = 0.95, max_records: int = 800) -> List[List[str]]:
         """
-        初始化对话存储
+        查找内容高度重复的记忆，按项目和 embedding 余弦相似度分组。
         
         Args:
-            storage_path: 存储路径
-            model_name: sentence-transformers 模型名称
-                       - all-MiniLM-L6-v2: 快速，英文为主
-                       - paraphrase-multilingual-MiniLM-L12-v2: 多语言支持
-        """
-        self.storage_path = Path(storage_path)
-        self.storage_path.mkdir(parents=True, exist_ok=True)
+            threshold: 相似度阈值，达到或超过该值的两条记录视为重复
+            max_records: 为了避免 O(n^2) 开销设置的硬上限，超过则只检查最新 max_records 条
         
-        # 初始化 embedding 模型（优先从本地加载）
-        self._model_name = model_name
-        t0 = time.perf_counter()
-        self._embedding_model = self._load_embedding_model(model_name)
-        print(f"[Memory] embedding 模型加载耗时: {time.perf_counter() - t0:.2f}s")
-        
-        # 初始化 ChromaDB
-        t1 = time.perf_counter()
-        self.client = self._chromadb.PersistentClient(
-            path=str(self.storage_path),
-            settings=self._Settings(anonymized_telemetry=False)
-        )
-        
-        # 获取或创建 collection
-        self.collection = self.client.get_or_create_collection(
-            name="conversations",
-            metadata={"hnsw:space": "cosine"}  # 使用余弦相似度
-        )
-
-        print(f"[Memory] ChromaDB 初始化耗时: {time.perf_counter() - t1:.2f}s")
-        
-        print(f"[Memory] 对话存储已加载，当前记录数: {self.collection.count()}")
-    
-    def _load_embedding_model(self, model_name: str) -> "SentenceTransformer":
-        """
-        加载 embedding 模型
-        
-        优先从本地加载，避免每次启动都连接 HuggingFace
-        首次使用时下载到项目本地 models/ 目录
-        """
-        local_path = LOCAL_MODEL_DIR / model_name
-        
-        # 优先从本地加载（离线模式）
-        if local_path.exists():
-            print(f"[Memory] 从本地加载模型: {local_path}")
-            return self._SentenceTransformer(str(local_path), local_files_only=True)
-        
-        # 本地不存在，从网络下载并保存到本地
-        print(f"[Memory] 首次使用，下载模型: {model_name}")
-        print(f"[Memory] 模型将保存到: {local_path}")
-        
-        LOCAL_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        model = self._SentenceTransformer(model_name)
-        model.save(str(local_path))
-        
-        print(f"[Memory] 模型已保存，下次启动将直接从本地加载")
-        return model
-    
-    @property
-    def embedding_model(self) -> "SentenceTransformer":
-        """获取 embedding 模型"""
-        if self._embedding_model is None:
-            self._embedding_model = self._load_embedding_model(self._model_name)
-        return self._embedding_model
-    
-    def _generate_id(self, content: str, timestamp: str) -> str:
-        """生成唯一 ID"""
-        hash_input = f"{timestamp}_{content[:100]}"
-        return hashlib.md5(hash_input.encode()).hexdigest()[:12]
-    
-    def add_conversation(self, 
-                        user_message: str, 
-                        assistant_message: str,
-                        project: str = "",
-                        metadata: Optional[Dict] = None) -> str:
-        """
-        添加一轮对话
-        
-        Args:
-            user_message: 用户消息
-            assistant_message: AI 回复
-            project: 项目名称
-            metadata: 额外元数据
-            
         Returns:
-            对话 ID
+            每个元素是一组重复记录的 ID（长度>1）
         """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        duplicate_groups: List[List[str]] = []
         
-        # 组合文本用于 embedding（主要基于用户问题检索）
-        # 但存储完整对话用于上下文
-        embed_text = f"用户: {user_message}"
-        full_text = f"用户: {user_message}\nAI: {assistant_message}"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT id, project, embedding_json
+                FROM conversations
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (max_records,)
+            ).fetchall()
         
-        # 生成 embedding
-        embedding = self.embedding_model.encode(embed_text).tolist()
-        
-        # 生成 ID
-        doc_id = self._generate_id(user_message, timestamp)
-        
-        # 准备元数据
-        doc_metadata = {
-            "project": project,
-            "timestamp": timestamp,
-            "user_message": user_message[:1000],  # 限制长度
-            "assistant_message": assistant_message[:2000],
-            **(metadata or {})
-        }
-        
-        # 存入 ChromaDB
-        self.collection.add(
-            ids=[doc_id],
-            embeddings=[embedding],
-            documents=[full_text[:3000]],  # 完整对话，限制长度
-            metadatas=[doc_metadata]
-        )
-        
-        return doc_id
-    
-    def search(self, 
-               query: str, 
-               project: Optional[str] = None,
-               n_results: int = 5,
-               min_score: float = 0.3) -> List[Dict[str, Any]]:
-        """
-        检索相关对话
-        
-        Args:
-            query: 查询文本
-            project: 限定项目（可选）
-            n_results: 返回数量
-            min_score: 最低相似度阈值（0-1，越高越严格）
-            
-        Returns:
-            相关对话列表
-        """
-        if self.collection.count() == 0:
+        if len(rows) < 2:
             return []
         
-        # 生成查询 embedding
-        query_embedding = self.embedding_model.encode(f"用户: {query}").tolist()
+        # 先按项目拆分，减少跨项目比较
+        entries_by_project: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            try:
+                emb = json.loads(row["embedding_json"] or "[]")
+            except Exception:
+                emb = []
+            if not emb:
+                continue
+            project_key = row["project"] or ""
+            entries_by_project.setdefault(project_key, []).append({
+                "id": row["id"],
+                "embedding": emb,
+            })
         
-        # 构建过滤条件
-        where_filter = None
-        if project:
-            where_filter = {"project": project}
-        
-        # 检索
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=min(n_results, self.collection.count()),
-            where=where_filter,
-            include=["documents", "metadatas", "distances"]
-        )
-        
-        # 处理结果
-        conversations = []
-        if results and results['ids'] and results['ids'][0]:
-            for i, doc_id in enumerate(results['ids'][0]):
-                # ChromaDB 返回的是距离，转换为相似度
-                distance = results['distances'][0][i]
-                similarity = 1 - distance  # 余弦距离转相似度
-                
-                if similarity >= min_score:
-                    conversations.append({
-                        "id": doc_id,
-                        "similarity": round(similarity, 3),
-                        "document": results['documents'][0][i],
-                        "metadata": results['metadatas'][0][i]
-                    })
-        
-        return conversations
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """获取统计信息"""
-        return {
-            "total_conversations": self.collection.count(),
-            "storage_path": str(self.storage_path)
-        }
-    
-    def list_all(self, 
-                 project: Optional[str] = None,
-                 limit: int = 100,
-                 offset: int = 0) -> List[Dict[str, Any]]:
-        """
-        列出所有对话记录
-        
-        Args:
-            project: 限定项目（可选）
-            limit: 返回数量限制
-            offset: 偏移量（用于分页）
-            
-        Returns:
-            对话列表，按时间倒序
-        """
-        if self.collection.count() == 0:
-            return []
-        
-        # 构建过滤条件
-        where_filter = None
-        if project:
-            where_filter = {"project": project}
-        
-        # 获取所有记录
-        results = self.collection.get(
-            where=where_filter,
-            include=["documents", "metadatas"]
-        )
-        
-        # 组装结果
-        conversations = []
-        if results and results['ids']:
-            for i, doc_id in enumerate(results['ids']):
-                conversations.append({
-                    "id": doc_id,
-                    "document": results['documents'][i] if results['documents'] else "",
-                    "metadata": results['metadatas'][i] if results['metadatas'] else {}
-                })
-        
-        # 按时间倒序排序
-        conversations.sort(
-            key=lambda x: x.get('metadata', {}).get('timestamp', ''),
-            reverse=True
-        )
-        
-        # 分页
-        return conversations[offset:offset + limit]
-    
-    def get_by_id(self, doc_id: str) -> Optional[Dict[str, Any]]:
-        """
-        根据 ID 获取单条对话
-        
-        Args:
-            doc_id: 对话 ID
-            
-        Returns:
-            对话记录，不存在则返回 None
-        """
-        try:
-            results = self.collection.get(
-                ids=[doc_id],
-                include=["documents", "metadatas"]
-            )
-            
-            if results and results['ids']:
-                return {
-                    "id": results['ids'][0],
-                    "document": results['documents'][0] if results['documents'] else "",
-                    "metadata": results['metadatas'][0] if results['metadatas'] else {}
-                }
-        except Exception:
-            pass
-        return None
-    
-    def delete(self, doc_id: str) -> bool:
-        """
-        删除单条对话
-        
-        Args:
-            doc_id: 对话 ID
-            
-        Returns:
-            是否删除成功
-        """
-        try:
-            self.collection.delete(ids=[doc_id])
-            return True
-        except Exception:
-            return False
-    
-    def delete_batch(self, doc_ids: List[str]) -> int:
-        """
-        批量删除对话
-        
-        Args:
-            doc_ids: 对话 ID 列表
-            
-        Returns:
-            成功删除的数量
-        """
-        if not doc_ids:
-            return 0
-        try:
-            self.collection.delete(ids=doc_ids)
-            return len(doc_ids)
-        except Exception:
-            return 0
-    
-    def find_duplicates(self, threshold: float = 0.95) -> List[List[str]]:
-        """
-        查找重复或高度相似的对话
-        
-        Args:
-            threshold: 相似度阈值（0-1，越高越严格）
-            
-        Returns:
-            重复组列表，每组包含相似对话的 ID
-        """
-        if self.collection.count() < 2:
-            return []
-        
-        # 获取所有记录
-        all_records = self.list_all(limit=1000)
-        if len(all_records) < 2:
-            return []
-        
-        # 提取用户消息用于比较
-        messages = []
-        for record in all_records:
-            user_msg = record.get('metadata', {}).get('user_message', '')
-            messages.append((record['id'], user_msg))
-        
-        # 简单的文本相似度检测（基于字符重叠）
-        duplicate_groups = []
-        seen = set()
-        
-        for i, (id1, msg1) in enumerate(messages):
-            if id1 in seen or not msg1:
+        for project_entries in entries_by_project.values():
+            n = len(project_entries)
+            if n < 2:
                 continue
             
-            group = [id1]
-            for j, (id2, msg2) in enumerate(messages[i+1:], i+1):
-                if id2 in seen or not msg2:
-                    continue
-                
-                # 计算简单相似度（Jaccard）
-                set1 = set(msg1)
-                set2 = set(msg2)
-                if not set1 or not set2:
-                    continue
-                similarity = len(set1 & set2) / len(set1 | set2)
-                
-                if similarity >= threshold:
-                    group.append(id2)
-                    seen.add(id2)
+            parent = list(range(n))
             
-            if len(group) > 1:
-                duplicate_groups.append(group)
-                seen.add(id1)
+            def find(idx: int) -> int:
+                while parent[idx] != idx:
+                    parent[idx] = parent[parent[idx]]
+                    idx = parent[idx]
+                return idx
+            
+            def union(a: int, b: int) -> None:
+                pa, pb = find(a), find(b)
+                if pa != pb:
+                    parent[pb] = pa
+            
+            for i in range(n):
+                emb_i = project_entries[i]["embedding"]
+                for j in range(i + 1, n):
+                    emb_j = project_entries[j]["embedding"]
+                    if _cosine_similarity(emb_i, emb_j) >= threshold:
+                        union(i, j)
+            
+            grouped: Dict[int, List[str]] = {}
+            for idx in range(n):
+                root = find(idx)
+                grouped.setdefault(root, []).append(project_entries[idx]["id"])
+            
+            for group_ids in grouped.values():
+                if len(group_ids) > 1:
+                    duplicate_groups.append(group_ids)
         
         return duplicate_groups
-
 
 # ============================================================
 # 回忆管理器 - 生命值递减法
@@ -817,12 +532,12 @@ class RecallManager:
 
 
 # ============================================================
-# 记忆管理器 v3
+# 记忆管理
 # ============================================================
 
 class MemoryManager:
     """
-    记忆管理器 v3
+    记忆管理
     
     核心特性:
     1. Rules: 用户手动配置，永远注入
@@ -831,16 +546,14 @@ class MemoryManager:
     
     def __init__(self, 
                  project_path: Path,
-                 embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2",
-                 embeddings_url: Optional[str] = None,
-                 embeddings_model: Optional[str] = None,
-                 embeddings_api_key: Optional[str] = None):
+                 embedding_path: Optional[Path] = None,
+                 n_ctx: int = 32768):
         """
         初始化记忆管理器
         
         Args:
             project_path: 当前项目路径
-            embedding_model: embedding 模型名称
+            embedding_path: embedding 模型文件路径 (.gguf)
         """
         self.project_path = Path(project_path)
         
@@ -861,22 +574,15 @@ class MemoryManager:
         
         # 初始化对话存储
         conversations_dir = self.user_dir / "conversations"
-        if embeddings_url and embeddings_model:
-            embedding_client = LMStudioEmbeddingClient(
-                url=embeddings_url,
-                model=embeddings_model,
-                api_key=embeddings_api_key,
-                timeout_s=2.0
-            )
-            self.conversation_store = SQLiteConversationStore(
-                storage_path=conversations_dir,
-                embedding_client=embedding_client
-            )
-        else:
-            self.conversation_store = ConversationStore(
-                storage_path=conversations_dir,
-                model_name=embedding_model
-            )
+        resolved_model = self._resolve_embedding_model(embedding_path)
+        self.embedding_client = LlamaCppEmbeddingClient(
+            model_path=resolved_model,
+            n_ctx=n_ctx,
+        )
+        self.conversation_store = SQLiteConversationStore(
+            storage_path=conversations_dir,
+            embedding_client=self.embedding_client
+        )
         
         # 初始化回忆管理器（生命值递减法）
         self.recall_manager = RecallManager(
@@ -884,9 +590,6 @@ class MemoryManager:
             base_life=3,        # 基础生命值3轮
             decay_rate=1        # 每轮衰减1
         )
-        
-        # 当前检索到的相关对话（临时，用于兼容）
-        self.recalled_conversations: List[Dict] = []
     
     # ==================== 规则加载 ====================
     
@@ -915,6 +618,26 @@ class MemoryManager:
                 print(f"[Memory] 加载项目规范失败: {e}")
         
         return rules
+    
+    # ==================== 模型路径解析 ====================
+    
+    def _resolve_embedding_model(self, embedding_path: Optional[Path]) -> Path:
+        """
+        优先使用显式指定的模型路径，否则自动查找项目根目录下 embedding/*.gguf
+        """
+        if embedding_path:
+            p = Path(embedding_path).expanduser()
+            if p.exists():
+                return p
+            raise FileNotFoundError(f"指定的 embedding 模型不存在: {p}")
+        
+        default_dir = self.project_path / "embedding"
+        if default_dir.exists():
+            candidates = sorted(default_dir.glob("*.gguf"))
+            if candidates:
+                return candidates[0]
+        
+        raise FileNotFoundError("未找到 embedding 模型文件，请将 *.gguf 放在项目 embedding/ 目录或在配置中指定 path")
     
     def reload_rules(self):
         """重新加载规则"""
@@ -1153,10 +876,6 @@ class MemoryManager:
         """
         return self.recall_manager.get_active_prompt()
     
-    def clear_recalled(self):
-        """清空所有活跃记忆"""
-        self.recall_manager.clear()
-    
     # ==================== 统计信息 ====================
     
     def get_stats(self) -> Dict[str, Any]:
@@ -1174,6 +893,6 @@ class MemoryManager:
     
     def get_memory_prompt(self) -> str:
         """兼容旧接口"""
-        return self.get_rules_prompt()
+        return self.get_rules_prompt() #规则注入
 
 

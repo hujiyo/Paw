@@ -3,11 +3,9 @@
 AutoStatus - 动态状态评估模块
 通过独立的API调用评估AI的当前状态，并注入到系统提示词中
 """
-
 import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-
 from call import LLMClient, LLMConfig
 
 

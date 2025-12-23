@@ -11,6 +11,7 @@ Web 工具模块 - 提供联网搜索和网页阅读能力
 import aiohttp
 import asyncio
 import hashlib
+import json
 import random
 import string
 import re
@@ -18,9 +19,7 @@ from typing import Dict, List, Any, Optional
 from urllib.parse import quote_plus, urlparse
 from bs4 import BeautifulSoup
 import html2text
-
 from call import LLMClient, LLMConfig
-
 
 class WebTools:
     """
@@ -46,6 +45,7 @@ class WebTools:
         self.max_results = self.config.get('max_results', 5)
         self.page_size = self.config.get('page_size', 4096)  # 每页最大 4KB
         self.use_jina_reader = self.config.get('use_jina_reader', True)  # 默认启用 Jina Reader
+        self.custom_search_api = self.config.get('custom_search_api') or {}
         
         # 内存存储: page_id -> {"content": str, "url": str, "summary": str}
         self.pages: Dict[str, Dict[str, str]] = {}
@@ -94,8 +94,12 @@ class WebTools:
         num_results = num_results or self.max_results
         
         try:
-            if self.search_engine == 'duckduckgo':
-                results = await self._search_duckduckgo(query, num_results)
+            use_custom_api = bool(self.custom_search_api.get('url'))
+            engine_label = self.search_engine
+            
+            if use_custom_api:
+                engine_label = self.custom_search_api.get('name') or self.custom_search_api.get('engine') or 'custom'
+                results = await self._search_custom_api(query, num_results)
             else:
                 # 默认使用 DuckDuckGo
                 results = await self._search_duckduckgo(query, num_results)
@@ -109,7 +113,7 @@ class WebTools:
             return {
                 "success": True,
                 "query": query,
-                "engine": self.search_engine,
+                "engine": engine_label,
                 "results": results,
                 "count": len(results)
             }
@@ -144,6 +148,91 @@ class WebTools:
             })
         
         return results
+    
+    async def _search_custom_api(self, query: str, num_results: int) -> List[Dict[str, str]]:
+        """调用用户自定义搜索 API"""
+        if not self.custom_search_api.get('url'):
+            raise ValueError("custom_search_api.url 未配置")
+        
+        replacements = {
+            "query": query,
+            "query_encoded": quote_plus(query),
+            "api_key": self.custom_search_api.get('api_key', '')
+        }
+        
+        url_template = self.custom_search_api.get('url', '')
+        url = self._render_template(url_template, replacements)
+        method = (self.custom_search_api.get('method') or 'GET').upper()
+        headers = self._render_template(self.custom_search_api.get('headers', {}), replacements) or {}
+        params = self._render_template(self.custom_search_api.get('params'), replacements)
+        payload = self._render_template(self.custom_search_api.get('payload'), replacements)
+        payload_type = (self.custom_search_api.get('payload_type') or 'json').lower()
+        timeout = aiohttp.ClientTimeout(total=self.custom_search_api.get('timeout', 15))
+        
+        request_kwargs: Dict[str, Any] = {"headers": headers, "timeout": timeout}
+        if params and isinstance(params, dict):
+            request_kwargs["params"] = params
+        
+        if method in {"POST", "PUT", "PATCH"} and payload is not None:
+            if payload_type == "json":
+                if isinstance(payload, (dict, list)):
+                    request_kwargs["json"] = payload
+                else:
+                    try:
+                        request_kwargs["json"] = json.loads(payload)
+                    except Exception:
+                        request_kwargs["data"] = payload
+            elif payload_type == "form" and isinstance(payload, dict):
+                request_kwargs["data"] = payload
+            else:
+                request_kwargs["data"] = payload if isinstance(payload, str) else json.dumps(payload)
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.request(method, url, **request_kwargs) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise RuntimeError(f"自定义搜索 API 请求失败 (HTTP {response.status}): {error_text[:200]}")
+                
+                try:
+                    data = await response.json()
+                except Exception:
+                    text = await response.text()
+                    raise RuntimeError("自定义搜索 API 返回的不是 JSON 数据: " + text[:200])
+        
+        results_path = self.custom_search_api.get('results_path', 'results')
+        records = self._extract_from_path(data, results_path) if results_path else data
+        if not isinstance(records, list):
+            raise ValueError(f"自定义搜索 API 返回结果无法解析，期望列表，得到 {type(records)}")
+        
+        title_field = self.custom_search_api.get('title_field', 'title')
+        url_field = self.custom_search_api.get('url_field', 'url')
+        snippet_field = self.custom_search_api.get('snippet_field', 'snippet')
+        
+        parsed_results: List[Dict[str, str]] = []
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            
+            title = self._extract_from_path(item, title_field) if title_field else None
+            link = self._extract_from_path(item, url_field) if url_field else None
+            snippet = self._extract_from_path(item, snippet_field) if snippet_field else None
+            
+            if not link:
+                continue
+            
+            parsed_results.append({
+                "title": str(title or "")[:200],
+                "url": str(link),
+                "snippet": str(snippet or "")[:300]
+            })
+            
+            if len(parsed_results) >= num_results:
+                break
+        
+        if not parsed_results:
+            raise ValueError("自定义搜索 API 未返回有效的搜索结果")
+        
+        return parsed_results
     
     async def load_url_content(self, url: str) -> Dict[str, Any]:
         """
@@ -320,6 +409,45 @@ class WebTools:
         markdown = re.sub(r'\n{3,}', '\n\n', markdown)
         
         return markdown.strip()
+    
+    def _render_template(self, value: Any, replacements: Dict[str, str]) -> Any:
+        """对字符串、列表、字典中的占位符进行替换"""
+        if value is None:
+            return None
+        
+        if isinstance(value, str):
+            result = value
+            for key, val in replacements.items():
+                placeholder = f"{{{key}}}"
+                result = result.replace(placeholder, val or "")
+            return result
+        
+        if isinstance(value, dict):
+            return {k: self._render_template(v, replacements) for k, v in value.items()}
+        
+        if isinstance(value, list):
+            return [self._render_template(v, replacements) for v in value]
+        
+        return value
+    
+    def _extract_from_path(self, data: Any, path: str) -> Any:
+        """根据点路径提取嵌套字段，支持简单的下标访问"""
+        if path is None:
+            return data
+        
+        current = data
+        for part in filter(None, path.split('.')):
+            if isinstance(current, dict):
+                current = current.get(part)
+            elif isinstance(current, list):
+                try:
+                    idx = int(part)
+                    current = current[idx]
+                except (ValueError, IndexError):
+                    return None
+            else:
+                return None
+        return current
     
     def _extract_title(self, html: str) -> str:
         """提取网页标题"""

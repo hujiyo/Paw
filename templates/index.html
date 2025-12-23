@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paw</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.css">
+    <style>
+        :root {
+            --font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            /* Terminal-inspired Palette */
+            --bg-color: #000000;
+            --text-primary: #EAEAEA;
+            --text-secondary: #888888;
+            --border-color: #333333;
+            --accent-primary: #FF9E80; /* Coral Orange-Pink from Logo */
+            --accent-secondary: #80D1FF; /* Bright Cyan from User Badge */
+            --tool-color: #BB9AF7;
+            --error-color: #FF5555;
+            --success-color: #50FA7B;
+        }
+        * { box-sizing: border-box; }
+        body { font-family: var(--font-family); background-color: var(--bg-color); color: var(--text-primary); margin: 0; }
+        #app-shell { display: flex; height: 100vh; width: 100%; }
+        #conversation-panel { width: 320px; border-right: 1px solid var(--border-color); background: radial-gradient(circle at top, rgba(255,158,128,0.15), transparent 60%), #060606; padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 1rem; }
+        #app-container { display: flex; flex-direction: column; height: 100vh; width: 100%; }
+        #header { padding: 2rem 0 1rem 0; text-align: center; }
+        #logo { font-family: var(--font-family); font-size: 16px; line-height: 1.2; color: var(--accent-primary); white-space: pre; display: inline-block; text-shadow: 0 0 5px rgba(255, 158, 128, 0.5); }
+        #status-bar { color: var(--text-secondary); text-align: center; padding: 0.75rem 0; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
+        #messages-wrapper { flex-grow: 1; overflow-y: auto; scroll-behavior: smooth; }
+        #messages { max-width: 800px; margin: 0 auto; padding: 2rem 1rem; width: 100%; }
+        #input-area { border-top: 1px solid var(--border-color); padding: 1.25rem 1rem; }
+        #input-form-wrapper { max-width: 800px; margin: 0 auto; }
+        #input-form { display: flex; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; }
+        #message-input { flex-grow: 1; background: none; color: var(--text-primary); border: none; padding: 0.75rem; font-size: 1rem; font-family: var(--font-family); outline: none; resize: none; max-height: 250px; }
+        #send-button { background: var(--accent-primary); color: var(--bg-color); border: none; border-radius: 6px; padding: 0 1rem; margin: 0.5rem; cursor: pointer; font-weight: bold; transition: background-color 0.2s; }
+        .message-block { margin-bottom: 2rem; }
+        .message-header { display: inline-block; font-weight: bold; padding: 0.25rem 0.75rem; margin-bottom: 0.75rem; border-radius: 4px; }
+        .user-message .message-header { background-color: var(--accent-secondary); color: var(--bg-color); }
+        .assistant-message .message-header { background-color: var(--accent-primary); color: var(--bg-color); }
+        .message-content { line-height: 1.7; word-wrap: break-word; padding-left: 1rem; }
+        .message-content p:last-child { margin-bottom: 0; }
+        .message-content pre { position: relative; background-color: #1A1A1A; padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color); font-family: var(--font-family); font-size: 0.9em; }
+        .message-content code:not(pre > code) { background-color: rgba(255, 158, 128, 0.1); color: var(--accent-primary); padding: 0.2em 0.4em; border-radius: 4px; }
+        .copy-btn { position: absolute; top: 0.75rem; right: 0.75rem; background: var(--border-color); color: var(--text-primary); border: none; padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+        .message-content pre:hover .copy-btn { opacity: 1; }
+        .system-message { color: var(--text-secondary); font-size: 0.9em; text-align: center; padding: 0.5rem 0; }
+        .tool-call { border-left: 2px solid var(--tool-color); padding-left: 1rem; margin: 1rem 0; font-size: 0.9em; }
+        .tool-call-header { display: flex; align-items: center; color: var(--tool-color); }
+        .tool-call-header .spinner { width: 1em; height: 1em; border: 2px solid var(--accent-primary); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 0.75rem; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .tool-call-body { margin-top: 0.5rem; color: var(--text-secondary); word-break: break-all; }
+        .tool-result.success { border-left-color: var(--success-color); }
+        .tool-result.error { border-left-color: var(--error-color); }
+        .tool-result .tool-call-header { color: var(--text-secondary); }
+        .tool-result .result-icon { margin-right: 0.5rem; }
+        .tool-result.success .result-icon { color: var(--success-color); }
+        .tool-result.error .result-icon { color: var(--error-color); }
+        .tool-result .result-body { margin-top: 0.5rem; color: var(--text-primary); }
+        .panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+        .panel-title { font-size: 1rem; letter-spacing: 0.06em; margin-bottom: 0.35rem; }
+        .panel-subtitle { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
+        #create-branch-btn { background: rgba(255,158,128,0.1); color: var(--accent-primary); border: 1px solid rgba(255,158,128,0.4); border-radius: 6px; padding: 0.35rem 0.8rem; cursor: pointer; font-weight: 600; }
+        #create-branch-btn:hover { background: rgba(255,158,128,0.2); }
+        .branch-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+        .branch-pill { border: 1px solid var(--border-color); background: rgba(255,255,255,0.02); color: var(--text-secondary); border-radius: 999px; padding: 0.2rem 0.8rem; font-size: 0.85rem; cursor: pointer; transition: border 0.2s, color 0.2s, background 0.2s; }
+        .branch-pill.active { border-color: var(--accent-primary); color: var(--accent-primary); background: rgba(255,158,128,0.15); }
+        #tree-scroll { flex: 1; overflow-y: auto; padding-right: 0.5rem; }
+        #conversation-tree { display: flex; flex-direction: column; gap: 1rem; padding-bottom: 1rem; }
+        .tree-empty { color: var(--text-secondary); font-size: 0.9rem; border: 1px dashed var(--border-color); border-radius: 10px; padding: 1rem; text-align: center; }
+        .tree-node { display: flex; gap: 0.75rem; position: relative; padding-left: calc(var(--node-depth, 0) * 24px); }
+        .tree-node::after { content: ''; position: absolute; left: calc(var(--node-depth, 0) * 24px + 6px); top: 0; bottom: -0.5rem; width: 1px; background: rgba(255,255,255,0.08); }
+        .tree-node.terminal-node::after { bottom: 0.7rem; }
+        .tree-node .node-spine { width: 12px; position: relative; display: flex; justify-content: center; }
+        .node-dot { width: 10px; height: 10px; border-radius: 50%; display: block; margin-top: 0.2rem; box-shadow: 0 0 6px rgba(255,255,255,0.4); }
+        .node-line { position: absolute; top: 1.2rem; bottom: -1rem; width: 2px; background: rgba(255,255,255,0.06); }
+        .tree-node.terminal-node .node-line { display: none; }
+        .tree-node.node-user .node-dot { background: var(--accent-secondary); }
+        .tree-node.node-assistant .node-dot { background: var(--accent-primary); }
+        .tree-node .node-card { flex: 1; border: 1px solid var(--border-color); border-radius: 10px; padding: 0.75rem; background: rgba(255,255,255,0.02); transition: border-color 0.2s, transform 0.2s; }
+        .tree-node.active-branch .node-card { border-color: rgba(255,158,128,0.6); transform: translateX(2px); }
+        .node-card-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 0.35rem; }
+        .node-role { font-weight: bold; letter-spacing: 0.1em; }
+        .node-card-meta { display: flex; align-items: center; gap: 0.4rem; color: var(--text-secondary); }
+        .node-time { font-size: 0.75rem; }
+        .branch-tag { border: 1px solid rgba(255,255,255,0.1); padding: 0.05rem 0.4rem; border-radius: 0.5rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .fork-btn { background: none; border: 1px solid rgba(255,255,255,0.15); color: var(--text-primary); border-radius: 999px; padding: 0.15rem 0.55rem; font-size: 0.7rem; cursor: pointer; text-transform: uppercase; letter-spacing: 0.08em; }
+        .fork-btn:hover { border-color: var(--accent-secondary); color: var(--accent-secondary); }
+        .node-text { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; max-height: 6rem; overflow: hidden; }
+        @media (max-width: 960px) {
+            #app-shell { flex-direction: column; }
+            #conversation-panel { width: 100%; height: 40vh; border-right: none; border-bottom: 1px solid var(--border-color); }
+            #app-container { height: 60vh; }
+        }
+        @media (max-width: 600px) {
+            .panel-header { flex-direction: column; align-items: flex-start; }
+            #create-branch-btn { width: 100%; }
+            .branch-pills { max-height: 96px; overflow-y: auto; }
+        }
+
+        /* Modal */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-overlay.visible { display: flex; }
+        .modal { width: min(520px, 92vw); background: #0b0b0b; border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 20px 80px rgba(0,0,0,0.5); }
+        .modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-color); font-weight: bold; color: var(--text-primary); }
+        .modal-body { padding: 1rem 1.25rem; }
+        .model-item { padding: 0.6rem 0.8rem; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 0.6rem; cursor: pointer; }
+        .model-item:hover { border-color: var(--accent-primary); background: rgba(255,158,128,0.08); }
+        .modal-input { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid var(--border-color); background: #0d0d0d; color: var(--text-primary); border-radius: 8px; outline: none; }
+        .modal-actions { padding: 0 1.25rem 1rem; display: flex; justify-content: flex-end; }
+        .modal-btn { background: var(--accent-primary); color: #000; border: none; border-radius: 6px; padding: 0.5rem 0.9rem; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="app-shell">
+        <aside id="conversation-panel">
+            <div class="panel-header">
+                <div>
+                    <div class="panel-title">Dialogue Tree</div>
+                    <p class="panel-subtitle">蓝色 USER · 粉色 PAW · 任意节点可分叉</p>
+                </div>
+                <button id="create-branch-btn" type="button">+ 新分支</button>
+            </div>
+            <div id="branch-pills" class="branch-pills"></div>
+            <div id="tree-scroll">
+                <div id="tree-empty" class="tree-empty">暂无对话，发送消息后这里会绘制对话结构树。</div>
+                <div id="conversation-tree"></div>
+            </div>
+        </aside>
+        <div id="app-container">
+            <header id="header"><div id="logo"></div></header>
+            <div id="status-bar"></div>
+            <div id="messages-wrapper"><div id="messages"></div></div>
+            <div id="input-area">
+                <div id="input-form-wrapper">
+                    <form id="input-form">
+                        <textarea id="message-input" placeholder="Ask Paw anything..." rows="1"></textarea>
+                        <button id="send-button" type="submit">Send</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for model selection / text input -->
+    <div id="modal" class="modal-overlay">
+        <div class="modal">
+            <div id="modal-title" class="modal-header">Select a model</div>
+            <div id="modal-body" class="modal-body"></div>
+            <div id="modal-actions" class="modal-actions" style="display:none;">
+                <button id="modal-ok" class="modal-btn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const logoEl = document.getElementById('logo');
+        const logoText = `██████╗    █████╗   ██╗    ██╗\n██╔══██╗  ██╔══██╗  ██║ █╗ ██║\n██████╔╝  ███████║  ██║███╗██║\n██╔═══╝   ██╔══██║  ╚███╔███╔╝\n╚═╝       ╚═╝  ╚═╝   ╚══╝╚══╝ `;
+        logoEl.textContent = logoText;
+
+        const messagesWrapper = document.getElementById('messages-wrapper');
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('message-input');
+        const inputForm = document.getElementById('input-form');
+        const modal = document.getElementById('modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const modalActions = document.getElementById('modal-actions');
+        const modalOk = document.getElementById('modal-ok');
+        const conversationTreeEl = document.getElementById('conversation-tree');
+        const forkEmptyEl = document.getElementById('tree-empty');
+        const branchPillsEl = document.getElementById('branch-pills');
+        const createBranchBtn = document.getElementById('create-branch-btn');
+
+        marked.setOptions({ highlight: (code, lang) => hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value, langPrefix: 'hljs language-', gfm: true, breaks: true });
+        
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        ws.onopen = () => addSystemMessage('Connected to Paw!');
+        ws.onclose = () => addSystemMessage('Connection closed.', 'error');
+        ws.onerror = (error) => { addSystemMessage('WebSocket error.', 'error'); console.error('WebSocket Error:', error); };
+        ws.onmessage = (event) => handleEvent(JSON.parse(event.data));
+
+        function handleEvent({ event, data }) {
+            switch (event) {
+                case 'assistant_stream_start': createAssistantMessage(data.id); break;
+                case 'assistant_stream_chunk': appendToMessage(data.id, data.text); break;
+                case 'assistant_stream_end': finalizeMessage(data.id); break;
+                case 'tool_start': createToolCall(data); break;
+                case 'tool_result': updateToolCall(data); break;
+                case 'system_message': addSystemMessage(data.text, data.type); break;
+                case 'status_update': updateStatusBar(data); break;
+                case 'show_model_selection': showModelSelection(data.models); break;
+                case 'request_input': showInputPrompt(data); break;
+                default: console.log("Unknown event:", event, data);
+            }
+        }
+
+        function addSystemMessage(text, type = 'dim') {
+            const msgEl = document.createElement('div');
+            msgEl.className = `system-message ${type}`;
+            msgEl.textContent = text;
+            messagesDiv.appendChild(msgEl);
+            scrollToBottom();
+        }
+
+        const treeState = {
+            branches: [{ id: 'branch-main', name: '主线', parentNodeId: null }],
+            activeBranchId: 'branch-main',
+            nodes: []
+        };
+        const messageBranchMap = new Map();
+
+        function getBranchById(id) {
+            return treeState.branches.find(b => b.id === id);
+        }
+
+        function setActiveBranch(id) {
+            treeState.activeBranchId = id;
+            renderBranchPills();
+            renderConversationTree();
+        }
+
+        function renderBranchPills() {
+            if (!branchPillsEl) return;
+            branchPillsEl.innerHTML = '';
+            treeState.branches.forEach(branch => {
+                const pill = document.createElement('button');
+                pill.type = 'button';
+                pill.className = `branch-pill ${branch.id === treeState.activeBranchId ? 'active' : ''}`;
+                pill.textContent = branch.name;
+                pill.onclick = () => setActiveBranch(branch.id);
+                branchPillsEl.appendChild(pill);
+            });
+        }
+
+        function formatNodeText(text) {
+            const div = document.createElement('div');
+            div.textContent = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+            return div.innerHTML.replace(/\n/g, '<br>');
+        }
+
+        function calculateDepth(node) {
+            let depth = 0;
+            let currentParent = node.parentId;
+            while (currentParent) {
+                depth += 1;
+                const parentNode = treeState.nodes.find(n => n.id === currentParent);
+                if (!parentNode) break;
+                currentParent = parentNode.parentId;
+            }
+            return depth;
+        }
+
+        function isTerminalNode(nodeId) {
+            return !treeState.nodes.some(n => n.parentId === nodeId);
+        }
+
+        function renderConversationTree() {
+            if (!conversationTreeEl || !forkEmptyEl) return;
+            conversationTreeEl.innerHTML = '';
+            if (!treeState.nodes.length) {
+                forkEmptyEl.style.display = 'flex';
+                return;
+            }
+            forkEmptyEl.style.display = 'none';
+            const frag = document.createDocumentFragment();
+            treeState.nodes.forEach(node => {
+                const depth = calculateDepth(node);
+                const nodeEl = document.createElement('div');
+                nodeEl.className = `tree-node ${node.role === 'user' ? 'node-user' : 'node-assistant'} ${node.branchId === treeState.activeBranchId ? 'active-branch' : ''} ${isTerminalNode(node.id) ? 'terminal-node' : ''}`;
+                nodeEl.style.setProperty('--node-depth', depth);
+                nodeEl.innerHTML = `
+                    <div class="node-spine">
+                        <span class="node-dot"></span>
+                        <span class="node-line"></span>
+                    </div>
+                    <div class="node-card">
+                        <div class="node-card-header">
+                            <span class="node-role">${node.role === 'user' ? 'USER' : 'PAW'}</span>
+                            <div class="node-card-meta">
+                                <span class="branch-tag">${getBranchById(node.branchId)?.name || '主线'}</span>
+                                <span class="node-time">${node.timestamp}</span>
+                                <button class="fork-btn" data-fork-node="${node.id}">分叉</button>
+                            </div>
+                        </div>
+                        <div class="node-text">${formatNodeText(node.text)}</div>
+                    </div>
+                `;
+                frag.appendChild(nodeEl);
+            });
+            conversationTreeEl.appendChild(frag);
+        }
+
+        function findParentForBranch(branchId) {
+            const branchNodes = treeState.nodes.filter(n => n.branchId === branchId);
+            if (branchNodes.length) return branchNodes[branchNodes.length - 1].id;
+            return getBranchById(branchId)?.parentNodeId || null;
+        }
+
+        function addConversationNode({ role, text, messageId, branchId }) {
+            const normalized = text?.trim();
+            if (!normalized) return null;
+            const targetBranch = branchId || treeState.activeBranchId;
+            const nodeId = messageId || `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            treeState.nodes.push({
+                id: nodeId,
+                role,
+                text: normalized,
+                branchId: targetBranch,
+                parentId: findParentForBranch(targetBranch),
+                timestamp: new Date().toLocaleTimeString()
+            });
+            renderConversationTree();
+            return nodeId;
+        }
+
+        function createBranchFromNode(nodeId) {
+            const origin = treeState.nodes.find(n => n.id === nodeId);
+            if (!origin) return;
+            const suggested = origin.role === 'user' ? '用户假设' : 'Paw推演';
+            const name = prompt('为新分支命名', suggested);
+            if (!name) return;
+            const branchId = `branch-${Date.now()}`;
+            treeState.branches.push({ id: branchId, name, parentNodeId: nodeId });
+            setActiveBranch(branchId);
+        }
+
+        function createDetachedBranch() {
+            const name = prompt('新建分支名称', `分支 ${treeState.branches.length + 1}`);
+            if (!name) return;
+            const branchId = `branch-${Date.now()}`;
+            treeState.branches.push({ id: branchId, name, parentNodeId: null });
+            setActiveBranch(branchId);
+        }
+
+        conversationTreeEl?.addEventListener('click', (event) => {
+            const forkBtn = event.target.closest('[data-fork-node]');
+            if (!forkBtn) return;
+            createBranchFromNode(forkBtn.dataset.forkNode);
+        });
+
+        createBranchBtn?.addEventListener('click', createDetachedBranch);
+        renderBranchPills();
+        renderConversationTree();
+
+        function createUserMessage(text) {
+            const msgEl = createMessageBlock('user', 'USER', text);
+            messagesDiv.appendChild(msgEl);
+            scrollToBottom();
+            addConversationNode({ role: 'user', text });
+        }
+
+        function createAssistantMessage(id) {
+            const msgEl = createMessageBlock('assistant', 'PAW', '', id);
+            messagesDiv.appendChild(msgEl);
+            messageBranchMap.set(id, treeState.activeBranchId);
+        }
+
+        function appendToMessage(id, text) {
+            const contentEl = document.getElementById(id)?.querySelector('.message-content');
+            if (!contentEl) return;
+            if (!contentEl.dataset.buffer) contentEl.dataset.buffer = '';
+            contentEl.dataset.buffer += text;
+            contentEl.innerHTML = marked.parse(contentEl.dataset.buffer);
+            scrollToBottom();
+        }
+
+        function finalizeMessage(id) {
+            const contentEl = document.getElementById(id)?.querySelector('.message-content');
+            if (!contentEl) return;
+            delete contentEl.dataset.buffer;
+            contentEl.querySelectorAll('pre code').forEach(el => {
+                const pre = el.parentElement;
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'copy-btn';
+                copyBtn.textContent = 'Copy';
+                copyBtn.onclick = () => navigator.clipboard.writeText(el.textContent).then(() => { copyBtn.textContent = 'Copied!'; setTimeout(() => copyBtn.textContent = 'Copy', 2000); });
+                pre.appendChild(copyBtn);
+            });
+            addConversationNode({ role: 'assistant', text: contentEl.textContent || '', messageId: id, branchId: messageBranchMap.get(id) });
+        }
+
+        function createToolCall({ id, name, args }) {
+            const toolEl = document.createElement('div');
+            toolEl.id = `tool-${id}`;
+            toolEl.className = 'tool-call';
+            toolEl.innerHTML = `
+                <div class="tool-call-header"><div class="spinner"></div>${name}</div>
+                <div class="tool-call-body">${args}</div>
+            `;
+            messagesDiv.appendChild(toolEl);
+            scrollToBottom();
+        }
+
+        function updateToolCall({ id, name, display, success }) {
+            const toolEl = document.getElementById(`tool-${id}`);
+            if (!toolEl) return;
+            toolEl.className = `tool-call tool-result ${success ? 'success' : 'error'}`;
+            const icon = success ? '✓' : '✗';
+            const line2HTML = display.has_line2 ? `<div class=\"result-line2\">${display.line2}</div>` : '';
+            toolEl.innerHTML = `
+                <div class="tool-call-header">${name}</div>
+                <div class="result-body"><span class="result-icon">${icon}</span>${display.line1}</div>
+                ${line2HTML}
+            `;
+        }
+        
+        function createMessageBlock(type, author, text, id = null) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `message-block ${type}-message`;
+            if (id) wrapper.id = id;
+            wrapper.innerHTML = `
+                <div class="message-header">${author}</div>
+                <div class="message-content">${marked.parse(text)}</div>
+            `;
+            return wrapper;
+        }
+
+        function sendMessageToServer(message) {
+            if (ws.readyState === WebSocket.OPEN) ws.send(message);
+            else addSystemMessage('WebSocket is not connected.', 'error');
+        }
+
+        function handleUserInput() {
+            const message = messageInput.value.trim();
+            if (message === '') return;
+            sendMessageToServer(message);
+            createUserMessage(message);
+            messageInput.value = '';
+            autoResizeInput();
+        }
+
+        function updateStatusBar(data) {
+            const statusBar = document.getElementById('status-bar');
+            if (!statusBar) return;
+            const parts = [];
+            if (data.time) parts.push(`time: ${data.time}`);
+            if (data.model) parts.push(`model: ${data.model}`);
+            if (data.mode) parts.push(`mode: ${data.mode}`);
+            statusBar.textContent = parts.join(' · ');
+        }
+
+        // ----- Model selection / input modals -----
+        function showModelSelection(models) {
+            modalTitle.textContent = '选择模型';
+            modalBody.innerHTML = '';
+            modalActions.style.display = 'none';
+            const frag = document.createDocumentFragment();
+            models.forEach(m => {
+                const item = document.createElement('div');
+                item.className = 'model-item';
+                item.textContent = m;
+                item.onclick = () => { sendMessageToServer(m); modal.classList.remove('visible'); };
+                frag.appendChild(item);
+            });
+            modalBody.appendChild(frag);
+            modal.classList.add('visible');
+        }
+
+        function showInputPrompt(data) {
+            modalTitle.textContent = data?.prompt || '输入模型名称';
+            modalBody.innerHTML = '';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'modal-input';
+            input.placeholder = '如 glm-4-flash';
+            modalBody.appendChild(input);
+            modalActions.style.display = 'flex';
+            modalOk.onclick = () => { const v = input.value.trim(); if (v) { sendMessageToServer(v); modal.classList.remove('visible'); } };
+            modal.classList.add('visible');
+            setTimeout(() => input.focus(), 30);
+        }
+
+        inputForm.addEventListener('submit', (e) => { e.preventDefault(); handleUserInput(); });
+        messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUserInput(); } });
+        function autoResizeInput() { messageInput.style.height = 'auto'; messageInput.style.height = `${messageInput.scrollHeight}px`; }
+        messageInput.addEventListener('input', autoResizeInput);
+
+        function scrollToBottom() { messagesWrapper.scrollTop = messagesWrapper.scrollHeight; }
+
+        // Boot
+        addSystemMessage('Waiting for Paw to wake up...');
+        autoResizeInput();
+    </script>
+</body>
+</html>

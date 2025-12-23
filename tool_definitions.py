@@ -22,9 +22,8 @@ from tool_registry import (
     transform_truncate
 )
 
-
 # ============================================================
-# Schema 定义（保持与原 tools_schema.py 完全一致）
+# Schema 定义
 # ============================================================
 
 SCHEMA_READ_FILE = {
@@ -601,23 +600,6 @@ def register_web_tools(web_tools_instance):
         handler=web_tools_instance.read_page,
         category="web"
     )
-
-
-def get_tools_schema():
-    """获取所有工具的 OpenAI schema（用于 API 调用）"""
-    return ToolRegistry.get_schemas()
-
-
-# 为了向后兼容，保留 TOOLS_SCHEMA 变量
-# 但现在它是动态生成的，需要先调用 register_all_tools
-def get_legacy_tools_schema():
-    """
-    获取传统格式的 TOOLS_SCHEMA
-    
-    注意：这个函数需要在 register_all_tools 之后调用
-    """
-    return ToolRegistry.get_schemas()
-
 
 # ============================================================
 # 分支编辑工具 Schema（上下文编辑模式专用）

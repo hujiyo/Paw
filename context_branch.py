@@ -750,18 +750,3 @@ class ContextBranchManager:
             self.active_branch = None
         
         return result
-    
-    def get_branch_tools_schema(self) -> List[Dict[str, Any]]:
-        """
-        获取分支专用的工具定义
-        
-        已废弃：现在使用 ToolRegistry.get_schemas() 获取当前启用的工具
-        保留此方法仅为向后兼容
-        
-        Returns:
-            OpenAI格式的工具定义列表
-        """
-        # 导入放在方法内部避免循环导入
-        from tool_registry import ToolRegistry
-        return ToolRegistry.get_schemas()
-

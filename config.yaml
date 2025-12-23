@@ -25,10 +25,9 @@ api:
 
 # Embeddings 配置（用于记忆系统向量化）
 embeddings:
-  # Embeddings 端点（LM Studio OpenAI 兼容）
-  url: "http://127.0.0.1:1234/v1/embeddings"
-  # Embeddings 模型名称
-  model: "text-embedding-qwen3-embedding-0.6b"
+  # 可选：显式指定本地 embedding 模型路径（.gguf）
+  # 留空则自动从项目根目录 embedding/*.gguf 选择第一个
+  path: ""
 
 # 终端配置
 terminal:
@@ -57,6 +56,16 @@ web:
   # true: 通过 r.jina.ai 获取（推荐，免费，支持 SPA）
   # false: 直接获取（仅支持静态页面）
   use_jina_reader: true
+
+#  custom_search_api:
+#    name: "baidu"
+#    url: "https://api.baidu.com/search?q={query_encoded}&apikey={api_key}"
+#    method: "GET"
+#    api_key: "你的百度API密钥"
+#    results_path: "result.items"     # 视百度返回JSON结构而定
+#    title_field: "title"
+#    url_field: "url"
+#    snippet_field: "summary"
 
 # 系统配置
 system:

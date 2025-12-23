@@ -30,7 +30,7 @@ if sys.platform == "win32":
 from autostatus import AutoStatus
 from tools import BaseTools
 from chunk_system import ChunkManager, ChunkType, Chunk
-from tool_definitions import TOOLS_SCHEMA, register_all_tools, register_web_tools, get_tools_schema
+from tool_definitions import TOOLS_SCHEMA, register_all_tools, register_web_tools
 from web_tools import WebTools
 from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
@@ -46,7 +46,7 @@ class Paw:
     统一标准启动，完全可视化，上帝视角
     """
 
-    def __init__(self, api_url: str = None, model: str = None, api_key: str = None, minimal: bool = False, workspace_dir: str = None):
+    def __init__(self, ui: Any, api_url: str = None, model: str = None, api_key: str = None, workspace_dir: str = None):
         """初始化
 
         Args:
@@ -66,7 +66,7 @@ class Paw:
             self._startup_marks.append((label, now - self._startup_t0))
 
         # UI系统（统一入口）
-        self.ui = UI(minimal_mode=minimal)
+        self.ui = ui
         _mark("UI 初始化")
 
         # 读取配置文件
@@ -525,7 +525,14 @@ class Paw:
         if has_content[0] and last_chunk[0] and not last_chunk[0].endswith('\n'):
             print()
         
-        # 错误处理
+        # 通知 WebUI 流式结束（如果支持）
+        if hasattr(self.ui, 'assistant_stream_end') and callable(getattr(self.ui, 'assistant_stream_end')):
+            try:
+                self.ui.assistant_stream_end()
+            except Exception:
+                pass
+        
+        # 错误处理（打印可见错误文本，避免“静默卡住”）
         if response.is_error:
             if "API错误" in (response.content or ""):
                 error_template = ToolPrompts.get_error_messages()["api_error"]
@@ -533,11 +540,17 @@ class Paw:
             else:
                 error_template = ToolPrompts.get_error_messages()["connection_error"]
                 error_msg = error_template.format(error=response.content)
+            if error_msg:
+                self.ui.print_assistant(error_msg + "\n")
             return {
                 "content": error_msg,
                 "tool_calls": [],
                 "finish_reason": "error"
             }
+        
+        # 若整个流期间无任何输出但有最终文本，也要打印
+        if (not has_content[0]) and response.content:
+            self.ui.print_assistant(response.content + "\n")
         
         return {
             "role": "assistant",
@@ -668,7 +681,7 @@ class Paw:
         if user_message.startswith("[系统"):
             return
         try:
-            # 新记忆后端可能需要异步保存（LM Studio embeddings + SQLite）
+            # 新记忆后端可能需要异步保存（llama.cpp embeddings + SQLite）
             # 这里保持接口不阻塞主流程：失败则降级跳过
             if hasattr(self.memory_manager, "save_conversation_async"):
                 asyncio.create_task(self.memory_manager.save_conversation_async(
@@ -790,7 +803,7 @@ class Paw:
                     
                     # 显示工具调用（简洁格式，紧凑排列）
                     args_str = json.dumps(function_args, ensure_ascii=False) if function_args else ""
-                    self.ui.show_tool_start(function_name, args_str)
+                    self.ui.show_tool_start(tool_call_id, function_name, args_str)
                     
                     # 执行工具
                     result = await self._execute_tool({
@@ -806,11 +819,11 @@ class Paw:
                         result_text = str(result.get("result", ""))
                         # 获取显示信息
                         display = self._get_tool_display(function_name, result_text, function_args)
-                        self.ui.show_tool_result(function_name, display, success=True)
+                        self.ui.show_tool_result(tool_call_id, function_name, display, success=True)
                     else:
                         error_msg = result.get('error', '未知错误')
                         result_text = f"错误: {error_msg}"
-                        self.ui.show_tool_result(function_name, {'line1': error_msg, 'line2': '', 'has_line2': False}, success=False)
+                        self.ui.show_tool_result(tool_call_id, function_name, {'line1': error_msg, 'line2': '', 'has_line2': False}, success=False)
                     
                     # 获取工具配置，检查上下文策略
                     tool_config = ToolRegistry.get(function_name)
@@ -1122,10 +1135,34 @@ class Paw:
     
     async def _select_model(self, use_alternate_screen: bool = False) -> str:
         """选择模型
-        
+
         Args:
             use_alternate_screen: 是否使用备用屏幕（运行时切换模型时为 True）
         """
+        is_web_ui = self.ui.__class__.__name__ == 'WebUI'
+
+        if is_web_ui:
+            # Web UI 模式：循环直到拿到有效模型名
+            while True:
+                models = await self._fetch_available_models()
+                if not models:
+                    self.ui.show_model_input_prompt()
+                else:
+                    self.ui.show_model_list(models)
+                # 等待前端通过WebSocket返回模型名称（显式模型选择通道）
+                if hasattr(self.ui, 'get_model_choice_async'):
+                    chosen_model = await self.ui.get_model_choice_async("请选择模型或输入模型名")
+                else:
+                    chosen_model = await self.ui.get_user_input()
+                chosen_model = (chosen_model or '').strip()
+                if chosen_model:
+                    # 若提供了列表且选择不在其中，给出提示并继续循环
+                    if models and chosen_model not in models:
+                        self.ui.print_error(f"模型不存在: {chosen_model}")
+                        continue
+                    return chosen_model
+
+        # --- 以下是原始的终端UI逻辑 ---
         if use_alternate_screen:
             self.ui.enter_alternate_screen()
         
@@ -1142,7 +1179,6 @@ class Paw:
             
             self.ui.show_model_list(models)
             
-            # 让用户选择
             status_msgs = UIPrompts.get_status_messages()
             while True:
                 try:
@@ -1166,9 +1202,16 @@ class Paw:
     
     async def run(self):
         """主运行循环"""
-        # 如果没有指定模型，自动选择
-        if not self.model:
+        # 模型选择
+        is_web_ui = (self.ui.__class__.__name__ == 'WebUI')
+        if is_web_ui:
+            # Web：始终展示模型选择，确保显式确认
             self.model = await self._select_model()
+            if hasattr(self.ui, 'show_model_selected'):
+                self.ui.show_model_selected(self.model)
+        else:
+            if not self.model:
+                self.model = await self._select_model()
             
         # 模型选择完毕，清屏准备进入主界面
         self.ui.clear_screen()
@@ -1192,7 +1235,16 @@ class Paw:
         
         # 启动横幅
         self.ui.print_welcome()
-        self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
+
+        async def status_updater():
+            while True:
+                if hasattr(self.ui, 'show_status_bar') and callable(self.ui.show_status_bar):
+                    self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None, self.birth_time)
+                await asyncio.sleep(1)
+
+        # Start the status bar updater as a background task
+        self._status_task = asyncio.create_task(status_updater())
+
 
         # 记忆系统延迟初始化：确保先进入首屏
         if self.memory_manager is None:
@@ -1200,16 +1252,12 @@ class Paw:
                 self.ui.print_dim("[Memory] 正在初始化记忆系统（首次可能较慢）...")
                 config = self._load_config()
                 emb_cfg = (config.get('embeddings') or {})
-                embedding_model = emb_cfg.get('model') or "paraphrase-multilingual-MiniLM-L12-v2"
-                embeddings_url = emb_cfg.get('url')
-                embeddings_model = emb_cfg.get('model')
+                embedding_path = emb_cfg.get('path')  # 可选：显式指定 .gguf
                 self.memory_manager = MemoryManager(
                     project_path=self.workspace_dir,
-                    embedding_model=embedding_model,
-                    embeddings_url=embeddings_url,
-                    embeddings_model=embeddings_model,
-                    embeddings_api_key=self.api_key
+                    embedding_path=embedding_path,
                 )
+                self.ui.print_dim("[Memory] 本地 llama.cpp embedding 模型已加载")
                 # 记忆系统初始化完成后，重建 system_prompt 以注入记忆
                 self.system_prompt = self._create_system_prompt()
             except Exception as e:
@@ -1223,7 +1271,7 @@ class Paw:
         while True:
             try:
                 # 获取用户输入
-                user_input = self.ui.get_user_input()
+                user_input = await self.ui.get_user_input()
                 
                 if user_input.lower() in ['exit', 'quit', 'bye']:
                     self.ui.print_goodbye()
@@ -1345,6 +1393,11 @@ async def main():
         action='store_true',
         help='使用极简模式'
     )
+    parser.add_argument(
+        '--web',
+        action='store_true',
+        help='启动Web UI模式'
+    )
     args = parser.parse_args()
     
     # 确定工作目录: 命令行参数 > PAW_HOME 环境变量
@@ -1363,9 +1416,27 @@ async def main():
         print("请安装 colorama: pip install colorama")
         return
     
-    # 创建并运行Paw
-    paw = Paw(workspace_dir=workspace_dir, minimal=args.minimal)
-    await paw.run()
+    # 根据参数选择并创建UI
+    if args.web:
+        try:
+            from ui_web import WebUI
+        except ImportError:
+            print("\033[31m错误: Web UI 依赖未安装。\033[0m")
+            print("请运行: pip install fastapi uvicorn python-multipart websockets")
+            return
+        
+        ui = WebUI()
+        paw = Paw(ui=ui, workspace_dir=workspace_dir)
+        
+        # 并发运行Web服务器和Paw主循环
+        await asyncio.gather(
+            ui.run_server(),
+            paw.run()
+        )
+    else:
+        ui = UI(minimal_mode=args.minimal)
+        paw = Paw(ui=ui, workspace_dir=workspace_dir)
+        await paw.run()
 
 
 if __name__ == "__main__":

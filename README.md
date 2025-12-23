@@ -133,8 +133,14 @@ aiohttp, pyyaml, colorama, tiktoken
 ddgs, beautifulsoup4, html2text
 
 # 记忆系统
-chromadb, sentence-transformers
+llama-cpp-python, sqlite
 ```
+
+## 📜 模型与许可证
+
+- 本项目使用 Qwen 系列 GGUF 权重（embedding 目录），模型遵循 Apache License 2.0。  
+- 权重未做修改；Apache 2.0 许可证文件已放置于 `embedding/` 目录。  
+- 若分发本项目，请一并附带该许可证文件。
 
 ## 📄 License
 
