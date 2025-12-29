@@ -370,6 +370,76 @@ SCHEMA_GET_PLAN = {
     }
 }
 
+SCHEMA_PASS = {
+    "type": "function",
+    "function": {
+        "name": "pass_turn",
+        "description": "Skip this turn without generating a response. Use when: 1) The user said something that doesn't need a reply (like 'ok', 'got it'). 2) You've completed a task and are waiting for user's next instruction. 3) The conversation naturally pauses.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief reason for skipping (optional)"
+                }
+            },
+            "required": []
+        }
+    }
+}
+
+SCHEMA_LOAD_SKILL = {
+    "type": "function",
+    "function": {
+        "name": "load_skill",
+        "description": "Load a specialized skill by reading its SKILL.md file. Compatible with Claude Code skills format. Automatically includes reference.md (detailed docs) and examples.md (usage examples) if they exist. Lists available scripts in the scripts/ directory. Use this when you need domain-specific expertise that isn't in your base knowledge.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill to load (e.g., 'pdf-processing', 'excel-helper'). Skills are located in ~/.paw/skills/<skill_name>/"
+                },
+                "include_reference": {
+                    "type": "boolean",
+                    "description": "Whether to include reference.md content (default: true)"
+                },
+                "include_examples": {
+                    "type": "boolean",
+                    "description": "Whether to include examples.md content (default: true)"
+                }
+            },
+            "required": ["skill_name"]
+        }
+    }
+}
+
+SCHEMA_RUN_SKILL_SCRIPT = {
+    "type": "function",
+    "function": {
+        "name": "run_skill_script",
+        "description": "Execute a script from a skill's scripts/ directory. Compatible with Claude Code skills format. Supports .py, .sh, .bat, .ps1, and .js scripts. Scripts run with the skill directory as the working directory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill containing the script"
+                },
+                "script_name": {
+                    "type": "string",
+                    "description": "Script filename located in the skill's scripts/ directory (e.g., 'helper.py', 'process.sh')"
+                },
+                "args": {
+                    "type": "string",
+                    "description": "Command line arguments to pass to the script (optional)"
+                }
+            },
+            "required": ["skill_name", "script_name"]
+        }
+    }
+}
+
 # ============================================================
 # Web 工具 Schema
 # ============================================================
@@ -569,6 +639,32 @@ def register_all_tools(tools_instance):
         handler=tools_instance.get_plan,
         max_call_pairs=1,  # 只保留最近一次查询
         category="utility"
+    )
+    
+    register_tool(
+        name="pass_turn",
+        schema=SCHEMA_PASS,
+        handler=tools_instance.pass_turn,
+        max_call_pairs=1,
+        category="utility"
+    )
+
+    # === Skill 工具 ===
+
+    register_tool(
+        name="load_skill",
+        schema=SCHEMA_LOAD_SKILL,
+        handler=tools_instance.load_skill,
+        max_call_pairs=1,  # 只保留最近一次加载
+        category="skill"
+    )
+
+    register_tool(
+        name="run_skill_script",
+        schema=SCHEMA_RUN_SKILL_SCRIPT,
+        handler=tools_instance.run_skill_script,
+        max_call_pairs=3,  # 保留最近3次调用
+        category="skill"
     )
 
 
@@ -848,6 +944,8 @@ MAIN_TOOL_NAMES = [
     # TODO-list 工具
     "update_plan",
     "get_plan",
+    # 跳过回复
+    "pass_turn",
 ]
 
 
@@ -897,4 +995,9 @@ TOOLS_SCHEMA = [
     # TODO-list 工具
     SCHEMA_UPDATE_PLAN,
     SCHEMA_GET_PLAN,
+    # 跳过回复工具
+    SCHEMA_PASS,
+    # Skill 工具
+    SCHEMA_LOAD_SKILL,
+    SCHEMA_RUN_SKILL_SCRIPT,
 ]

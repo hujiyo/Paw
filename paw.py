@@ -179,9 +179,14 @@ class Paw:
         
         # 替换终端状态占位符
         main_prompt = main_prompt.replace("{terminal_status}", terminal_info)
-        
+
         # 组合基础系统提示词
         prompt = main_prompt
+
+        # === 注入 Skill 列表（Level 1: name + description）===
+        skills_prompt = self._get_skills_prompt()
+        if skills_prompt:
+            prompt = prompt + "\n\n" + skills_prompt
         
         # 注入记忆（如果有）
         if self.memory_manager is not None:
@@ -200,7 +205,57 @@ class Paw:
         else:
             self.chunk_manager.add_system_prompt(prompt)
         return prompt
-    
+
+    def _get_skills_prompt(self) -> str:
+        """扫描并生成 Skill 列表提示词
+
+        Returns:
+            Skill 提示词，如果没有 Skill 则返回空字符串
+        """
+        import yaml
+        from pathlib import Path
+
+        skills_dir = Path.home() / ".paw" / "skills"
+        if not skills_dir.exists():
+            return ""
+
+        skills = []
+        for skill_dir in skills_dir.iterdir():
+            if not skill_dir.is_dir():
+                continue
+
+            skill_md = skill_dir / "SKILL.md"
+            if not skill_md.exists():
+                continue
+
+            try:
+                content = skill_md.read_text(encoding='utf-8')
+                # 提取 YAML frontmatter
+                parts = content.split('---')
+                if len(parts) >= 3:
+                    yaml_part = parts[1].strip()
+                    metadata = yaml.safe_load(yaml_part)
+                    name = metadata.get('name', skill_dir.name)
+                    desc = metadata.get('description', 'No description')
+                    skills.append(f"- {name}: {desc}")
+            except Exception as e:
+                # 跳过解析失败的 Skill
+                continue
+
+        if not skills:
+            return ""
+
+        return f"""# Available Skills
+
+You have access to specialized skills. When a task matches a skill's purpose,
+use the load_skill tool to read its full SKILL.md file for detailed instructions.
+
+Available skills:
+{chr(10).join(skills)}
+
+**IMPORTANT**: Before working on any task, check if a relevant skill exists.
+If so, call load_skill(skill_name="...") to get detailed instructions."""
+
     def _try_fix_json(self, raw_json: str) -> dict:
         """尝试修复常见的 JSON 格式问题
         
@@ -351,7 +406,38 @@ class Paw:
         elif tool_name == "wait":
             seconds = args.get("seconds", 0)
             return {'line1': f"{seconds}s", 'line2': '', 'has_line2': False}
-        
+
+        elif tool_name == "load_skill":
+            skill_name = args.get("skill_name", "")
+            # 解析结果（格式：Base Path: xxx\n\nSKILL内容）
+            if result.startswith("Base Path:"):
+                parts = result.split('\n\n', 1)
+                base_path = parts[0].replace("Base Path:", "").strip()
+                # 提取 SKILL.md 第一行作为摘要
+                if len(parts) > 1:
+                    skill_lines = parts[1].strip().split('\n')
+                    summary = skill_lines[0][:50] + '...' if len(skill_lines[0]) > 50 else skill_lines[0]
+                else:
+                    summary = "SKILL.md"
+                return {'line1': f"Skill: {skill_name}", 'line2': summary, 'has_line2': True}
+            elif result.startswith("Error:"):
+                return {'line1': f"Skill: {skill_name}", 'line2': result[:60], 'has_line2': True}
+            else:
+                return {'line1': f"Skill: {skill_name}", 'line2': '', 'has_line2': False}
+
+        elif tool_name == "run_skill_script":
+            skill_name = args.get("skill_name", "")
+            script_name = args.get("script_name", "")
+            if result.startswith("Error:"):
+                return {'line1': f"Script: {script_name}", 'line2': result[:60], 'has_line2': True}
+            elif result.startswith("STDOUT:"):
+                # 提取第一行作为摘要
+                lines = result.split('\n')
+                first_line = lines[0][:50] + '...' if len(lines[0]) > 50 else lines[0]
+                return {'line1': f"Script: {script_name}", 'line2': first_line, 'has_line2': True}
+            else:
+                return {'line1': f"Script: {script_name}", 'line2': 'executed', 'has_line2': True}
+
         elif tool_name == "update_plan":
             # 解析 JSON 结果
             try:
@@ -640,38 +726,24 @@ class Paw:
     def _show_memory_status(self):
         """显示记忆系统状态"""
         stats = self.memory_manager.get_stats()
-        
-        print("\n" + "="*50)
-        print("记忆系统 (RAG)")
-        print("="*50)
-        
+
         # 规则
         rules = stats["rules"]
-        print(f"\n[规则] (永远注入)")
-        print(f"   用户规则: {rules['user_rules_count']} 条 ({self.memory_manager.user_rules_file})")
-        print(f"   项目规范: {rules['project_conventions_count']} 条 ({self.memory_manager.project_conventions_file})")
-        
+        self.ui.print_dim(f"[规则] (永远注入)")
+        self.ui.print_dim(f"   用户规则: {rules['user_rules_count']} 条 ({self.memory_manager.user_rules_file})")
+        self.ui.print_dim(f"   项目规范: {rules['project_conventions_count']} 条 ({self.memory_manager.project_conventions_file})")
+
         # 对话存储
         convs = stats["conversations"]
-        print(f"\n[对话记录] (RAG 检索)")
-        print(f"   总对话数: {convs['total_conversations']} 条")
-        print(f"   存储路径: {convs['storage_path']}")
-        
+        self.ui.print_dim(f"[对话记录] (RAG 检索)")
+        self.ui.print_dim(f"   总对话数: {convs['total_conversations']} 条")
+
         # 活跃记忆统计（从 recall_manager 获取）
         recall_stats = stats.get("recall", {})
         if recall_stats:
-            print(f"   活跃记忆: {recall_stats.get('active_count', 0)} 条")
-        
-        # 显示规则内容
-        rules_prompt = self.memory_manager.get_rules_prompt()
-        if rules_prompt:
-            print(f"\n[规则内容]")
-            print("-"*50)
-            print(rules_prompt[:500])
-            if len(rules_prompt) > 500:
-                print(f"... (共 {len(rules_prompt)} 字符)")
-        
-        print("="*50 + "\n")
+            self.ui.print_dim(f"   活跃记忆: {recall_stats.get('active_count', 0)} 条")
+
+        self.ui.print_dim("提示: 使用 /memory edit 进入记忆管理模式")
     
     def _save_conversation(self, user_message: str, assistant_message: str):
         """保存一轮对话到记忆系统"""
@@ -1210,9 +1282,19 @@ class Paw:
             if hasattr(self.ui, 'show_model_selected'):
                 self.ui.show_model_selected(self.model)
         else:
+            # 终端 UI：使用独立的启动设置界面
             if not self.model:
-                self.model = await self._select_model()
-            
+                # 获取可用模型列表
+                models = await self._fetch_available_models()
+                # 使用启动设置界面（会自动使用 os.system clear 完全清屏）
+                if hasattr(self.ui, 'show_startup_screen'):
+                    self.model = self.ui.show_startup_screen(models, self.api_url)
+                else:
+                    # 兼容旧版本，如果 UI 没有 show_startup_screen 方法
+                    self.model = await self._select_model()
+                # 启动界面结束后，再次使用系统清屏确保缓冲区完全清空
+                os.system('cls' if os.name == 'nt' else 'clear')
+
         # 模型选择完毕，清屏准备进入主界面
         self.ui.clear_screen()
         
@@ -1236,14 +1318,9 @@ class Paw:
         # 启动横幅
         self.ui.print_welcome()
 
-        async def status_updater():
-            while True:
-                if hasattr(self.ui, 'show_status_bar') and callable(self.ui.show_status_bar):
-                    self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None, self.birth_time)
-                await asyncio.sleep(1)
-
-        # Start the status bar updater as a background task
-        self._status_task = asyncio.create_task(status_updater())
+        # 显示状态栏（只打印一次）
+        if hasattr(self.ui, 'show_status_bar') and callable(self.ui.show_status_bar):
+            self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
 
 
         # 记忆系统延迟初始化：确保先进入首屏
@@ -1348,6 +1425,11 @@ class Paw:
                 if user_input == '/context stats':
                     # 显示上下文管理统计
                     self._show_context_stats()
+                    continue
+                
+                if user_input == '/pass':
+                    # 用户跳过本轮输入，不发送任何内容给 LLM
+                    self.ui.print_dim("[跳过本轮输入]")
                     continue
                 
                 if user_input.startswith('/'):

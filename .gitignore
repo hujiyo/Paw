@@ -3,3 +3,5 @@ paw_env/
 .*/
 models/
 *.gguf
+CLAUDE.md
+nul

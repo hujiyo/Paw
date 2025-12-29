@@ -465,12 +465,9 @@ class UI:
         """极其简约的状态栏，仅作为分割线上的信息"""
         if self.minimal_mode:
             return ""
-            
+
         parts = []
-        # 运行时间
-        runtime = str(datetime.now() - self.start_time).split('.')[0]
-        parts.append(f"time: {runtime}")
-        
+
         if extra_info:
             if 'model' in extra_info:
                 parts.append(f"model: {extra_info['model']}")
@@ -484,14 +481,14 @@ class UI:
             parts.append(f"tools: {self.performance_data['tool_calls']}")
 
         info_str = " · ".join(parts)
-        
+
         # 灰色分割线，中间嵌信息（固定 80 列）
         text_len = len(info_str) + 2
         padding = (self.WIDTH - text_len) // 2
         if padding < 0: padding = 0
         right_padding = self.WIDTH - padding - text_len
         if right_padding < 0: right_padding = 0
-        
+
         bar = f"{self.COLORS['dim']}{'─' * padding} {info_str} {'─' * right_padding}{Style.RESET_ALL}"
         return f"\n{bar}\n"
 
@@ -549,9 +546,9 @@ class UI:
         print(f"{self.COLORS['dim']}{self.center_text(goodbye)}{Style.RESET_ALL}")
 
     # ==================== 输入方法 ====================
-    
-    def get_user_input(self) -> str:
-        """获取用户输入（带提示符）"""
+
+    async def get_user_input(self) -> str:
+        """获取用户输入（带提示符）- 异步接口以兼容 WebUI"""
         header = self.format_message_header('user')
         prompt_style = self.COLORS['user_text']
         reset_style = self.COLORS['reset']
@@ -653,9 +650,110 @@ class UI:
                     result_preview += "..."
                 print(f"    {self.COLORS['dim']}⎿ {result_preview}{Style.RESET_ALL}")
 
+    # ==================== 启动设置界面 ====================
+
+    def show_startup_screen(self, models: List[str], api_url: str = None) -> str:
+        """显示启动设置界面（首次启动时，支持方向键导航）
+
+        这是一个独立的设置界面，用户可以：
+        - 选择模型（支持上下键导航）
+        - 查看当前配置
+        - 未来可扩展更多设置选项
+
+        Args:
+            models: 可用模型列表
+            api_url: API 地址
+
+        Returns:
+            用户选择的模型名称
+        """
+        import os
+
+        # 清屏（使用系统命令完全清空缓冲区）
+        os.system('cls' if os.name == 'nt' else 'clear')
+
+        # 如果没有模型，回退到手动输入
+        if not models:
+            self.print_system("未检测到可用模型，请手动输入模型名称")
+            print()
+            while True:
+                model_name = self.get_input(f"{self.COLORS['user_text']}模型名称 (如 glm-4-flash): {Style.RESET_ALL}")
+                if model_name:
+                    return model_name
+                self.print_error("模型名称不能为空")
+
+        # 有模型，显示交互式选择界面
+        current_index = 0
+
+        while True:
+            os.system('cls' if os.name == 'nt' else 'clear')
+
+            # 显示欢迎标题
+            print()
+            title = "═══════════════════ Paw 启动设置 ═══════════════════"
+            print(f"{self.COLORS['dim']}{self.center_text(title)}{Style.RESET_ALL}")
+            print()
+
+            # 显示 API 信息
+            if api_url:
+                api_display = api_url[:50] + "..." if len(api_url) > 50 else api_url
+                print(f"{self.COLORS['dim']}{self.center_text(f'API: {api_display}')}{Style.RESET_ALL}")
+                print()
+
+            # 显示分隔线
+            print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+            print()
+
+            # 显示模型列表
+            self.print_dim(f"检测到 {len(models)} 个可用模型:")
+            print()
+
+            max_model_width = self.WIDTH - 10
+            for i, model in enumerate(models):
+                if len(model) > max_model_width:
+                    model = self.truncate(model, max_model_width)
+
+                is_selected = (i == current_index)
+                if is_selected:
+                    marker = f"{Fore.CYAN}›{Style.RESET_ALL}"
+                    line = f"  {marker} {self.COLORS['bright']}{i+1}.{Style.RESET_ALL} {self.COLORS['assistant_text']}{model}{Style.RESET_ALL}"
+                else:
+                    line = f"    {self.COLORS['dim']}{i+1}.{Style.RESET_ALL} {self.COLORS['dim']}{model}{Style.RESET_ALL}"
+
+                print(line)
+
+            print()
+            print(f"{self.COLORS['dim']}{self.draw_line('─')}{Style.RESET_ALL}")
+            print()
+
+            # 显示操作提示
+            hint = "↑↓ 选择  │  Enter 确认"
+            print(f"{self.COLORS['dim']}{self.center_text(hint)}{Style.RESET_ALL}")
+            print()
+
+            # 显示当前选中项
+            print(f"{self.COLORS['user_text']}当前选择: {models[current_index]}{Style.RESET_ALL}", end='', flush=True)
+
+            # 获取按键
+            try:
+                key = self._get_key()
+
+                if key == 'UP':
+                    current_index = max(0, current_index - 1)
+                elif key == 'DOWN':
+                    current_index = min(len(models) - 1, current_index + 1)
+                elif key == 'ENTER':
+                    # 用户确认选择
+                    return models[current_index]
+                elif key == 'ESC':
+                    # ESC 退出，选择第一个
+                    return models[0]
+            except KeyboardInterrupt:
+                return models[0]
+
     # ==================== 模型选择界面 ====================
     def show_model_list(self, models: List[str]):
-        """显示可用模型列表"""
+        """显示可用模型列表（运行时 /model 命令使用）"""
         self.print_dim(f"可用模型 ({len(models)}):")
         # 计算模型名最大宽度：80 - 5(缩进+序号+点+空格)
         max_model_width = self.WIDTH - 6
@@ -677,8 +775,8 @@ class UI:
         self.print_system(f"已切换到模型: {model}")
 
     # ==================== 状态栏 ====================
-    
-    def show_status_bar(self, model: str = None, autostatus: dict = None):
+
+    def show_status_bar(self, model: str = None, autostatus: dict = None, start_time: datetime = None):
         """显示状态栏"""
         extra_info = {}
         if model:

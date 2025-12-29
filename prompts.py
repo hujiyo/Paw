@@ -222,7 +222,7 @@ class UIPrompts:
     @staticmethod
     def get_command_help() -> str:
         """命令帮助"""
-        return "Commands: /clear /chunks /messages /edit /model /memory /memory edit /context /ctx"
+        return "Commands: /clear /chunks /messages /edit /model /memory /memory edit /context /ctx /pass"
     
     @staticmethod
     def get_status_messages() -> Dict[str, str]:

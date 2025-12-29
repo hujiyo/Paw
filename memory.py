@@ -16,6 +16,7 @@ Paw 记忆系统 - Memory System v3
 """
 
 import os
+import sys
 import yaml
 import json
 import hashlib
@@ -29,7 +30,60 @@ from dataclasses import dataclass, field
 
 from llama_cpp import Llama
 
+
 EMBED_MAX_LEN = 2048
+
+
+# ============================================================
+# stderr 屏蔽器（持久化，在整个程序生命周期内生效）
+# ============================================================
+
+class _SuppressStderr:
+    """持久屏蔽 stderr 的类"""
+    def __init__(self):
+        self.original_stderr = None
+        self.null_fd = None
+
+    def __enter__(self):
+        try:
+            if os.name == 'nt':  # Windows
+                self.null_fd = open('NUL', 'w')
+            else:  # Unix/Linux/macOS
+                self.null_fd = open('/dev/null', 'w')
+            self.original_stderr = sys.stderr
+            sys.stderr = self.null_fd
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.original_stderr is not None:
+            sys.stderr = self.original_stderr
+        if self.null_fd is not None:
+            try:
+                self.null_fd.close()
+            except Exception:
+                pass
+
+
+# 全局 stderr 屏蔽器（在整个程序生命周期内生效）
+_llama_stderr_suppressor = None
+
+
+def _enable_llama_stderr_suppression():
+    """启用 llama.cpp stderr 屏蔽（全局）"""
+    global _llama_stderr_suppressor
+    if _llama_stderr_suppressor is None:
+        _llama_stderr_suppressor = _SuppressStderr()
+        _llama_stderr_suppressor.__enter__()
+
+
+def _disable_llama_stderr_suppression():
+    """禁用 llama.cpp stderr 屏蔽（全局）"""
+    global _llama_stderr_suppressor
+    if _llama_stderr_suppressor is not None:
+        _llama_stderr_suppressor.__exit__(None, None, None)
+        _llama_stderr_suppressor = None
 
 
 # ============================================================
@@ -73,6 +127,8 @@ class LlamaCppEmbeddingClient:
         # 静音底层日志
         os.environ.setdefault("LLAMA_LOG_LEVEL", "fatal")
         os.environ.setdefault("LLAMA_CPP_LOG_LEVEL", "fatal")
+        # 启用全局 stderr 屏蔽（llama.cpp 会持续输出到 stderr）
+        _enable_llama_stderr_suppression()
         # 预加载模型，避免每次调用重复加载
         self.llama = Llama(
             model_path=str(self.model_path),

@@ -663,7 +663,212 @@ class BaseTools:
         except ValueError:
             # 如果路径试图逃出沙盒（如使用 ../..），强制返回沙盒根目录
             return self.sandbox_dir
-    
+
+    def load_skill(self, skill_name: str, include_reference: bool = True,
+                   include_examples: bool = True) -> str:
+        """加载指定的 Skill，读取其 SKILL.md 内容
+
+        遵循 Claude Code Skills 规范：
+        1. 返回 Base Path（skill 目录的绝对路径）
+        2. 返回 SKILL.md 内容（去除 YAML frontmatter）
+        3. 可选加载 reference.md（详细文档）
+        4. 可选加载 examples.md（使用示例）
+        5. scripts/ 目录中的脚本可通过 run_skill_script 工具执行
+
+        Args:
+            skill_name: Skill 名称（目录名）
+            include_reference: 是否包含 reference.md 内容（默认 True）
+            include_examples: 是否包含 examples.md 内容（默认 True）
+
+        Returns:
+            Base Path + SKILL.md 内容（去除 frontmatter）+ 可选的 reference/examples
+        """
+        skills_dir = Path.home() / ".paw" / "skills"
+        skill_dir = skills_dir / skill_name
+        skill_md = skill_dir / "SKILL.md"
+
+        if not skill_md.exists():
+            return f"Error: Skill '{skill_name}' not found. SKILL.md does not exist at {skill_md}"
+
+        try:
+            content = skill_md.read_text(encoding='utf-8')
+
+            # 移除 YAML frontmatter（第一个 --- 和第二个 --- 之间的内容）
+            lines = content.split('\n')
+            content_start = 0
+            found_first = False
+            for i, line in enumerate(lines):
+                if line.strip() == '---':
+                    if not found_first:
+                        found_first = True
+                    else:
+                        content_start = i + 1
+                        break
+
+            skill_body = '\n'.join(lines[content_start:]).strip()
+
+            # 构建返回内容
+            parts = []
+            base_path = str(skill_dir)
+            parts.append(f"Base Path: {base_path}")
+            parts.append("")
+            parts.append("## SKILL.md")
+            parts.append("")
+            parts.append(skill_body)
+
+            # 加载 reference.md（如果存在且启用）
+            reference_md = skill_dir / "reference.md"
+            if include_reference and reference_md.exists():
+                try:
+                    ref_content = reference_md.read_text(encoding='utf-8').strip()
+                    parts.append("")
+                    parts.append("")
+                    parts.append("## reference.md (Detailed Documentation)")
+                    parts.append("")
+                    parts.append(ref_content)
+                except Exception:
+                    pass  # 静默跳过读取失败的文件
+
+            # 加载 examples.md（如果存在且启用）
+            examples_md = skill_dir / "examples.md"
+            if include_examples and examples_md.exists():
+                try:
+                    ex_content = examples_md.read_text(encoding='utf-8').strip()
+                    parts.append("")
+                    parts.append("")
+                    parts.append("## examples.md (Usage Examples)")
+                    parts.append("")
+                    parts.append(ex_content)
+                except Exception:
+                    pass  # 静默跳过读取失败的文件
+
+            # 列出可用的脚本
+            scripts_dir = skill_dir / "scripts"
+            if scripts_dir.exists() and scripts_dir.is_dir():
+                try:
+                    scripts = [f.name for f in scripts_dir.iterdir()
+                              if f.is_file() and not f.name.startswith('.')]
+                    if scripts:
+                        parts.append("")
+                        parts.append("")
+                        parts.append("## Available Scripts")
+                        parts.append("")
+                        parts.append(f"Scripts directory: {scripts_dir}")
+                        parts.append("")
+                        for script in sorted(scripts):
+                            parts.append(f"  - {script}")
+                        parts.append("")
+                        parts.append("Use run_skill_script(skill_name, script_name, args) to execute.")
+                except Exception:
+                    pass
+
+            return '\n'.join(parts)
+
+        except Exception as e:
+            return f"Error: Failed to read skill '{skill_name}': {e}"
+
+    def run_skill_script(self, skill_name: str, script_name: str, args: str = "") -> str:
+        """执行 Skill scripts/ 目录下的脚本
+
+        遵循 Claude Code Skills 规范：
+        - 脚本位于 ~/.paw/skills/<skill_name>/scripts/<script_name>
+        - 支持的脚本类型：.py, .sh, .bat, .ps1
+        - 执行时自动切换到 skill 目录作为工作目录
+
+        Args:
+            skill_name: Skill 名称（目录名）
+            script_name: 脚本文件名（位于 scripts/ 目录下）
+            args: 传递给脚本的命令行参数（可选）
+
+        Returns:
+            脚本执行结果
+        """
+        import subprocess
+        import platform
+
+        skills_dir = Path.home() / ".paw" / "skills"
+        skill_dir = skills_dir / skill_name
+        script_path = skill_dir / "scripts" / script_name
+
+        if not skill_dir.exists():
+            return f"Error: Skill '{skill_name}' not found at {skill_dir}"
+
+        if not script_path.exists():
+            return f"Error: Script '{script_name}' not found at {script_path}"
+
+        try:
+            # 确定解释器
+            ext = script_path.suffix.lower()
+            if ext == '.py':
+                interpreter = sys.executable  # 当前 Python 解释器
+                cmd = [interpreter, str(script_path)]
+            elif ext == '.sh':
+                interpreter = '/bin/bash'
+                cmd = [interpreter, str(script_path)]
+            elif ext == '.ps1':
+                interpreter = 'powershell.exe'
+                cmd = [interpreter, '-File', str(script_path)]
+            elif ext == '.bat':
+                interpreter = 'cmd.exe'
+                cmd = [interpreter, '/c', str(script_path)]
+            elif ext == '.js':
+                # Node.js 脚本
+                interpreter = 'node'
+                cmd = [interpreter, str(script_path)]
+            else:
+                # 无扩展名或其他类型，尝试直接执行
+                cmd = [str(script_path)]
+
+            # 添加参数
+            if args and args.strip():
+                cmd.extend(args.strip().split())
+
+            # 执行脚本
+            result = subprocess.run(
+                cmd,
+                cwd=str(skill_dir),  # 工作目录为 skill 根目录
+                capture_output=True,
+                text=True,
+                timeout=self.script_timeout,
+                encoding='utf-8',
+                errors='replace'
+            )
+
+            output = []
+            if result.stdout:
+                output.append(f"STDOUT:\n{result.stdout}")
+            if result.stderr:
+                output.append(f"STDERR:\n{result.stderr}")
+            if result.returncode != 0:
+                output.append(f"Exit code: {result.returncode}")
+
+            return '\n'.join(output) if output else f"Script executed successfully (no output)"
+
+        except subprocess.TimeoutExpired:
+            return f"Error: Script execution timed out (limit: {self.script_timeout}s)"
+        except FileNotFoundError as e:
+            return f"Error: Interpreter not found. {e}"
+        except Exception as e:
+            return f"Error: Failed to execute script: {e}"
+
+    def pass_turn(self, reason: str = "") -> str:
+        """跳过当前回合，不生成响应
+
+        用于以下情况：
+        1) 用户说的内容不需要回复（如 "ok"、"got it"）
+        2) 已完成任务，等待用户下一步指示
+        3) 对话自然暂停
+
+        Args:
+            reason: 跳过的原因（可选）
+
+        Returns:
+            确认消息
+        """
+        if reason:
+            return f"[Turn skipped: {reason}]"
+        return "[Turn skipped]"
+
     def cleanup(self):
         """清理沙盒目录"""
         try:
