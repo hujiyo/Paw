@@ -34,7 +34,6 @@ from tool_definitions import TOOLS_SCHEMA, register_all_tools, register_web_tool
 from web_tools import WebTools
 from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
-from ui import UI
 from memory import MemoryManager
 from branch_executor import AutoContextManager
 from call import LLMClient, LLMConfig
@@ -1209,95 +1208,32 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         """选择模型
 
         Args:
-            use_alternate_screen: 是否使用备用屏幕（运行时切换模型时为 True）
+            use_alternate_screen: 忽略（保留参数兼容性）
         """
-        is_web_ui = self.ui.__class__.__name__ == 'WebUI'
-
-        if is_web_ui:
-            # Web UI 模式：循环直到拿到有效模型名
-            while True:
-                models = await self._fetch_available_models()
-                if not models:
-                    self.ui.show_model_input_prompt()
-                else:
-                    self.ui.show_model_list(models)
-                # 等待前端通过WebSocket返回模型名称（显式模型选择通道）
-                if hasattr(self.ui, 'get_model_choice_async'):
-                    chosen_model = await self.ui.get_model_choice_async("请选择模型或输入模型名")
-                else:
-                    chosen_model = await self.ui.get_user_input()
-                chosen_model = (chosen_model or '').strip()
-                if chosen_model:
-                    # 若提供了列表且选择不在其中，给出提示并继续循环
-                    if models and chosen_model not in models:
-                        self.ui.print_error(f"模型不存在: {chosen_model}")
-                        continue
-                    return chosen_model
-
-        # --- 以下是原始的终端UI逻辑 ---
-        if use_alternate_screen:
-            self.ui.enter_alternate_screen()
-        
-        try:
+        # Web UI 模式：循环直到拿到有效模型名
+        while True:
             models = await self._fetch_available_models()
-            
             if not models:
                 self.ui.show_model_input_prompt()
-                while True:
-                    model_name = self.ui.get_input("模型名称 (如 glm-4-flash): ")
-                    if model_name:
-                        return model_name
-                    self.ui.print_error("模型名称不能为空")
-            
-            self.ui.show_model_list(models)
-            
-            status_msgs = UIPrompts.get_status_messages()
-            while True:
-                try:
-                    choice = self.ui.get_model_choice(status_msgs["model_prompt"])
-                    if not choice:
-                        return models[0]
-                    
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(models):
-                        return models[idx]
-                    else:
-                        self.ui.print_error(status_msgs["invalid_number"])
-                except ValueError:
-                    self.ui.print_error(status_msgs["please_enter_number"])
-                except KeyboardInterrupt:
-                    self.ui.print_dim(status_msgs["using_first_model"])
-                    return models[0]
-        finally:
-            if use_alternate_screen:
-                self.ui.leave_alternate_screen()
+            else:
+                self.ui.show_model_list(models)
+            # 等待前端通过WebSocket返回模型名称（显式模型选择通道）
+            chosen_model = await self.ui.get_model_choice_async("请选择模型或输入模型名")
+            chosen_model = (chosen_model or '').strip()
+            if chosen_model:
+                # 若提供了列表且选择不在其中，给出提示并继续循环
+                if models and chosen_model not in models:
+                    self.ui.print_error(f"模型不存在: {chosen_model}")
+                    continue
+                return chosen_model
     
     async def run(self):
         """主运行循环"""
         # 模型选择
-        is_web_ui = (self.ui.__class__.__name__ == 'WebUI')
-        if is_web_ui:
-            # Web：始终展示模型选择，确保显式确认
-            self.model = await self._select_model()
-            if hasattr(self.ui, 'show_model_selected'):
-                self.ui.show_model_selected(self.model)
-        else:
-            # 终端 UI：使用独立的启动设置界面
-            if not self.model:
-                # 获取可用模型列表
-                models = await self._fetch_available_models()
-                # 使用启动设置界面（会自动使用 os.system clear 完全清屏）
-                if hasattr(self.ui, 'show_startup_screen'):
-                    self.model = self.ui.show_startup_screen(models, self.api_url)
-                else:
-                    # 兼容旧版本，如果 UI 没有 show_startup_screen 方法
-                    self.model = await self._select_model()
-                # 启动界面结束后，再次使用系统清屏确保缓冲区完全清空
-                os.system('cls' if os.name == 'nt' else 'clear')
+        self.model = await self._select_model()
+        if hasattr(self.ui, 'show_model_selected'):
+            self.ui.show_model_selected(self.model)
 
-        # 模型选择完毕，清屏准备进入主界面
-        self.ui.clear_screen()
-        
         # 现在模型已确定，初始化AutoStatus
         if self.autostatus is None:
             self.autostatus = AutoStatus(self.api_url, self.model, self.api_key)
@@ -1452,7 +1388,7 @@ async def main():
     """主入口 - 唯一标准启动方式"""
     # 解析命令行参数
     parser = argparse.ArgumentParser(
-        description='Paw - AGI级别的猫娘终端智能体',
+        description='Paw - AGI级别的桌面智能体',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 示例:
@@ -1471,17 +1407,18 @@ async def main():
         help='工作目录路径 (默认: PAW_HOME 环境变量)'
     )
     parser.add_argument(
-        '--minimal', '-m',
-        action='store_true',
-        help='使用极简模式'
+        '--host', '-H',
+        default='127.0.0.1',
+        help='Web服务器监听地址 (默认: 127.0.0.1)'
     )
     parser.add_argument(
-        '--web',
-        action='store_true',
-        help='启动Web UI模式'
+        '--port', '-p',
+        type=int,
+        default=8080,
+        help='Web服务器端口 (默认: 8080)'
     )
     args = parser.parse_args()
-    
+
     # 确定工作目录: 命令行参数 > PAW_HOME 环境变量
     workspace_dir = args.workspace or os.getenv('PAW_HOME')
     if not workspace_dir:
@@ -1490,35 +1427,24 @@ async def main():
         print("  1. 命令行参数: paw <workspace_path>")
         print("  2. 设置环境变量: set PAW_HOME=<workspace_path>")
         return
-    
-    # 检查依赖
+
+    # 检查Web UI依赖
     try:
-        import colorama
+        from ui_web import WebUI
     except ImportError:
-        print("请安装 colorama: pip install colorama")
+        print("\033[31m错误: Web UI 依赖未安装。\033[0m")
+        print("请运行: pip install fastapi uvicorn python-multipart websockets")
         return
-    
-    # 根据参数选择并创建UI
-    if args.web:
-        try:
-            from ui_web import WebUI
-        except ImportError:
-            print("\033[31m错误: Web UI 依赖未安装。\033[0m")
-            print("请运行: pip install fastapi uvicorn python-multipart websockets")
-            return
-        
-        ui = WebUI()
-        paw = Paw(ui=ui, workspace_dir=workspace_dir)
-        
-        # 并发运行Web服务器和Paw主循环
-        await asyncio.gather(
-            ui.run_server(),
-            paw.run()
-        )
-    else:
-        ui = UI(minimal_mode=args.minimal)
-        paw = Paw(ui=ui, workspace_dir=workspace_dir)
-        await paw.run()
+
+    # 创建Web UI
+    ui = WebUI(host=args.host, port=args.port)
+    paw = Paw(ui=ui, workspace_dir=workspace_dir)
+
+    # 并发运行Web服务器和Paw主循环
+    await asyncio.gather(
+        ui.run_server(),
+        paw.run()
+    )
 
 
 if __name__ == "__main__":
