@@ -36,6 +36,7 @@ from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
 from memory import MemoryManager
 from branch_executor import AutoContextManager
+from session_manager import SessionManager
 from call import LLMClient, LLMConfig
 
 
@@ -130,6 +131,10 @@ class Paw:
         
         # 上下文分支管理器（延迟初始化，等API配置确定后）
         self.context_manager = None
+
+        # 会话管理器（用于保存/恢复完整对话状态）
+        self.session_manager = SessionManager()
+        self.current_session_id = None  # 当前会话ID（用于更新现有会话）
         
         # 系统提示词（第一人称）
         self.system_prompt = self._create_system_prompt()
@@ -743,6 +748,35 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             self.ui.print_dim(f"   活跃记忆: {recall_stats.get('active_count', 0)} 条")
 
         self.ui.print_dim("提示: 使用 /memory edit 进入记忆管理模式")
+
+    def _show_sessions(self):
+        """显示会话列表"""
+        sessions = self.session_manager.list_sessions(limit=20)
+
+        if not sessions:
+            self.ui.print_dim("没有历史会话")
+            return
+
+        # 表头
+        print("\n" + "="*70)
+        print(f"{'ID':<10} {'标题':<30} {'时间':<16} {'消息数':<6} {'Token':<8}")
+        print("-"*70)
+
+        for s in sessions:
+            session_id = s.get('session_id', '')
+            title = s.get('title', '')[:28]
+            timestamp = s.get('timestamp', '')[:16]
+            msg_count = s.get('message_count', 0)
+            token_count = s.get('token_count', 0)
+
+            # 标记当前会话
+            prefix = "* " if session_id == self.current_session_id else "  "
+
+            print(f"{prefix}{session_id:<8} {title:<30} {timestamp:<16} {msg_count:<6} {token_count:<8}")
+
+        print("="*70)
+        print(f"共 {len(sessions)} 个会话")
+        print("使用 /load <id> 恢复会话，/delete-session <id> 删除会话")
     
     def _save_conversation(self, user_message: str, assistant_message: str):
         """保存一轮对话到记忆系统"""
@@ -766,6 +800,84 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 )
         except Exception as e:
             self.ui.print_dim(f"[Memory] 保存对话失败: {e}")
+
+    def _save_session(self):
+        """保存当前会话快照"""
+        try:
+            # 获取 Shell 状态
+            terminal_status = self.tools.get_terminal_status()
+
+            snapshot = self.session_manager.save_session(
+                chunk_manager=self.chunk_manager,
+                workspace_dir=str(self.workspace_dir),
+                model=self.model or "unknown",
+                shell_open=terminal_status.get('is_open', False),
+                shell_pid=terminal_status.get('pid'),
+                session_id=self.current_session_id
+            )
+
+            # 更新当前会话ID
+            if self.current_session_id is None:
+                self.current_session_id = snapshot.session_id
+
+            # 同步会话列表到 Web UI
+            self._sync_session_list()
+
+        except Exception as e:
+            self.ui.print_dim(f"[Session] 保存会话失败: {e}")
+
+    def _load_session(self, session_id: str, sync_ui: bool = True) -> bool:
+        """加载会话
+
+        Args:
+            session_id: 会话ID
+            sync_ui: 是否同步到 Web UI
+
+        Returns:
+            是否加载成功
+        """
+        snapshot = self.session_manager.load_session(session_id)
+        if snapshot is None:
+            self.ui.print_error(f"会话 {session_id} 不存在")
+            return False
+
+        try:
+            # 恢复 ChunkManager
+            from chunk_system import ChunkManager
+            self.chunk_manager = ChunkManager.from_json(
+                snapshot.chunks,
+                max_tokens=64000,
+                tools_schema=TOOLS_SCHEMA
+            )
+
+            # 更新当前会话ID
+            self.current_session_id = snapshot.session_id
+
+            # 如果 Shell 是打开的，尝试恢复
+            # 注意：Shell 状态恢复需要终端支持会话恢复，这里只记录状态
+            if snapshot.shell_open:
+                self.ui.print_dim(f"[Session] 上次对话时终端是打开的 (PID: {snapshot.shell_pid})")
+
+            # 同步到 Web UI
+            if sync_ui and hasattr(self.ui, 'send_session_load'):
+                # 发送完整 chunks 给前端渲染
+                self.ui.send_session_load(snapshot.chunks)
+                self.ui.send_session_loaded(snapshot.session_id, snapshot.title)
+
+            self.ui.print_success(f"已恢复会话: {snapshot.title}")
+            return True
+
+        except Exception as e:
+            self.ui.print_error(f"恢复会话失败: {e}")
+            return False
+
+    def _sync_session_list(self):
+        """同步会话列表到 Web UI"""
+        if not hasattr(self.ui, 'send_session_list'):
+            return
+
+        sessions = self.session_manager.list_sessions(limit=50)
+        self.ui.send_session_list(sessions, self.current_session_id)
     
     async def process_input(self, user_input: str) -> str:
         """处理用户输入 - 完全符合OpenAI Function Calling标准"""
@@ -875,16 +987,16 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 显示工具调用（简洁格式，紧凑排列）
                     args_str = json.dumps(function_args, ensure_ascii=False) if function_args else ""
                     self.ui.show_tool_start(tool_call_id, function_name, args_str)
-                    
+
                     # 执行工具
                     result = await self._execute_tool({
                         "tool": function_name,
                         "args": function_args
                     })
-                    
+
                     # 获取工具执行结果
                     success = result.get("success", False)
-                    
+
                     # 确保result_text总是被定义
                     if success:
                         result_text = str(result.get("result", ""))
@@ -895,13 +1007,13 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         error_msg = result.get('error', '未知错误')
                         result_text = f"错误: {error_msg}"
                         self.ui.show_tool_result(tool_call_id, function_name, {'line1': error_msg, 'line2': '', 'has_line2': False}, success=False)
-                    
+
                     # 获取工具配置，检查上下文策略
                     tool_config = ToolRegistry.get(function_name)
-                    
+
                     # 获取 max_call_pairs 配置（用于配对清理）
                     max_call_pairs = tool_config.max_call_pairs if tool_config else 0
-                    
+
                     # 添加工具结果到chunk_manager（OpenAI标准）
                     # 如果设置了 max_call_pairs，会自动清理超出的旧配对
                     self.chunk_manager.add_tool_result(
@@ -957,7 +1069,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             except Exception as e:
                 # 状态评估失败不影响主流程
                 pass
-        
+
+        # 自动保存会话
+        self._save_session()
+
         return final_response
     
     async def _fetch_available_models(self) -> List[str]:
@@ -1279,7 +1394,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         
         # 标记对话区域起始位置（用于编辑后重渲染）
         self.ui.mark_conversation_start()
-        
+
+        # 同步会话列表到 Web UI
+        self._sync_session_list()
+
         # 主循环
         while True:
             try:
@@ -1351,6 +1469,113 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 if user_input == '/save':
                     # /save 命令已废弃，对话会自动保存
                     self.ui.print_dim("[提示] 对话已自动保存，无需手动操作")
+                    continue
+
+                if user_input == '/sessions':
+                    # 显示会话列表（终端）
+                    self._show_sessions()
+                    # 同步到 Web UI
+                    self._sync_session_list()
+                    continue
+
+                if user_input.startswith('/load '):
+                    # 加载会话
+                    session_id = user_input.split(' ', 1)[1].strip()
+                    if session_id:
+                        if self._load_session(session_id, sync_ui=True):
+                            # 加载成功后刷新系统提示词
+                            self.system_prompt = self._create_system_prompt()
+                            # 同步会话列表
+                            self._sync_session_list()
+                    continue
+
+                if user_input.startswith('/delete-session '):
+                    # 删除会话
+                    session_id = user_input.split(' ', 1)[1].strip()
+                    if session_id:
+                        if self.session_manager.delete_session(session_id):
+                            self.ui.print_success(f"已删除会话: {session_id}")
+                            # 同步会话列表
+                            self._sync_session_list()
+                        else:
+                            self.ui.print_error(f"删除会话失败: {session_id}")
+                    continue
+
+                if user_input == '/new':
+                    # 新对话：立即创建空会话记录并显示在侧边栏
+                    from chunk_system import ChunkManager, ChunkType
+
+                    # 检查当前是否已经是空会话（且会话仍存在）
+                    can_reuse_current = False
+                    if self.current_session_id:
+                        # 检查会话是否还存在
+                        session_exists = self.session_manager.load_session(self.current_session_id) is not None
+                        if session_exists:
+                            # 检查是否有用户消息
+                            user_msg_count = sum(1 for c in self.chunk_manager.chunks
+                                                if c.chunk_type in (ChunkType.USER, ChunkType.ASSISTANT))
+                            can_reuse_current = (user_msg_count == 0)
+
+                    if can_reuse_current:
+                        # 已经在空会话中，直接清空聊天区并同步列表
+                        if hasattr(self.ui, 'send_message'):
+                            await self.ui.send_message('new_chat', {
+                                'session_id': self.current_session_id
+                            })
+                            # 同步会话列表确保前端状态一致
+                            sessions = self.session_manager.list_sessions(limit=50)
+                            await self.ui.send_message("session_list", {
+                                "sessions": sessions,
+                                "current_id": self.current_session_id
+                            })
+                    else:
+                        # 检查是否存在其他空会话
+                        existing_sessions = self.session_manager.list_sessions(limit=50)
+                        existing_empty = None
+                        for s in existing_sessions:
+                            if s.get('message_count', 0) == 0:
+                                existing_empty = s
+                                break
+                        
+                        if existing_empty:
+                            # 切换到已存在的空会话
+                            if self._load_session(existing_empty['session_id'], sync_ui=True):
+                                self.system_prompt = self._create_system_prompt()
+                                if hasattr(self.ui, 'send_message'):
+                                    await self.ui.send_message('new_chat', {
+                                        'session_id': existing_empty['session_id']
+                                    })
+                                    sessions = self.session_manager.list_sessions(limit=50)
+                                    await self.ui.send_message("session_list", {
+                                        "sessions": sessions,
+                                        "current_id": self.current_session_id
+                                    })
+                        else:
+                            # 创建新的空会话
+                            self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+
+                            new_session = self.session_manager.save_session(
+                                chunk_manager=self.chunk_manager,
+                                workspace_dir=str(self.workspace_dir),
+                                model=self.model,
+                                shell_open=False,
+                                shell_pid=None,
+                                session_id=None
+                            )
+                            self.current_session_id = new_session.session_id
+
+                            # 同步到 Web UI
+                            if hasattr(self.ui, 'send_message'):
+                                sessions = self.session_manager.list_sessions(limit=50)
+                                await self.ui.send_message("session_list", {
+                                    "sessions": sessions,
+                                    "current_id": self.current_session_id
+                                })
+                                await self.ui.send_message('new_chat', {
+                                    'session_id': new_session.session_id
+                                })
+
+                    self.ui.print_success('新对话已开始')
                     continue
                 
                 if user_input == '/context' or user_input == '/ctx':

@@ -132,97 +132,64 @@
             padding: 2rem 1rem;
         }
 
-        /* === 对话树视图 === */
-        .tree-header {
+        /* === 对话链视图 === */
+        .chain-header {
             padding: 0.75rem;
             border-bottom: 1px solid var(--border-color);
         }
-        .tree-header__title {
+        .chain-header__title {
             font-size: 0.85rem;
             font-weight: 600;
             margin-bottom: 0.15rem;
         }
-        .tree-header__hint {
+        .chain-header__hint {
             font-size: 0.7rem;
             color: var(--text-secondary);
         }
-        .tree-canvas {
+        .chain-list {
             flex: 1;
-            overflow: auto;
-            padding: 1rem;
+            overflow-y: auto;
+            padding: 0.5rem;
         }
-        .tree-svg { display: block; }
-        .tree-empty {
-            color: var(--text-secondary);
-            font-size: 0.8rem;
-            text-align: center;
-            padding: 2rem 1rem;
-        }
-        .tree-node {
+        .chain-item {
+            padding: 0.5rem 0.6rem;
+            border-radius: 5px;
+            margin-bottom: 0.3rem;
             cursor: pointer;
-        }
-        .tree-node:hover {
-            filter: brightness(1.3);
-        }
-        .tree-node--user { fill: var(--accent-user); }
-        .tree-node--assistant { fill: var(--accent-assistant); }
-        .tree-node--active {
-            stroke: var(--accent-active);
-            stroke-width: 2;
-            filter: drop-shadow(0 0 4px var(--accent-active));
-        }
-        .tree-edge {
-            stroke: var(--border-color);
-            stroke-width: 1.5;
-            fill: none;
-        }
-
-        /* 悬浮提示 */
-        .tooltip {
-            position: fixed;
-            background: #1a1a1a;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 0.5rem 0.75rem;
-            max-width: 260px;
+            transition: background 0.15s;
             font-size: 0.75rem;
-            line-height: 1.4;
-            pointer-events: none;
-            z-index: 1000;
-            display: none;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            position: relative;
         }
-        .tooltip.visible { display: block; }
-        .tooltip__role {
+        .chain-item:hover { background: rgba(255,255,255,0.05); }
+        .chain-item--active { background: rgba(255,158,128,0.15); }
+        .chain-item__role {
             font-size: 0.65rem;
             font-weight: 600;
             margin-bottom: 0.2rem;
         }
-        .tooltip__role--user { color: var(--accent-user); }
-        .tooltip__role--assistant { color: var(--accent-assistant); }
-        .tooltip__text { color: var(--text-secondary); word-break: break-word; }
-
-        /* 右键菜单 */
-        .ctx-menu {
-            position: fixed;
-            background: #1a1a1a;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 0.25rem 0;
-            min-width: 130px;
-            z-index: 1001;
-            display: none;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        .chain-item__role--user { color: var(--accent-user); }
+        .chain-item__role--assistant { color: var(--accent-assistant); }
+        .chain-item__text {
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        .ctx-menu.visible { display: block; }
-        .ctx-menu__item {
-            padding: 0.45rem 0.7rem;
-            font-size: 0.75rem;
+        .chain-item__clone {
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
             cursor: pointer;
-            transition: background 0.15s;
+            opacity: 0;
+            font-size: 0.9rem;
+            padding: 0.2rem;
         }
-        .ctx-menu__item:hover { background: rgba(255,255,255,0.08); }
-        .ctx-menu__item--danger { color: var(--error-color); }
+        .chain-item:hover .chain-item__clone { opacity: 1; }
+        .chain-item__clone:hover { color: var(--accent-assistant); }
 
         /* ===== 记忆管理 ===== */
         .memory-header {
@@ -558,7 +525,7 @@
             <!-- 视图切换标签 -->
             <div class="sidebar__tabs">
                 <button class="sidebar__tab sidebar__tab--active" data-view="history">历史对话</button>
-                <button class="sidebar__tab" data-view="tree">对话树</button>
+                <button class="sidebar__tab" data-view="chain">当前对话</button>
                 <button class="sidebar__tab" data-view="memory">记忆</button>
             </div>
 
@@ -572,15 +539,14 @@
                 </div>
             </div>
 
-            <!-- 对话树视图 -->
-            <div class="sidebar__view" id="view-tree">
-                <div class="tree-header">
-                    <div class="tree-header__title">当前对话结构</div>
-                    <div class="tree-header__hint">右键: 回退/分叉/编辑/删除</div>
+            <!-- 当前对话链视图 -->
+            <div class="sidebar__view" id="view-chain">
+                <div class="chain-header">
+                    <div class="chain-header__title">当前对话</div>
+                    <div class="chain-header__hint">点击克隆: 从此消息创建新对话</div>
                 </div>
-                <div class="tree-canvas" id="tree-canvas">
-                    <div class="tree-empty" id="tree-empty">发送消息开始对话</div>
-                    <svg class="tree-svg" id="tree-svg"></svg>
+                <div class="chain-list" id="chain-list">
+                    <div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem" id="chain-empty">发送消息开始对话</div>
                 </div>
             </div>
 
@@ -617,13 +583,6 @@
         </main>
     </div>
 
-    <div class="tooltip" id="tooltip"></div>
-    <div class="ctx-menu" id="ctx-menu">
-        <div class="ctx-menu__item" data-action="fork">↻ 从此处重新输入</div>
-        <div class="ctx-menu__item" data-action="edit">✎ 编辑消息</div>
-        <div class="ctx-menu__item ctx-menu__item--danger" data-action="delete">✕ 删除此条及之后</div>
-    </div>
-
     <div id="modal" class="modal-overlay">
         <div class="modal">
             <div id="modal-title" class="modal__header">选择模型</div>
@@ -642,10 +601,6 @@
 ██╔═══╝   ██╔══██║  ╚███╔███╔╝
 ╚═╝       ╚═╝  ╚═╝   ╚══╝╚══╝ `;
 
-        const NODE_RADIUS = 6;
-        const LEVEL_HEIGHT = 40;
-        const SIBLING_GAP = 30;
-
         marked.setOptions({
             highlight: (code, lang) => hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value,
             langPrefix: 'hljs language-', gfm: true, breaks: true
@@ -654,6 +609,10 @@
         // ========== DOM ==========
         const $ = s => document.querySelector(s);
         const $$ = s => document.querySelectorAll(s);
+        
+        // 缓存会话列表，用于前端判断（需要在 newChatBtn 事件之前定义）
+        let cachedSessions = [];
+        
         const dom = {
             logo: $('#logo'),
             statusBar: $('#status-bar'),
@@ -661,10 +620,6 @@
             messages: $('#messages'),
             form: $('#input-form'),
             input: $('#input'),
-            treeSvg: $('#tree-svg'),
-            treeEmpty: $('#tree-empty'),
-            tooltip: $('#tooltip'),
-            ctxMenu: $('#ctx-menu'),
             modal: $('#modal'),
             modalTitle: $('#modal-title'),
             modalBody: $('#modal-body'),
@@ -674,8 +629,9 @@
             historyEmpty: $('#history-empty'),
             newChatBtn: $('#new-chat-btn'),
             viewHistory: $('#view-history'),
-            viewTree: $('#view-tree'),
+            viewChain: $('#view-chain'),
             viewMemory: $('#view-memory'),
+            chainList: $('#chain-list'),
             memoryCanvas: $('#memory-canvas'),
             memoryEmpty: $('#memory-empty'),
             memoryStats: $('#memory-stats'),
@@ -691,339 +647,125 @@
                 tab.classList.add('sidebar__tab--active');
                 const view = tab.dataset.view;
                 dom.viewHistory.classList.toggle('sidebar__view--active', view === 'history');
-                dom.viewTree.classList.toggle('sidebar__view--active', view === 'tree');
+                dom.viewChain.classList.toggle('sidebar__view--active', view === 'chain');
                 dom.viewMemory.classList.toggle('sidebar__view--active', view === 'memory');
+                // 切换到对话链视图时刷新
+                if (view === 'chain') ChatHistory.renderChain();
             });
         });
 
         // ========== 历史对话管理 ==========
         const ChatHistory = {
-            chats: [],          // { id, title, createdAt, tree: { nodes, activeId } }
-            currentId: null,
+            messages: [],      // 当前对话的消息列表（仅用于显示，不持久化）
+            currentSessionId: null,  // 当前会话ID
 
-            init() {
-                const saved = localStorage.getItem('paw_chats');
-                if (saved) {
-                    try {
-                        this.chats = JSON.parse(saved);
-                    } catch (e) { this.chats = []; }
-                }
-                if (!this.chats.length) this.createNew();
-                else this.load(this.chats[0].id);
-                this.render();
+            // 添加用户消息
+            addUserMessage(text) {
+                const msg = { id: `msg-${Date.now()}`, role: 'user', text };
+                this.messages.push(msg);
+                dom.messages.appendChild(createMsgEl('user', 'USER', text, msg.id));
+                scrollToBottom();
+                this.renderChain();
+                return msg.id;
             },
 
-            save() {
-                // 保存当前对话树到当前 chat
-                const chat = this.chats.find(c => c.id === this.currentId);
-                if (chat) {
-                    chat.tree = { nodes: Tree.nodes, activeId: Tree.activeId };
-                    // 更新标题为第一条用户消息
-                    const firstUser = Tree.nodes.find(n => n.role === 'user');
-                    if (firstUser) chat.title = firstUser.text.slice(0, 30) + (firstUser.text.length > 30 ? '…' : '');
-                }
-                localStorage.setItem('paw_chats', JSON.stringify(this.chats));
-                this.render();
+            // 添加助手消息
+            addAssistantMessage(text) {
+                const msg = { id: `msg-${Date.now()}`, role: 'assistant', text };
+                this.messages.push(msg);
+                this.renderChain();
+                return msg.id;
             },
 
-            createNew() {
-                const id = `chat-${Date.now()}`;
-                const chat = {
-                    id,
-                    title: '新对话',
-                    createdAt: new Date().toLocaleString('zh-CN'),
-                    tree: { nodes: [], activeId: null }
-                };
-                this.chats.unshift(chat);
-                this.load(id);
-                this.save();
-            },
-
-            load(id) {
-                const chat = this.chats.find(c => c.id === id);
-                if (!chat) return;
-                this.currentId = id;
-                Tree.nodes = chat.tree.nodes || [];
-                Tree.activeId = chat.tree.activeId;
-                TreeUI.render();
-                renderMessagesFromTree();
-                this.render();
-            },
-
-            delete(id) {
-                this.chats = this.chats.filter(c => c.id !== id);
-                if (this.currentId === id) {
-                    if (this.chats.length) this.load(this.chats[0].id);
-                    else this.createNew();
-                }
-                this.save();
-            },
-
-            render() {
-                if (!this.chats.length) {
-                    dom.historyEmpty.style.display = 'block';
-                    dom.historyList.querySelectorAll('.history-item').forEach(el => el.remove());
+            // 渲染对话链视图
+            renderChain() {
+                if (!this.messages.length) {
+                    dom.chainList.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem">发送消息开始对话</div>';
                     return;
                 }
-                dom.historyEmpty.style.display = 'none';
-                
-                // 清除旧的项目
-                dom.historyList.querySelectorAll('.history-item').forEach(el => el.remove());
-                
-                this.chats.forEach(chat => {
+                dom.chainList.innerHTML = '';
+
+                this.messages.forEach((msg, idx) => {
                     const el = document.createElement('div');
-                    el.className = `history-item ${chat.id === this.currentId ? 'history-item--active' : ''}`;
-                    el.dataset.id = chat.id;
+                    el.className = 'chain-item';
                     el.innerHTML = `
-                        <div class="history-item__title">${escapeHtml(chat.title)}</div>
-                        <div class="history-item__meta">${chat.createdAt}</div>
-                        <button class="history-item__delete" data-delete="${chat.id}">×</button>
+                        <div class="chain-item__role chain-item__role--${msg.role}">${msg.role === 'user' ? 'USER' : 'PAW'}</div>
+                        <div class="chain-item__text">${escapeHtml(msg.text.slice(0, 50))}${msg.text.length > 50 ? '…' : ''}</div>
                     `;
-                    dom.historyList.appendChild(el);
+                    dom.chainList.appendChild(el);
                 });
             }
         };
 
-        // 历史对话事件
+        // 历史对话事件（使用 WebSocket 请求后端）
         dom.historyList.addEventListener('click', e => {
             const deleteBtn = e.target.closest('[data-delete]');
             if (deleteBtn) {
                 e.stopPropagation();
-                ChatHistory.delete(deleteBtn.dataset.delete);
+                ws.send(`/delete-session ${deleteBtn.dataset.delete}`);
                 return;
             }
             const item = e.target.closest('.history-item');
-            if (item) ChatHistory.load(item.dataset.id);
+            if (item) requestLoadSession(item.dataset.id);
         });
 
-        dom.newChatBtn.addEventListener('click', () => ChatHistory.createNew());
-
-        // ========== 对话树数据结构 ==========
-        const Tree = {
-            nodes: [],
-            activeId: null,
-
-            createNode(role, text, parentId = null) {
-                const id = `n${Date.now()}-${Math.random().toString(36).slice(2,5)}`;
-                const node = { id, role, text, parentId, children: [] };
-                this.nodes.push(node);
-                if (parentId) {
-                    const parent = this.getNode(parentId);
-                    if (parent && !parent.children.includes(id)) parent.children.push(id);
-                }
-                this.activeId = id;
-                ChatHistory.save();
-                return node;
-            },
-
-            getNode(id) {
-                return this.nodes.find(n => n.id === id);
-            },
-
-            getPathTo(nodeId) {
-                const path = [];
-                let cur = this.getNode(nodeId);
-                while (cur) {
-                    path.unshift(cur);
-                    cur = cur.parentId ? this.getNode(cur.parentId) : null;
-                }
-                return path;
-            },
-
-            // 滚动到某节点对应的消息（不改变对话状态）
-            scrollToNode(nodeId) {
-                const msgEl = document.getElementById(nodeId);
-                if (msgEl) {
-                    msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    // 短暂高亮提示
-                    msgEl.style.outline = '2px solid var(--accent-active)';
-                    setTimeout(() => msgEl.style.outline = '', 1000);
-                }
-            },
-
-            // 从某个 user 节点的父节点处分叉（准备重新输入）
-            forkFrom(nodeId) {
-                const node = this.getNode(nodeId);
-                if (!node || node.role !== 'user') return;
-                // 设置 activeId 为该 user 节点的父节点（即上一个 assistant 节点或 null）
-                // 这样下一条用户消息会成为该父节点的新子节点，形成分叉
-                this.activeId = node.parentId;
-                TreeUI.render();
-                renderMessagesFromTree();
-                ChatHistory.save();
-                // 聚焦输入框，提示用户输入
-                dom.input.focus();
+        dom.newChatBtn.addEventListener('click', () => {
+            // 检查当前是否已经是空对话（message_count === 0）
+            const currentSession = cachedSessions.find(s => s.session_id === ChatHistory.currentSessionId);
+            if (currentSession && currentSession.message_count === 0) {
+                // 已经在空对话中，只需确保高亮并清空聊天区
+                updateSidebarHighlight(ChatHistory.currentSessionId);
+                ChatHistory.messages = [];
+                dom.messages.innerHTML = '';
+                dom.chainList.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem">发送消息开始对话</div>';
+                return;
             }
-        };
-
-        // ========== 树形布局 ==========
-        function layoutTree() {
-            if (!Tree.nodes.length) return { positions: {}, width: 0, height: 0 };
-            const positions = {};
-            const roots = Tree.nodes.filter(n => !n.parentId);
-            let nextX = 0;
-
-            function layout(nodeId, depth) {
-                const node = Tree.getNode(nodeId);
-                if (!node) return;
-                if (!node.children.length) {
-                    positions[nodeId] = { x: nextX * SIBLING_GAP + 20, y: depth * LEVEL_HEIGHT + 20 };
-                    nextX++;
-                } else {
-                    const childPos = node.children.map(cid => { layout(cid, depth + 1); return positions[cid]; }).filter(Boolean);
-                    const minX = Math.min(...childPos.map(p => p.x));
-                    const maxX = Math.max(...childPos.map(p => p.x));
-                    positions[nodeId] = { x: (minX + maxX) / 2, y: depth * LEVEL_HEIGHT + 20 };
-                }
+            
+            // 检查是否已存在其他空对话（message_count === 0）
+            const existingEmptySession = cachedSessions.find(s => s.message_count === 0);
+            if (existingEmptySession) {
+                // 切换到已存在的空对话
+                requestLoadSession(existingEmptySession.session_id);
+                return;
             }
-
-            roots.forEach(root => layout(root.id, 0));
-            const allPos = Object.values(positions);
-            return {
-                positions,
-                width: allPos.length ? Math.max(...allPos.map(p => p.x)) + 40 : 0,
-                height: allPos.length ? Math.max(...allPos.map(p => p.y)) + 40 : 0
-            };
-        }
-
-        // ========== 树 UI ==========
-        const TreeUI = {
-            render() {
-                if (!Tree.nodes.length) {
-                    dom.treeEmpty.style.display = 'block';
-                    dom.treeSvg.innerHTML = '';
-                    return;
-                }
-                dom.treeEmpty.style.display = 'none';
-                const { positions, width, height } = layoutTree();
-                dom.treeSvg.setAttribute('width', width);
-                dom.treeSvg.setAttribute('height', height);
-                const activePath = new Set(Tree.getPathTo(Tree.activeId).map(n => n.id));
-
-                let svg = '';
-                Tree.nodes.forEach(node => {
-                    if (node.parentId && positions[node.id] && positions[node.parentId]) {
-                        const p1 = positions[node.parentId], p2 = positions[node.id];
-                        svg += `<path class="tree-edge" d="M${p1.x},${p1.y} C${p1.x},${(p1.y+p2.y)/2} ${p2.x},${(p1.y+p2.y)/2} ${p2.x},${p2.y}"/>`;
-                    }
-                });
-                Tree.nodes.forEach(node => {
-                    const pos = positions[node.id];
-                    if (!pos) return;
-                    const cls = `tree-node tree-node--${node.role} ${activePath.has(node.id) ? 'tree-node--active' : ''}`;
-                    svg += `<circle class="${cls}" cx="${pos.x}" cy="${pos.y}" r="${NODE_RADIUS}" data-id="${node.id}"/>`;
-                });
-                dom.treeSvg.innerHTML = svg;
-            }
-        };
-
-        // ========== Tooltip ==========
-        dom.treeSvg.addEventListener('mouseover', e => {
-            const circle = e.target.closest('.tree-node');
-            if (!circle) return;
-            const node = Tree.getNode(circle.dataset.id);
-            if (!node) return;
-            const preview = node.text.length > 180 ? node.text.slice(0, 180) + '…' : node.text;
-            dom.tooltip.innerHTML = `
-                <div class="tooltip__role tooltip__role--${node.role}">${node.role === 'user' ? 'USER' : 'PAW'}</div>
-                <div class="tooltip__text">${escapeHtml(preview)}</div>
-            `;
-            dom.tooltip.classList.add('visible');
-            positionTooltip(e);
-        });
-        dom.treeSvg.addEventListener('mousemove', e => { if (dom.tooltip.classList.contains('visible')) positionTooltip(e); });
-        dom.treeSvg.addEventListener('mouseout', e => { if (e.target.closest('.tree-node')) dom.tooltip.classList.remove('visible'); });
-
-        // 点击节点 → 滚动到对应消息
-        dom.treeSvg.addEventListener('click', e => {
-            const circle = e.target.closest('.tree-node');
-            if (!circle) return;
-            Tree.scrollToNode(circle.dataset.id);
-        });
-
-        function positionTooltip(e) {
-            let x = e.clientX + 10, y = e.clientY + 10;
-            if (x + 260 > window.innerWidth) x = e.clientX - 270;
-            if (y + 120 > window.innerHeight) y = e.clientY - 130;
-            dom.tooltip.style.left = x + 'px';
-            dom.tooltip.style.top = y + 'px';
-        }
-
-        // ========== 右键菜单 ==========
-        let ctxNodeId = null;
-
-        dom.treeSvg.addEventListener('contextmenu', e => {
-            const circle = e.target.closest('.tree-node');
-            if (!circle) return;
-            e.preventDefault();
-            ctxNodeId = circle.dataset.id;
-
-            const node = Tree.getNode(ctxNodeId);
-            const items = dom.ctxMenu.querySelectorAll('.ctx-menu__item');
-
-            // 只有 user 节点显示"重新输入"
-            items[0].style.display = (node && node.role === 'user') ? 'block' : 'none';
-
-            dom.ctxMenu.style.left = e.clientX + 'px';
-            dom.ctxMenu.style.top = e.clientY + 'px';
-            dom.ctxMenu.classList.add('visible');
-        });
-
-        document.addEventListener('click', () => dom.ctxMenu.classList.remove('visible'));
-
-        dom.ctxMenu.addEventListener('click', e => {
-            const action = e.target.dataset.action;
-            if (!action || !ctxNodeId) return;
-
-            if (action === 'fork') {
-                Tree.forkFrom(ctxNodeId);
-            } else if (action === 'edit') {
-                const node = Tree.getNode(ctxNodeId);
-                if (node) {
-                    // 编辑消息内容
-                    const newContent = prompt('编辑消息内容:', node.text);
-                    if (newContent !== null && newContent !== node.text) {
-                        node.text = newContent;
-                        TreeUI.render();
-                        renderMessagesFromTree();
-                        // 发送编辑命令到后端
-                        send(`EDIT_NODE:${ctxNodeId}:${newContent}`);
-                    }
-                }
-            } else if (action === 'delete') {
-                // 删除此节点及之后的所有节点
-                const node = Tree.getNode(ctxNodeId);
-                if (node && confirm('确定删除此条及之后的所有消息吗？')) {
-                    // 从树中找到要删除的节点
-                    const idx = Tree.nodes.findIndex(n => n.id === ctxNodeId);
-                    if (idx >= 0) {
-                        Tree.nodes = Tree.nodes.slice(0, idx);
-                        // 更新activeId为前一个节点或null
-                        Tree.activeId = idx > 0 ? Tree.nodes[idx - 1].id : null;
-                        TreeUI.render();
-                        renderMessagesFromTree();
-                        ChatHistory.save();
-                        // 发送删除命令到后端
-                        send(`DELETE_FROM:${ctxNodeId}`);
-                    }
-                }
-            }
-            dom.ctxMenu.classList.remove('visible');
+            
+            // 没有空对话，请求后端创建新对话
+            ws.send('/new');
         });
 
         // ========== 消息渲染 ==========
-        function renderMessagesFromTree() {
-            dom.messages.innerHTML = '';
-            if (!Tree.activeId) return;
-            Tree.getPathTo(Tree.activeId).forEach(node => {
-                dom.messages.appendChild(createMsgEl(node.role, node.role === 'user' ? 'USER' : 'PAW', node.text, node.id));
-            });
+        function createMsgEl(type, author, text, id = null) {
+            const el = document.createElement('div');
+            el.className = `msg msg--${type}`;
+            if (id) el.id = id;
+            // 添加工具容器（用于附加该消息的工具调用）
+            el.innerHTML = `<div class="msg__header">${author}</div><div class="msg__content">${marked.parse(text)}</div><div class="msg__tools"></div>`;
+            return el;
+        }
+
+        function addSysMsg(text, type = '') {
+            const el = document.createElement('div');
+            el.className = `sys-msg ${type}`;
+            el.textContent = text;
+            dom.messages.appendChild(el);
             scrollToBottom();
+        }
+
+        function scrollToBottom() { dom.msgWrap.scrollTop = dom.msgWrap.scrollHeight; }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // ========== WebSocket ==========
         const ws = new WebSocket(`ws://${location.host}/ws`);
-        ws.onopen = () => addSysMsg('Connected to Paw!');
+        ws.onopen = () => {
+            addSysMsg('Connected to Paw!');
+            // 延迟请求会话列表，等待后端初始化完成
+            setTimeout(() => requestSessionList(), 500);
+        };
         ws.onclose = () => addSysMsg('Connection closed.', 'error');
         ws.onerror = () => addSysMsg('WebSocket error.', 'error');
         ws.onmessage = e => handleEvent(JSON.parse(e.data));
@@ -1040,9 +782,289 @@
                 'show_model_selection': () => showModelSelect(data.models),
                 'request_input': () => showInputPrompt(data),
                 'show_memory': () => Memory.show(data.conversations),
-                'memory_result': () => Memory.handleResult(data)
+                'memory_result': () => Memory.handleResult(data),
+                'session_list': () => handleSessionList(data),
+                'session_load': () => handleSessionLoad(data),
+                'session_loaded': () => {
+                    addSysMsg(`已恢复会话: ${data.title}`, 'system');
+                    // 更新当前会话ID和侧边栏高亮
+                    if (data.session_id) {
+                        ChatHistory.currentSessionId = data.session_id;
+                        updateSidebarHighlight(data.session_id);
+                    }
+                },
+                'new_chat': () => {
+                    ChatHistory.messages = [];
+                    dom.messages.innerHTML = '';
+                    dom.chainList.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem">发送消息开始对话</div>';
+                    // 更新当前会话ID（如果后端返回了）
+                    if (data.session_id) {
+                        ChatHistory.currentSessionId = data.session_id;
+                        // 更新侧边栏高亮
+                        updateSidebarHighlight(data.session_id);
+                    }
+                    // 请求刷新会话列表以确保侧边栏同步
+                    requestSessionList();
+                }
             };
             h[event]?.();
+        }
+
+        // ========== 会话管理 ==========
+        function handleSessionList({ sessions, current_id }) {
+            // 缓存会话列表
+            cachedSessions = sessions || [];
+            // 更新侧边栏的会话列表
+            dom.historyList.innerHTML = '';
+            sessions.forEach(s => {
+                const el = document.createElement('div');
+                el.className = 'history-item';
+                el.dataset.id = s.session_id;
+                if (s.session_id === current_id) el.classList.add('history-item--active');
+                el.innerHTML = `
+                    <div class="history-item__title">${escapeHtml(s.title || '新对话')}</div>
+                    <div class="history-item__meta">${s.timestamp || ''} · ${s.message_count || 0} 消息</div>
+                    <span class="history-item__delete" data-delete="${s.session_id}">×</span>
+                `;
+                dom.historyList.appendChild(el);
+            });
+            // 更新当前会话ID
+            ChatHistory.currentSessionId = current_id;
+        }
+
+        // 更新侧边栏高亮状态
+        function updateSidebarHighlight(sessionId) {
+            dom.historyList.querySelectorAll('.history-item').forEach(item => {
+                item.classList.toggle('history-item--active', item.dataset.id === sessionId);
+            });
+        }
+
+        function handleSessionLoad({ chunks }) {
+            // 清空当前消息
+            ChatHistory.messages = [];
+            dom.messages.innerHTML = '';
+
+            // 先收集工具结果（稍后更新）
+            const toolResults = [];
+            // 建立 tool_call_id → args 的映射（用于重新生成 display）
+            const toolArgsMap = new Map();
+
+            // 从 chunks 重建消息和工具调用
+            chunks.forEach(chunk => {
+                const type = chunk.type;
+
+                if (type === 'user') {
+                    // 用户消息
+                    const msg = { id: `msg-${Date.now()}-${Math.random()}`, role: 'user', text: chunk.content };
+                    ChatHistory.messages.push(msg);
+                    dom.messages.appendChild(createMsgEl('user', 'USER', chunk.content));
+
+                } else if (type === 'assistant') {
+                    // 助手消息
+                    const msg = { id: `msg-${Date.now()}-${Math.random()}`, role: 'assistant', text: chunk.content || '' };
+                    ChatHistory.messages.push(msg);
+                    dom.messages.appendChild(createMsgEl('assistant', 'PAW', chunk.content || ''));
+
+                    // 如果有 tool_calls，渲染工具调用并保存 args
+                    if (chunk.metadata?.tool_calls) {
+                        chunk.metadata.tool_calls.forEach(tc => {
+                            const func = tc.function || {};
+                            const args = func.arguments || '{}';
+                            // 保存 args 到映射
+                            toolArgsMap.set(tc.id, typeof args === 'string' ? JSON.parse(args) : args);
+                            createTool({
+                                id: tc.id,
+                                name: func.name,
+                                args: typeof args === 'string' ? args : JSON.stringify(args)
+                            });
+                        });
+                    }
+
+                } else if (type === 'tool_result') {
+                    // 收集工具结果，稍后更新
+                    toolResults.push({
+                        toolCallId: chunk.metadata?.tool_call_id,
+                        toolName: chunk.metadata?.name || 'unknown',
+                        content: chunk.content
+                    });
+                }
+            });
+
+            // 更新所有工具结果状态
+            toolResults.forEach(result => {
+                const args = toolArgsMap.get(result.toolCallId) || {};
+                const display = getToolDisplay(result.toolName, result.content, args);
+                updateTool({
+                    id: result.toolCallId,
+                    name: result.toolName,
+                    display: display,
+                    success: true
+                });
+            });
+
+            scrollToBottom();
+            ChatHistory.renderChain();
+        }
+
+        // 重新生成工具显示信息（与后端 _get_tool_display 逻辑一致）
+        function getToolDisplay(toolName, resultText, args) {
+            const content = resultText || '';
+
+            // read_file
+            if (toolName === 'read_file') {
+                const path = args.file_path || '';
+                const filename = path.split('/').pop().split('\\').pop();
+                const totalLines = content.split('\n').length;
+                const offset = args.offset;
+                const limit = args.limit;
+                let rangeStr = `(all ${totalLines}行)`;
+                if (offset && limit) {
+                    const end = offset + limit - 1;
+                    rangeStr = `(${offset}-${end}/${totalLines}行)`;
+                } else if (offset) {
+                    rangeStr = `(${offset}-end/${totalLines}行)`;
+                }
+                return {
+                    line1: `${filename} ${rangeStr}`,
+                    line2: '',
+                    has_line2: false
+                };
+            }
+
+            // write_to_file / delete_file / edit / multi_edit
+            if (['write_to_file', 'delete_file', 'edit', 'multi_edit'].includes(toolName)) {
+                const path = args.file_path || '';
+                const filename = path.split('/').pop().split('\\').pop();
+                return { line1: filename, line2: '', has_line2: false };
+            }
+
+            // list_dir
+            if (toolName === 'list_dir') {
+                const path = args.directory_path || '.';
+                const lines = content.split('\n').filter(l => l.startsWith('['));
+                const count = lines.length;
+                const preview = lines.slice(0, 3).map(l => {
+                    const match = l.match(/\] (.+?)(?: \(|$)/);
+                    return match ? match[1] : '';
+                }).filter(Boolean).join(', ');
+                return {
+                    line1: path,
+                    line2: preview + (count > 3 ? `... (+${count-3})` : ''),
+                    has_line2: count > 0
+                };
+            }
+
+            // find_by_name
+            if (toolName === 'find_by_name') {
+                const pattern = args.pattern || '';
+                const items = content.split('\n').filter(Boolean);
+                const count = items.length;
+                if (count === 0) {
+                    return { line1: `"${pattern}" 无匹配`, line2: '', has_line2: false };
+                }
+                const names = items.slice(0, 3).map(i => i.split('/').pop().split('\\').pop());
+                const preview = names.join(', ');
+                return {
+                    line1: `"${pattern}" ${count}匹配`,
+                    line2: preview + (count > 3 ? `... (+${count-3})` : ''),
+                    has_line2: true
+                };
+            }
+
+            // grep_search
+            if (toolName === 'grep_search') {
+                const query = args.query || '';
+                const resultText = content.trim();
+                if (!resultText || resultText.toLowerCase().includes('no matches')) {
+                    return { line1: `"${query}" 无匹配`, line2: '', has_line2: false };
+                }
+                const lines = resultText.split('\n');
+                const summary = lines[0]?.slice(0, 60) + (lines[0].length > 60 ? '...' : '');
+                return {
+                    line1: `"${query}"`,
+                    line2: summary + (lines.length > 1 ? ` (+${lines.length-1})` : ''),
+                    has_line2: true
+                };
+            }
+
+            // search_web
+            if (toolName === 'search_web') {
+                const query = args.query || '';
+                try {
+                    const jsonMatch = content.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const data = JSON.parse(jsonMatch[0]);
+                        const results = data.results || [];
+                        return {
+                            line1: `${results.length}条 "${query}"`,
+                            line2: results.map(r => `[${r.id}] ${r.title}`).join('\n'),
+                            has_line2: results.length > 0
+                        };
+                    }
+                } catch (e) {}
+                return { line1: `"${query}"`, line2: '', has_line2: false };
+            }
+
+            // load_url_content
+            if (toolName === 'load_url_content') {
+                try {
+                    const jsonMatch = content.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const data = JSON.parse(jsonMatch[0]);
+                        const title = (data.title || '无标题').slice(0, 40);
+                        const urlId = data.url_id || '';
+                        const pages = data.pages || [];
+                        return {
+                            line1: urlId ? `[${urlId}] ${title}` : title,
+                            line2: pages.map(p => `[${p.page_id}] ${p.summary}`).join('\n'),
+                            has_line2: pages.length > 0
+                        };
+                    }
+                } catch (e) {}
+                return { line1: args.url?.slice(0, 40) || '', line2: '', has_line2: false };
+            }
+
+            // read_page
+            if (toolName === 'read_page') {
+                const pageId = args.page_id || '';
+                try {
+                    const jsonMatch = content.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const data = JSON.parse(jsonMatch[0]);
+                        const pageNum = data.page_num || '?';
+                        const total = data.total_pages || '?';
+                        const size = data.size || 0;
+                        return {
+                            line1: `[${pageId}] 第${pageNum}/${total}页 (${size}字节)`,
+                            line2: '',
+                            has_line2: false
+                        };
+                    }
+                } catch (e) {}
+                return { line1: `[${pageId}]`, line2: '', has_line2: false };
+            }
+
+            // 默认：多行内容显示
+            if (content.includes('\n')) {
+                const lines = content.split('\n');
+                return {
+                    line1: lines[0]?.slice(0, 60) || '',
+                    line2: lines.slice(1, 10).join('\n'),
+                    has_line2: true
+                };
+            }
+
+            return { line1: content.slice(0, 60), line2: '', has_line2: false };
+        }
+
+        // 请求会话列表
+        function requestSessionList() {
+            ws.send('/sessions');
+        }
+
+        // 请求加载会话
+        function requestLoadSession(sessionId) {
+            ws.send(`/load ${sessionId}`);
         }
 
         function send(msg) {
@@ -1051,25 +1073,10 @@
         }
 
         // ========== 消息处理 ==========
-        let streamId = null, streamBuf = '', pendingUserNodeId = null;
+        let streamId = null, streamBuf = '';
 
         function addUserMessage(text) {
-            // 确定父节点：activeId 应该是 assistant 节点或 null
-            // 如果 activeId 指向 user 节点，说明逻辑有误，应该用它的父节点
-            let parentId = Tree.activeId;
-            if (parentId) {
-                const activeNode = Tree.getNode(parentId);
-                if (activeNode && activeNode.role === 'user') {
-                    // 不应该发生，但做个保护
-                    parentId = activeNode.parentId;
-                }
-            }
-            
-            const node = Tree.createNode('user', text, parentId);
-            pendingUserNodeId = node.id; // 记录这个 user 节点，等 assistant 回复时用
-            TreeUI.render();
-            dom.messages.appendChild(createMsgEl('user', 'USER', text, node.id));
-            scrollToBottom();
+            return ChatHistory.addUserMessage(text);
         }
 
         function startStream(id) {
@@ -1098,31 +1105,12 @@
                     pre.appendChild(btn);
                 });
             }
-            
-            // assistant 节点的父节点应该是刚才的 user 节点
-            const parentId = pendingUserNodeId || Tree.activeId;
-            Tree.createNode('assistant', streamBuf, parentId);
-            TreeUI.render();
-            
+
+            // 保存助手消息到对话历史
+            ChatHistory.addAssistantMessage(streamBuf);
+
             streamId = null;
             streamBuf = '';
-            pendingUserNodeId = null;
-        }
-
-        function createMsgEl(type, author, text, id = null) {
-            const el = document.createElement('div');
-            el.className = `msg msg--${type}`;
-            if (id) el.id = id;
-            el.innerHTML = `<div class="msg__header">${author}</div><div class="msg__content">${marked.parse(text)}</div>`;
-            return el;
-        }
-
-        function addSysMsg(text, type = '') {
-            const el = document.createElement('div');
-            el.className = `sys-msg ${type}`;
-            el.textContent = text;
-            dom.messages.appendChild(el);
-            scrollToBottom();
         }
 
         function createTool({ id, name, args }) {
@@ -1131,7 +1119,15 @@
             el.className = 'tool';
             // Shell 风格：○ tool_name args
             el.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${name}</span> <span class="tool__args">${args}</span></div>`;
-            dom.messages.appendChild(el);
+
+            // 附加到上一条助手消息的工具容器中
+            const toolsContainer = dom.messages.querySelector('.msg--assistant:last-child .msg__tools');
+            if (toolsContainer) {
+                toolsContainer.appendChild(el);
+            } else {
+                // 如果找不到助手消息（边缘情况），暂时直接添加
+                dom.messages.appendChild(el);
+            }
             scrollToBottom();
         }
 
@@ -1384,7 +1380,6 @@
         // ========== 启动 ==========
         addSysMsg('Waiting for Paw...');
         autoResize();
-        ChatHistory.init();
     </script>
 </body>
 </html>

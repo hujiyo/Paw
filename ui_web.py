@@ -293,3 +293,36 @@ class WebUI:
         else:
             self.print_error(f"✗ 操作失败 {detail}")
         self.show_editor_result(success, detail if success else "", detail if not success else "")
+
+    # --- 会话管理方法 ---
+
+    def send_session_list(self, sessions: list, current_id: str = None):
+        """发送会话列表"""
+        asyncio.create_task(self.send_message("session_list", {
+            "sessions": sessions,
+            "current_id": current_id
+        }))
+
+    def send_session_load(self, chunks: list):
+        """发送加载会话的完整内容"""
+        asyncio.create_task(self.send_message("session_load", {
+            "chunks": chunks
+        }))
+
+    def send_session_loaded(self, session_id: str, title: str):
+        """发送会话加载成功通知"""
+        asyncio.create_task(self.send_message("session_loaded", {
+            "session_id": session_id,
+            "title": title
+        }))
+
+    def send_tool_details(self, tool_id: str, args: dict, result: str, duration: str = None):
+        """发送工具详情"""
+        asyncio.create_task(self.send_message("tool_details", {
+            "tool_id": tool_id,
+            "details": {
+                "args": args,
+                "result": result,
+                "duration": duration
+            }
+        }))

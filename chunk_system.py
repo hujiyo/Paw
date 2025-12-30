@@ -180,28 +180,31 @@ class ChunkManager:
         return self.add_chunk(tool_info, ChunkType.TOOL_CALL)
     
     def add_tool_result(self, result: str, tool_call_id: str = None, tool_name: str = None,
-                        max_call_pairs: int = 0) -> Chunk:
+                        max_call_pairs: int = 0, display_info: dict = None) -> Chunk:
         """添加工具结果
-        
+
         Args:
             result: 工具执行结果
             tool_call_id: 工具调用ID（OpenAI标准）
             tool_name: 工具名称
             max_call_pairs: 最大配对数量，超出时删除最旧的 (tool_call + tool_result)
+            display_info: 工具显示信息（用于恢复历史时保持显示一致性），包含 line1/line2/has_line2
         """
         metadata = {}
         if tool_call_id:
             metadata['tool_call_id'] = tool_call_id
         if tool_name:
             metadata['name'] = tool_name
-        
+        if display_info:
+            metadata['display'] = display_info
+
         # 添加新的 tool_result
         chunk = self.add_chunk(result, ChunkType.TOOL_RESULT, metadata=metadata)
-        
+
         # 如果设置了 max_call_pairs，执行配对清理
         if max_call_pairs > 0 and tool_name:
             self._enforce_max_call_pairs(tool_name, max_call_pairs)
-        
+
         return chunk
     
     def _enforce_max_call_pairs(self, tool_name: str, max_pairs: int):
@@ -699,4 +702,52 @@ class ChunkManager:
                 "metadata": chunk.metadata
             }
             for chunk in self.chunks
-        ]    
+        ]
+
+    @classmethod
+    def from_json(cls, data: List[Dict[str, Any]], max_tokens: int = 64000,
+                  tools_schema: Optional[List[Dict]] = None) -> 'ChunkManager':
+        """从JSON导入
+
+        Args:
+            data: JSON格式的语块数据
+            max_tokens: 最大token数
+            tools_schema: 工具定义schema
+
+        Returns:
+            新的ChunkManager实例
+        """
+        manager = cls(max_tokens=max_tokens, tools_schema=tools_schema)
+
+        for item in data:
+            chunk_type = ChunkType(item.get("type", "user"))
+            content = item.get("content", "")
+
+            # 解析时间戳
+            timestamp_str = item.get("timestamp")
+            if timestamp_str:
+                try:
+                    from datetime import datetime
+                    timestamp = datetime.fromisoformat(timestamp_str)
+                except Exception:
+                    timestamp = datetime.now()
+            else:
+                timestamp = datetime.now()
+
+            # 创建chunk
+            chunk = Chunk(
+                content=content,
+                chunk_type=chunk_type,
+                timestamp=timestamp,
+                tokens=item.get("tokens", 0),
+                metadata=item.get("metadata", {})
+            )
+
+            # 如果没有token数，重新估算
+            if chunk.tokens == 0:
+                chunk.estimate_tokens()
+
+            manager.chunks.append(chunk)
+            manager.current_tokens += chunk.tokens
+
+        return manager    
