@@ -1,6 +1,6 @@
-# Paw
+<img src=".logo/图标2.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src=".logo/图标3.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src=".logo/图标.png" width="128" height="128" alt="Paw">
 
-一个智能桌面 Agent
+# Paw: 一个桌面 Agent
 
 ## 特性
 
@@ -51,6 +51,8 @@ web:
 
 ### 运行
 
+#### 方式一：Python 直接运行
+
 ```bash
 python paw.py <workspace_dir>
 ```
@@ -63,6 +65,24 @@ python paw.py
 ```
 
 默认启动 Web UI: http://127.0.0.1:8080
+
+#### 方式二：Electron 桌面应用
+
+```bash
+cd electron
+npm install
+npm start
+```
+
+构建安装包：
+
+```bash
+npm run build:win    # Windows
+npm run build:mac    # macOS
+npm run build:linux  # Linux
+```
+
+详细说明请参考 [electron/README.md](electron/README.md)
 
 ## 内置指令
 
@@ -107,6 +127,10 @@ Paw/
 │
 ├── templates/          # 前端模板
 ├── embedding/          # 本地 Embedding 模型
+├── electron/           # Electron 桌面封装
+│   ├── main.js         # Electron 主进程
+│   ├── preload.js      # 预加载脚本
+│   └── package.json    # Node.js 配置
 └── scripts/            # 启动脚本
 ```
 
