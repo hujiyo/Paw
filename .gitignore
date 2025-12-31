@@ -5,3 +5,4 @@ models/
 *.gguf
 CLAUDE.md
 nul
+!.logo/
