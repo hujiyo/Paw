@@ -497,206 +497,6 @@ SCHEMA_READ_PAGE = {
         }
     }
 }
-
-
-# ============================================================
-# 工具注册函数
-# ============================================================
-
-def register_all_tools(tools_instance):
-    """
-    注册所有工具到 ToolRegistry
-    
-    Args:
-        tools_instance: BaseTools 实例，提供工具的执行函数
-    
-    注意：
-    - handler 绑定到具体实例的方法
-    - 上下文策略在这里声明
-    - 本次重构保持功能一致，暂不添加压缩策略
-    """
-    
-    # === 文件读写工具 ===
-    
-    register_tool(
-        name="read_file",
-        schema=SCHEMA_READ_FILE,
-        handler=tools_instance.read_file,
-        # 暂时不压缩，保持原有行为
-        # 后续可添加: singleton_key=key_by_arg("file_path"), max_instances=5
-        category="file"
-    )
-    
-    register_tool(
-        name="write_to_file",
-        schema=SCHEMA_WRITE_TO_FILE,
-        handler=tools_instance.write_to_file,
-        # 暂时不压缩，保持原有行为
-        # 后续可添加: result_transform=transform_to_summary("✓ 写入 {file_path}")
-        category="file"
-    )
-    
-    register_tool(
-        name="delete_file",
-        schema=SCHEMA_DELETE_FILE,
-        handler=tools_instance.delete_file,
-        category="file"
-    )
-    
-    # === 文件编辑工具 ===
-    
-    register_tool(
-        name="edit",
-        schema=SCHEMA_EDIT,
-        handler=tools_instance.edit,
-        category="edit"
-    )
-    
-    register_tool(
-        name="multi_edit",
-        schema=SCHEMA_MULTI_EDIT,
-        handler=tools_instance.multi_edit,
-        category="edit"
-    )
-    
-    # === 搜索工具 ===
-    
-    register_tool(
-        name="find_by_name",
-        schema=SCHEMA_FIND_BY_NAME,
-        handler=tools_instance.find_by_name,
-        category="search"
-    )
-    
-    register_tool(
-        name="grep_search",
-        schema=SCHEMA_GREP_SEARCH,
-        handler=tools_instance.grep_search,
-        category="search"
-    )
-    
-    register_tool(
-        name="list_dir",
-        schema=SCHEMA_LIST_DIR,
-        handler=tools_instance.list_dir,
-        category="search"
-    )
-    
-    # === Shell 工具（已有 singleton 优化）===
-    # 这些工具共享一个 "shell" chunk，通过 ChunkType.SHELL 实现
-    # 注意：shell 的 singleton 逻辑目前在 ChunkManager 中特殊处理
-    # 这里只是标记，实际逻辑保持不变
-    
-    register_tool(
-        name="run_command",
-        schema=SCHEMA_RUN_COMMAND,
-        handler=tools_instance.run_command,
-        # shell chunk 的管理目前由 _refresh_shell_chunk 处理
-        # 这里的 singleton_key 暂时不生效，保持兼容
-        singleton_key=key_constant("shell"),
-        category="shell"
-    )
-    
-    register_tool(
-        name="open_shell",
-        schema=SCHEMA_OPEN_SHELL,
-        handler=tools_instance.open_shell,
-        singleton_key=key_constant("shell"),
-        category="shell"
-    )
-    
-    register_tool(
-        name="interrupt_command",
-        schema=SCHEMA_INTERRUPT_COMMAND,
-        handler=tools_instance.interrupt_command,
-        singleton_key=key_constant("shell"),
-        category="shell"
-    )
-    
-    # === 辅助工具 ===
-    
-    register_tool(
-        name="wait",
-        schema=SCHEMA_WAIT,
-        handler=tools_instance.wait,
-        max_call_pairs=3,  # 只保留最近3次调用（tool_call + tool_result 配对）
-        category="utility"
-    )
-    
-    # === TODO-list 工具 ===
-    
-    register_tool(
-        name="update_plan",
-        schema=SCHEMA_UPDATE_PLAN,
-        handler=tools_instance.update_plan,
-        singleton_key=key_constant("plan"),  # 只保留最新的计划
-        category="utility"
-    )
-    
-    register_tool(
-        name="get_plan",
-        schema=SCHEMA_GET_PLAN,
-        handler=tools_instance.get_plan,
-        max_call_pairs=1,  # 只保留最近一次查询
-        category="utility"
-    )
-    
-    register_tool(
-        name="pass_turn",
-        schema=SCHEMA_PASS,
-        handler=tools_instance.pass_turn,
-        max_call_pairs=1,
-        category="utility"
-    )
-
-    # === Skill 工具 ===
-
-    register_tool(
-        name="load_skill",
-        schema=SCHEMA_LOAD_SKILL,
-        handler=tools_instance.load_skill,
-        max_call_pairs=1,  # 只保留最近一次加载
-        category="skill"
-    )
-
-    register_tool(
-        name="run_skill_script",
-        schema=SCHEMA_RUN_SKILL_SCRIPT,
-        handler=tools_instance.run_skill_script,
-        max_call_pairs=3,  # 保留最近3次调用
-        category="skill"
-    )
-
-
-def register_web_tools(web_tools_instance):
-    """
-    注册 Web 工具到 ToolRegistry
-    
-    Args:
-        web_tools_instance: WebTools 实例
-    """
-    
-    register_tool(
-        name="search_web",
-        schema=SCHEMA_SEARCH_WEB,
-        handler=web_tools_instance.search_web,
-        category="web"
-    )
-    
-    register_tool(
-        name="load_url_content",
-        schema=SCHEMA_LOAD_URL_CONTENT,
-        handler=web_tools_instance.load_url_content,
-        category="web"
-    )
-    
-    register_tool(
-        name="read_page",
-        schema=SCHEMA_READ_PAGE,
-        handler=web_tools_instance.read_page,
-        category="web"
-    )
-
 # ============================================================
 # 分支编辑工具 Schema（上下文编辑模式专用）
 # ============================================================
@@ -836,6 +636,200 @@ SCHEMA_EXIT_BRANCH = {
     }
 }
 
+# ============================================================
+# 工具注册函数
+# ============================================================
+
+def register_all_tools(tools_instance):
+    """
+    注册所有工具到 ToolRegistry
+    
+    Args:
+        tools_instance: BaseTools 实例，提供工具的执行函数
+    
+    注意：
+    - handler 绑定到具体实例的方法
+    - 上下文策略在这里声明
+    - 本次重构保持功能一致，暂不添加压缩策略
+    """
+    
+    # === 文件读写工具 ===    
+    register_tool(
+        name="read_file",
+        schema=SCHEMA_READ_FILE,
+        handler=tools_instance.read_file,
+        # 暂时不压缩，保持原有行为
+        # 后续可添加: singleton_key=key_by_arg("file_path"), max_instances=5
+        category="file"
+    )
+    
+    register_tool(
+        name="write_to_file",
+        schema=SCHEMA_WRITE_TO_FILE,
+        handler=tools_instance.write_to_file,
+        # 暂时不压缩，保持原有行为
+        # 后续可添加: result_transform=transform_to_summary("✓ 写入 {file_path}")
+        category="file"
+    )
+    
+    register_tool(
+        name="delete_file",
+        schema=SCHEMA_DELETE_FILE,
+        handler=tools_instance.delete_file,
+        category="file"
+    )
+    
+    # === 文件编辑工具 ===
+    
+    register_tool(
+        name="edit",
+        schema=SCHEMA_EDIT,
+        handler=tools_instance.edit,
+        category="edit"
+    )
+    
+    register_tool(
+        name="multi_edit",
+        schema=SCHEMA_MULTI_EDIT,
+        handler=tools_instance.multi_edit,
+        category="edit"
+    )
+    
+    # === 搜索工具 ===
+    
+    register_tool(
+        name="find_by_name",
+        schema=SCHEMA_FIND_BY_NAME,
+        handler=tools_instance.find_by_name,
+        category="search"
+    )
+    
+    register_tool(
+        name="grep_search",
+        schema=SCHEMA_GREP_SEARCH,
+        handler=tools_instance.grep_search,
+        category="search"
+    )
+    
+    register_tool(
+        name="list_dir",
+        schema=SCHEMA_LIST_DIR,
+        handler=tools_instance.list_dir,
+        category="search"
+    )
+    
+    # === Shell 工具（已有 singleton 优化）===
+    # 这些工具共享一个 "shell" chunk，通过 ChunkType.SHELL 实现
+    # 注意：shell 的 singleton 逻辑目前在 ChunkManager 中特殊处理
+    # 这里只是标记，实际逻辑保持不变
+    
+    register_tool(
+        name="run_command",
+        schema=SCHEMA_RUN_COMMAND,
+        handler=tools_instance.run_command,
+        # shell chunk 的管理目前由 _refresh_shell_chunk 处理
+        # 这里的 singleton_key 暂时不生效，保持兼容
+        singleton_key=key_constant("shell"),
+        category="shell"
+    )
+    
+    register_tool(
+        name="open_shell",
+        schema=SCHEMA_OPEN_SHELL,
+        handler=tools_instance.open_shell,
+        singleton_key=key_constant("shell"),
+        category="shell"
+    )
+    
+    register_tool(
+        name="interrupt_command",
+        schema=SCHEMA_INTERRUPT_COMMAND,
+        handler=tools_instance.interrupt_command,
+        singleton_key=key_constant("shell"),
+        category="shell"
+    )
+    
+    # === 辅助工具 ===
+    
+    register_tool(
+        name="wait",
+        schema=SCHEMA_WAIT,
+        handler=tools_instance.wait,
+        max_call_pairs=3,  # 只保留最近3次调用（tool_call + tool_result 配对）
+        category="utility"
+    )
+    # === TODO-list 工具 ===
+    
+    register_tool(
+        name="update_plan",
+        schema=SCHEMA_UPDATE_PLAN,
+        handler=tools_instance.update_plan,
+        singleton_key=key_constant("plan"),  # 只保留最新的计划
+        category="utility"
+    )
+    
+    register_tool(
+        name="get_plan",
+        schema=SCHEMA_GET_PLAN,
+        handler=tools_instance.get_plan,
+        max_call_pairs=1,  # 只保留最近一次查询
+        category="utility"
+    )
+    
+    register_tool(
+        name="pass_turn",
+        schema=SCHEMA_PASS,
+        handler=tools_instance.pass_turn,
+        max_call_pairs=1,
+        category="utility"
+    )
+
+    # === Skill 工具 ===
+    register_tool(
+        name="load_skill",
+        schema=SCHEMA_LOAD_SKILL,
+        handler=tools_instance.load_skill,
+        max_call_pairs=1,  # 只保留最近一次加载
+        category="skill"
+    )
+
+    register_tool(
+        name="run_skill_script",
+        schema=SCHEMA_RUN_SKILL_SCRIPT,
+        handler=tools_instance.run_skill_script,
+        max_call_pairs=3,  # 保留最近3次调用
+        category="skill"
+    )
+
+
+def register_web_tools(web_tools_instance):
+    """
+    注册 Web 工具到 ToolRegistry
+    
+    Args:
+        web_tools_instance: WebTools 实例
+    """
+    
+    register_tool(
+        name="search_web",
+        schema=SCHEMA_SEARCH_WEB,
+        handler=web_tools_instance.search_web,
+        category="web"
+    )
+    
+    register_tool(
+        name="load_url_content",
+        schema=SCHEMA_LOAD_URL_CONTENT,
+        handler=web_tools_instance.load_url_content,
+        category="web"
+    )
+    
+    register_tool(
+        name="read_page",
+        schema=SCHEMA_READ_PAGE,
+        handler=web_tools_instance.read_page,
+        category="web"
+    )
 
 def register_branch_tools(branch_instance):
     """

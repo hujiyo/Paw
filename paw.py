@@ -27,11 +27,9 @@ if sys.platform == "win32":
     os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # 导入核心组件
-from autostatus import AutoStatus
-from tools import BaseTools
+from tools import BaseTools,WebTools
 from chunk_system import ChunkManager, ChunkType, Chunk
 from tool_definitions import TOOLS_SCHEMA, register_all_tools, register_web_tools
-from web_tools import WebTools
 from tool_registry import ToolRegistry
 from prompts import SystemPrompts, UIPrompts, ToolPrompts
 from memory import MemoryManager
@@ -113,10 +111,7 @@ class Paw:
         )
         register_web_tools(self.web_tools)
         _mark("WebTools 初始化")
-        
-        # 动态状态管理器（延迟初始化，等模型确定后）
-        self.autostatus = None
-        
+
         # 上下文管理（使用语块系统，传入工具schema）
         self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
         _mark("ChunkManager 初始化")
@@ -142,12 +137,9 @@ class Paw:
         
         # 注意：消息历史现在完全由chunk_manager管理
         # 不再使用self.messages
-        
-        # 工具调用结果收集（用于状态评估）
-        self.last_tool_results = []
 
         # 启动耗时记录仅供内部排查，不对用户输出
-    
+
     def _load_config(self) -> dict:
         """加载config.yaml配置文件"""
         config_path = Path(__file__).parent / "config.yaml"
@@ -160,12 +152,8 @@ class Paw:
                 return {}
         return {}
     
-    def _create_system_prompt(self, include_state: bool = False) -> str:
-        """创建系统提示词 - 第一人称视角
-        
-        Args:
-            include_state: 是否包含动态状态
-        """
+    def _create_system_prompt(self) -> str:
+        """创建系统提示词 - 第一人称视角"""
         # 获取终端状态
         terminal_status = self.tools.get_terminal_status()
         
@@ -197,11 +185,7 @@ class Paw:
             memory_prompt = self.memory_manager.get_memory_prompt()
             if memory_prompt:
                 prompt = prompt + "\n\n" + memory_prompt
-        
-        # 如果需要，注入动态状态
-        if include_state and self.autostatus is not None:
-            prompt = self.autostatus.inject_to_prompt(prompt)
-        
+
         # 添加或更新系统提示词到语块管理器
         has_system = any(c.chunk_type == ChunkType.SYSTEM for c in self.chunk_manager.chunks)
         if has_system:
@@ -925,11 +909,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         
         while True:
             step_count += 1
-            
-            # 更新系统提示词，注入动态状态
-            if step_count > 1:  # 从第二次调用开始注入状态
-                updated_prompt = self._create_system_prompt(include_state=True)
-            
+
             # 刷新Shell输出到chunk（如果终端已打开）
             self._refresh_shell_chunk()
             
@@ -1028,13 +1008,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 避免插在 Assistant 和 Tool Result 之间破坏 API 规范
                     if tool_config and tool_config.category == "shell":
                         self._refresh_shell_chunk(move_to_end=True)
-                    
-                    # 收集工具结果用于状态评估
-                    self.last_tool_results.append({
-                        "tool": function_name,
-                        "success": success
-                    })
-            
+
             # 检查是否完成
             if not tool_calls:
                 # 没有工具调用，立即停止
@@ -1049,26 +1023,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 保存对话到记忆系统
         if final_response and not user_input.startswith("[系统"):
             self._save_conversation(user_input, final_response)
-        
-        # 评估状态（使用独立的API调用）
-        if self.autostatus is not None:
-            try:
-                # 只保留最近5个工具结果
-                if len(self.last_tool_results) > 5:
-                    self.last_tool_results = self.last_tool_results[-5:]
-                
-                # 从chunk_manager获取最近的消息用于状态评估
-                recent_messages = self.chunk_manager.get_context_for_llm()[-6:]
-                
-                # 评估新状态
-                await self.autostatus.evaluate_state(
-                    conversation_history=recent_messages,
-                    tool_results=self.last_tool_results
-                )
-                
-            except Exception as e:
-                # 状态评估失败不影响主流程
-                pass
 
         # 自动保存会话
         self._save_session()
@@ -1166,8 +1120,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 重新渲染对话历史，同步编辑后的内容到主屏幕
         self.ui.refresh_conversation_history(
             self.chunk_manager.chunks,
-            self.model,
-            self.autostatus.current_state if self.autostatus else None
+            self.model
         )
     
     async def _enter_memory_edit_mode(self, search_keyword: str = None):
@@ -1349,10 +1302,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         if hasattr(self.ui, 'show_model_selected'):
             self.ui.show_model_selected(self.model)
 
-        # 现在模型已确定，初始化AutoStatus
-        if self.autostatus is None:
-            self.autostatus = AutoStatus(self.api_url, self.model, self.api_key)
-        
         # 初始化上下文分支管理器
         if self.context_manager is None:
             self.context_manager = AutoContextManager(
@@ -1371,8 +1320,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
         # 显示状态栏（只打印一次）
         if hasattr(self.ui, 'show_status_bar') and callable(self.ui.show_status_bar):
-            self.ui.show_status_bar(self.model, self.autostatus.current_state if self.autostatus else None)
-
+            self.ui.show_status_bar(self.model)
 
         # 记忆系统延迟初始化：确保先进入首屏
         if self.memory_manager is None:
@@ -1428,14 +1376,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 
                 if user_input == '/chunks':
                     self.chunk_manager.print_context(show_llm_view=True)
-                    # 打印 autostatus 上下文
-                    if self.autostatus is not None:
-                        self.ui.show_autostatus_debug(
-                            self.autostatus.conversation_rounds,
-                            self.autostatus.current_state,
-                            self.autostatus.last_prompt,
-                            self.autostatus.last_response
-                        )
                     continue
                 
                 if user_input == '/model':

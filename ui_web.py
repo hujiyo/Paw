@@ -5,14 +5,13 @@ Web UI系统 - 重构版
 负责启动Web服务并与前端进行WebSocket通信，精确复刻终端UI的交互逻辑。
 """
 
+from typing import List, Dict, Any
 import asyncio
-import json
 import webbrowser
 import uuid
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import uvicorn
-from typing import List, Dict, Any
 
 class WebUI:
     """
@@ -158,21 +157,17 @@ class WebUI:
 
     # --- 空操作方法，保持接口兼容性 ---
     def clear_screen(self): pass
-    def show_status_bar(self, model: str = None, autostatus: dict = None, start_time=None):
+    def show_status_bar(self, model: str = None, start_time=None):
         from datetime import datetime
         runtime_str = ""
         if start_time:
             runtime = datetime.now() - start_time
             runtime_str = str(runtime).split('.')[0]
 
-        mode = ""
-        if autostatus and isinstance(autostatus, dict):
-            mode = autostatus.get('execution_mode', 'unknown')
-
         status_data = {
             "time": runtime_str,
             "model": model,
-            "mode": mode
+            "mode": ""
         }
         asyncio.create_task(self.send_message("status_update", status_data))
     def mark_conversation_start(self): pass
@@ -295,7 +290,6 @@ class WebUI:
         self.show_editor_result(success, detail if success else "", detail if not success else "")
 
     # --- 会话管理方法 ---
-
     def send_session_list(self, sessions: list, current_id: str = None):
         """发送会话列表"""
         asyncio.create_task(self.send_message("session_list", {
