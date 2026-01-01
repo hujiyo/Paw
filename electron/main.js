@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+const yaml = require('js-yaml');
 
 // Python 进程管理
 let pythonProcess = null;
@@ -266,6 +267,34 @@ function getIconPath() {
     return undefined;
 }
 
+// 获取主题颜色配置
+function getThemeColors() {
+    const appRoot = getAppRoot();
+    const configPath = path.join(appRoot, 'config.yaml');
+
+    try {
+        if (fs.existsSync(configPath)) {
+            const configContent = fs.readFileSync(configPath, 'utf8');
+            const config = yaml.load(configContent);
+            const theme = config.theme || {};
+            return {
+                titlebar: theme.titlebar || '#000000',
+                loading: theme.loading || '#000000',
+                main: theme.main || '#000000'
+            };
+        }
+    } catch (e) {
+        console.warn('[Paw] 读取主题配置失败:', e.message);
+    }
+
+    // 默认颜色
+    return {
+        titlebar: '#000000',
+        loading: '#000000',
+        main: '#000000'
+    };
+}
+
 // 获取加载页面路径
 function getLoadingPagePath() {
     const appRoot = getAppRoot();
@@ -287,15 +316,19 @@ function getLoadingPagePath() {
 
 // 创建主窗口
 function createWindow() {
+    const themeColors = getThemeColors();
+
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
         minWidth: 800,
         minHeight: 600,
-        title: 'Paw - AI Terminal Agent',
+        title: 'Paw - AI Desktop Agent',
         icon: getIconPath(),
-        backgroundColor: '#000000', // 与 loading 页面背景一致
-        show: true, // 立即显示窗口
+        backgroundColor: themeColors.titlebar,
+        frame: true, // 保留系统标题栏
+        titleBarStyle: 'default', // Windows 使用默认样式
+        show: true,
         autoHideMenuBar: true,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -334,6 +367,21 @@ function createWindow() {
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
+
+    // Windows: 尝试设置标题栏颜色
+    if (process.platform === 'win32') {
+        mainWindow.setBackgroundColor(themeColors.titlebar);
+        // 尝试使用 Windows 11 的 DWM 属性
+        const { nativeTheme } = require('electron');
+
+        // 根据标题栏颜色亮度决定主题
+        const r = parseInt(themeColors.titlebar.slice(1, 3), 16);
+        const g = parseInt(themeColors.titlebar.slice(3, 5), 16);
+        const b = parseInt(themeColors.titlebar.slice(5, 7), 16);
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+
+        nativeTheme.themeSource = brightness > 128 ? 'light' : 'dark';
+    }
 }
 
 // IPC 处理程序
@@ -347,6 +395,10 @@ function setupIpcHandlers() {
             appRoot: getAppRoot(),
             pythonPath: getPythonPath()
         };
+    });
+
+    ipcMain.handle('get-theme-colors', () => {
+        return getThemeColors();
     });
 
     ipcMain.handle('restart-backend', async () => {

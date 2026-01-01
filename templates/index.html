@@ -24,6 +24,12 @@
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: var(--font-family); background: var(--bg-color); color: var(--text-primary); }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
         #app-shell { display: flex; height: 100vh; }
 
         /* ===== 侧边栏 ===== */
@@ -105,7 +111,7 @@
             transition: background 0.15s;
             position: relative;
         }
-        .history-item:hover { background: rgba(255,255,255,0.05); }
+        .history-item:hover { background: var(--history-hover-bg); }
         .history-item--active { background: rgba(255,158,128,0.12); }
         .history-item__title {
             font-size: 0.8rem;
@@ -169,7 +175,7 @@
             font-size: 0.75rem;
             position: relative;
         }
-        .chain-item:hover { background: rgba(255,255,255,0.05); }
+        .chain-item:hover { background: var(--hover-bg); }
         .chain-item--active { background: rgba(255,158,128,0.15); }
         .chain-item__header {
             display: flex;
@@ -221,7 +227,7 @@
             cursor: pointer;
         }
         .chain-item__detail:hover {
-            background: rgba(255,255,255,0.05);
+            background: var(--hover-bg);
         }
         .chain-item__detail--tool {
             color: var(--tool-color);
@@ -301,7 +307,7 @@
             font-size: 0.75rem;
             position: relative;
         }
-        .memory-item:hover { background: rgba(255,255,255,0.05); }
+        .memory-item:hover { background: var(--hover-bg); }
         .memory-item--active { background: rgba(255,158,128,0.15); }
         .memory-item__msg {
             color: var(--text-secondary);
@@ -470,6 +476,60 @@
             min-height: 60px;
             resize: vertical;
         }
+
+        /* 颜色选择器 */
+        .color-picker {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .color-picker__presets {
+            display: flex;
+            gap: 0.4rem;
+        }
+        .color-picker__preset {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            border: 2px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .color-picker__preset:hover {
+            transform: scale(1.1);
+        }
+        .color-picker__preset--active {
+            border-color: var(--accent-assistant);
+            box-shadow: 0 0 0 2px rgba(255,158,128,0.3);
+        }
+        .color-picker__input {
+            flex: 1;
+            padding: 0.4rem 0.5rem;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.75rem;
+            font-family: var(--font-family);
+            text-transform: uppercase;
+        }
+        .color-picker__input:focus {
+            outline: none;
+            border-color: var(--accent-assistant);
+        }
+        .color-picker__preview {
+            width: 32px;
+            height: 32px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+        .color-preview-btn {
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
         .settings__checkbox-group {
             display: flex;
             align-items: center;
@@ -554,7 +614,7 @@
             transition: background 0.1s;
         }
         .model-select__option:hover {
-            background: rgba(255,255,255,0.08);
+            background: var(--button-hover-bg);
         }
         .model-select__option--selected {
             background: rgba(255,158,128,0.15);
@@ -699,7 +759,7 @@
             gap: 0.3rem;
         }
         .toolbar__btn:hover {
-            background: rgba(255,255,255,0.08);
+            background: var(--button-hover-bg);
             color: var(--text-primary);
         }
         .toolbar__btn--active {
@@ -757,7 +817,7 @@
         }
         .msg__content pre {
             position: relative;
-            background: #1a1a1a;
+            background: var(--code-bg);
             padding: 0.65rem;
             border-radius: 6px;
             border: 1px solid var(--border-color);
@@ -895,7 +955,7 @@
         .modal-overlay.visible { display: flex; }
         .modal {
             width: min(400px, 90vw);
-            background: #0b0b0b;
+            background: var(--modal-bg);
             border: 1px solid var(--border-color);
             border-radius: 8px;
         }
@@ -919,7 +979,7 @@
             width: 100%;
             padding: 0.45rem 0.55rem;
             border: 1px solid var(--border-color);
-            background: #0d0d0d;
+            background: var(--input-bg);
             color: var(--text-primary);
             border-radius: 5px;
             outline: none;
@@ -1158,6 +1218,54 @@
                     <div class="settings__hint">.gguf 格式的本地 embedding 模型路径</div>
                 </div>
             </div>
+
+            <!-- 颜色主题配置 -->
+            <div class="settings__section">
+                <div class="settings__section-title">颜色主题</div>
+
+                <div class="settings__field">
+                    <label class="settings__label">标题栏颜色</label>
+                    <select class="settings__select" id="cfg-color-titlebar">
+                        <option value="#000000">黑色（深色主题）</option>
+                        <option value="#FFFFFF">白色（浅色主题）</option>
+                    </select>
+                    <div class="settings__hint">Windows 标题栏仅支持黑白</div>
+                </div>
+
+                <div class="settings__field">
+                    <label class="settings__label">启动界面背景</label>
+                    <div class="color-picker" data-color-id="loading">
+                        <div class="color-picker__presets">
+                            <div class="color-picker__preset" style="background:#000000" data-color="#000000" title="黑色"></div>
+                            <div class="color-picker__preset" style="background:#FFFFFF" data-color="#FFFFFF" title="白色"></div>
+                            <div class="color-picker__preset" style="background:#FFD6E0" data-color="#FFD6E0" title="淡粉色"></div>
+                            <div class="color-picker__preset" style="background:#FFF4D6" data-color="#FFF4D6" title="淡黄色"></div>
+                        </div>
+                        <input type="text" class="color-picker__input" id="cfg-color-loading" placeholder="#000000" maxlength="7">
+                        <div class="color-picker__preview">
+                            <input type="color" id="cfg-color-loading-picker" class="color-preview-btn" value="#000000">
+                        </div>
+                    </div>
+                    <div class="settings__hint">启动加载页面背景色</div>
+                </div>
+
+                <div class="settings__field">
+                    <label class="settings__label">主界面背景</label>
+                    <div class="color-picker" data-color-id="main">
+                        <div class="color-picker__presets">
+                            <div class="color-picker__preset" style="background:#000000" data-color="#000000" title="黑色"></div>
+                            <div class="color-picker__preset" style="background:#FFFFFF" data-color="#FFFFFF" title="白色"></div>
+                            <div class="color-picker__preset" style="background:#FFF0F5" data-color="#FFF0F5" title="淡粉色"></div>
+                            <div class="color-picker__preset" style="background:#FFFAF0" data-color="#FFFAF0" title="淡黄色"></div>
+                        </div>
+                        <input type="text" class="color-picker__input" id="cfg-color-main" placeholder="#000000" maxlength="7">
+                        <div class="color-picker__preview">
+                            <input type="color" id="cfg-color-main-picker" class="color-preview-btn" value="#000000">
+                        </div>
+                    </div>
+                    <div class="settings__hint">主界面背景色（需刷新生效）</div>
+                </div>
+            </div>
         </div>
         <div class="settings__footer">
             <button class="settings__btn settings__btn--secondary" id="settings-reset-btn">重置</button>
@@ -1175,6 +1283,125 @@
 ██████╔╝  ███████║  ██║███╗██║
 ██╔═══╝   ██╔══██║  ╚███╔███╔╝
 ╚═╝       ╚═╝  ╚═╝   ╚══╝╚══╝ `;
+
+        // ========== 颜色主题管理 ==========
+        const ThemeColors = {
+            // 深色主题颜色
+            dark: {
+                bg: '#000000',
+                bgSecondary: '#0a0a0a',
+                textPrimary: '#EAEAEA',
+                textSecondary: '#666666',
+                borderColor: '#444444',
+                accentUser: '#80D1FF',
+                accentAssistant: '#FF9E80',
+                accentActive: '#50FA7B',
+                toolColor: '#00FFFF',
+                errorColor: '#FF5555',
+                successColor: '#50FA7B',
+                codeBg: '#1a1a1a',
+                scrollbarTrack: '#0a0a0a',
+                scrollbarThumb: '#444444',
+                scrollbarThumbHover: '#555555',
+                inputBg: '#0b0b0b',
+                headerUserText: '#000000',
+                headerAssistantText: '#000000',
+                modalBg: '#0d0d0d',
+                cardBg: '#0d0d0d',
+                buttonText: '#ffffff',
+                buttonSecondaryText: '#000000',
+                chainItemHover: 'rgba(255,255,255,0.08)',
+                historyItemHover: 'rgba(255,255,255,0.08)',
+                progressBar: '#ff4444',
+                toolBg: '#0d0d0d'
+            },
+
+            // 浅色主题颜色
+            light: {
+                bg: '#FFFFFF',
+                bgSecondary: '#f5f5f5',
+                textPrimary: '#333333',
+                textSecondary: '#666666',
+                borderColor: '#999999',
+                accentUser: '#0066cc',
+                accentAssistant: '#ff6b35',
+                accentActive: '#28a745',
+                toolColor: '#0088aa',
+                errorColor: '#dc3545',
+                successColor: '#28a745',
+                codeBg: '#f0f0f0',
+                scrollbarTrack: '#f0f0f0',
+                scrollbarThumb: '#999999',
+                scrollbarThumbHover: '#666666',
+                inputBg: '#ffffff',
+                headerUserText: '#000000',
+                headerAssistantText: '#000000',
+                modalBg: '#ffffff',
+                cardBg: '#f9f9f9',
+                buttonText: '#ffffff',
+                buttonSecondaryText: '#000000',
+                chainItemHover: 'rgba(0,0,0,0.08)',
+                historyItemHover: 'rgba(0,0,0,0.08)',
+                progressBar: '#dc3545',
+                toolBg: '#f0f0f0'
+            },
+
+            // 当前主题
+            current: 'dark',
+
+            // 用户配置的主背景色
+            userBgColor: null,
+
+            // 初始化主题
+            init(bgColor) {
+                this.userBgColor = bgColor;
+                const brightness = this.getBrightness(bgColor);
+                this.current = brightness > 128 ? 'light' : 'dark';
+                this.applyColors();
+            },
+
+            // 计算颜色亮度
+            getBrightness(color) {
+                const r = parseInt(color.slice(1, 3), 16);
+                const g = parseInt(color.slice(3, 5), 16);
+                const b = parseInt(color.slice(5, 7), 16);
+                return (r * 299 + g * 587 + b * 114) / 1000;
+            },
+
+            // 获取当前主题的颜色
+            get(key) {
+                return this[this.current][key] || this.dark[key];
+            },
+
+            // 应用颜色到CSS变量
+            applyColors() {
+                const colors = this[this.current];
+                const root = document.documentElement;
+
+                // 使用用户配置的背景色，而不是预设的颜色
+                root.style.setProperty('--bg-color', this.userBgColor);
+                root.style.setProperty('--bg-secondary', colors.bgSecondary);
+                root.style.setProperty('--text-primary', colors.textPrimary);
+                root.style.setProperty('--text-secondary', colors.textSecondary);
+                root.style.setProperty('--border-color', colors.borderColor);
+                root.style.setProperty('--accent-user', colors.accentUser);
+                root.style.setProperty('--accent-assistant', colors.accentAssistant);
+                root.style.setProperty('--accent-active', colors.accentActive);
+                root.style.setProperty('--tool-color', colors.toolColor);
+                root.style.setProperty('--error-color', colors.errorColor);
+                root.style.setProperty('--success-color', colors.successColor);
+                root.style.setProperty('--code-bg', colors.codeBg);
+                root.style.setProperty('--modal-bg', colors.modalBg);
+                root.style.setProperty('--card-bg', colors.cardBg);
+                root.style.setProperty('--input-bg', colors.inputBg);
+                root.style.setProperty('--hover-bg', colors.chainItemHover);
+                root.style.setProperty('--history-hover-bg', colors.historyItemHover);
+                root.style.setProperty('--button-hover-bg', colors.chainItemHover);
+                root.style.setProperty('--scrollbar-track', colors.scrollbarTrack);
+                root.style.setProperty('--scrollbar-thumb', colors.scrollbarThumb);
+                root.style.setProperty('--scrollbar-thumb-hover', colors.scrollbarThumbHover);
+            }
+        };
 
         marked.setOptions({
             highlight: (code, lang) => {
@@ -2276,9 +2503,9 @@
                         时间: ${meta.timestamp || '(未知)'}
                     </div>
                     <div style="margin-bottom:0.5rem;color:var(--accent-user)">用户:</div>
-                    <div style="background:#0d0d0d;padding:0.5rem;border-radius:4px;margin-bottom:0.5rem;max-height:120px;overflow:auto">${escapeHtml(meta.user_message || '(无)')}</div>
+                    <div style="background:var(--card-bg);padding:0.5rem;border-radius:4px;margin-bottom:0.5rem;max-height:120px;overflow:auto">${escapeHtml(meta.user_message || '(无)')}</div>
                     <div style="margin-bottom:0.5rem;color:var(--accent-assistant)">AI:</div>
-                    <div style="background:#0d0d0d;padding:0.5rem;border-radius:4px;max-height:120px;overflow:auto">${escapeHtml(meta.assistant_message || '(无)')}</div>
+                    <div style="background:var(--card-bg);padding:0.5rem;border-radius:4px;max-height:120px;overflow:auto">${escapeHtml(meta.assistant_message || '(无)')}</div>
                 `;
                 dom.modalActions.style.display = 'none';
                 dom.modal.classList.add('visible');
@@ -2358,6 +2585,67 @@
 
                 // 模型选择下拉
                 this.setupModelSelect();
+
+                // 颜色选择器
+                this.setupColorPickers();
+            },
+
+            setupColorPickers() {
+                // 颜色预设配置（标题栏已改为select）
+                const colorConfigs = ['loading', 'main'];
+
+                colorConfigs.forEach(configId => {
+                    const picker = $(`.color-picker[data-color-id="${configId}"]`);
+                    if (!picker) return;
+
+                    const textInput = $(`#cfg-color-${configId}`);
+                    const colorInput = $(`#cfg-color-${configId}-picker`);
+                    const presets = picker.querySelectorAll('.color-picker__preset');
+
+                    // 预设颜色点击
+                    presets.forEach(preset => {
+                        preset.addEventListener('click', () => {
+                            const color = preset.dataset.color;
+                            this.setColorValue(configId, color);
+                        });
+                    });
+
+                    // 文本输入框变化
+                    textInput.addEventListener('input', () => {
+                        const color = textInput.value.trim();
+                        if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
+                            this.setColorValue(configId, color);
+                        }
+                    });
+
+                    // 颜色选择器变化
+                    colorInput.addEventListener('input', () => {
+                        this.setColorValue(configId, colorInput.value);
+                    });
+                });
+            },
+
+            setColorValue(configId, color) {
+                if (configId === 'titlebar') {
+                    // 标题栏是select，直接设置值
+                    $('#cfg-color-titlebar').value = color;
+                    return;
+                }
+
+                const textInput = $(`#cfg-color-${configId}`);
+                const colorInput = $(`#cfg-color-${configId}-picker`);
+                const picker = $(`.color-picker[data-color-id="${configId}"]`);
+                const presets = picker.querySelectorAll('.color-picker__preset');
+
+                // 更新输入框
+                textInput.value = color;
+                colorInput.value = color;
+
+                // 更新预设选中状态
+                presets.forEach(preset => {
+                    preset.classList.toggle('color-picker__preset--active',
+                        preset.dataset.color.toUpperCase() === color.toUpperCase());
+                });
             },
 
             setupModelSelect() {
@@ -2564,6 +2852,12 @@
                 // Embedding 配置
                 const embeddings = config.embeddings || {};
                 $('#cfg-embedding-path').value = embeddings.path || '';
+
+                // 颜色主题配置
+                const theme = config.theme || {};
+                $('#cfg-color-titlebar').value = theme.titlebar || '#000000';
+                this.setColorValue('loading', theme.loading || '#000000');
+                this.setColorValue('main', theme.main || '#000000');
             },
 
             async save() {
@@ -2593,6 +2887,11 @@
                     },
                     embeddings: {
                         path: $('#cfg-embedding-path').value
+                    },
+                    theme: {
+                        titlebar: $('#cfg-color-titlebar').value || '#000000',
+                        loading: $('#cfg-color-loading').value || '#000000',
+                        main: $('#cfg-color-main').value || '#000000'
                     }
                 };
 
@@ -2635,6 +2934,24 @@
 
         // 初始化配置管理
         Settings.init();
+
+        // ========== 主题颜色应用 ==========
+        async function applyThemeColors() {
+            try {
+                const response = await fetch('/api/config');
+                const result = await response.json();
+                if (result.success && result.config.theme) {
+                    const mainColor = result.config.theme.main || '#000000';
+                    // 使用ThemeColors类初始化并应用主题
+                    ThemeColors.init(mainColor);
+                }
+            } catch (e) {
+                console.warn('Failed to apply theme colors:', e);
+            }
+        }
+
+        // 页面加载时应用主题颜色
+        applyThemeColors();
 
         // ========== 错误弹窗 ==========
         function showErrorDialog(message) {

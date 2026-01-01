@@ -1,6 +1,6 @@
 # Paw Electron Desktop Application
 
-Paw AI Terminal Agent 的 Electron 桌面封装版本，提供原生桌面应用体验。
+Paw AI Desktop Agent 的 Electron 桌面封装版本，提供原生桌面应用体验。
 
 ## 功能特点
 

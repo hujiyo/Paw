@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
     // 应用信息
     getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+    getThemeColors: () => ipcRenderer.invoke('get-theme-colors'),
 
     // 后端控制
     restartBackend: () => ipcRenderer.invoke('restart-backend'),

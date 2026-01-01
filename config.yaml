@@ -5,7 +5,7 @@ identity:
 api:
   key: aef418d2241a4e008fcdd61370cef5cc.VDXiXUnwJLWHcliy
   url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
-  model: null
+  model: glm-4.7
 embeddings:
   path: ''
 terminal:
@@ -18,3 +18,7 @@ web:
   use_jina_reader: true
 system:
   chunk_size: 96000
+theme:
+  titlebar: '#FFFFFF'
+  loading: '#000000'
+  main: '#FFF0F5'
