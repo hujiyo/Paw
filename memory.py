@@ -676,7 +676,7 @@ class MemoryManager:
         return rules
     
     # ==================== 模型路径解析 ====================
-    
+
     def _resolve_embedding_model(self, embedding_path: Optional[Path]) -> Path:
         """
         优先使用显式指定的模型路径，否则自动查找项目根目录下 embedding/*.gguf
@@ -685,15 +685,22 @@ class MemoryManager:
             p = Path(embedding_path).expanduser()
             if p.exists():
                 return p
-            raise FileNotFoundError(f"指定的 embedding 模型不存在: {p}")
-        
+            raise FileNotFoundError(
+                f"指定的 embedding 模型不存在: {p}\n"
+                f"请重新安装 Paw，或将 *.gguf 模型文件放入 embedding/ 目录"
+            )
+
         default_dir = self.project_path / "embedding"
         if default_dir.exists():
             candidates = sorted(default_dir.glob("*.gguf"))
             if candidates:
                 return candidates[0]
-        
-        raise FileNotFoundError("未找到 embedding 模型文件，请将 *.gguf 放在项目 embedding/ 目录或在配置中指定 path")
+
+        raise FileNotFoundError(
+            "未找到 embedding 模型文件 (*.gguf)\n"
+            f"期望位置: {default_dir}\n"
+            "请重新安装 Paw，或下载模型文件放入 embedding/ 目录"
+        )
     
     def reload_rules(self):
         """重新加载规则"""

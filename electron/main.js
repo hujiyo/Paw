@@ -6,6 +6,7 @@ const fs = require('fs');
 // Python 进程管理
 let pythonProcess = null;
 let mainWindow = null;
+let isServerReady = false;
 
 // 获取项目根目录（开发环境自动检测）
 function getAppRoot() {
@@ -43,13 +44,22 @@ function isDevMode() {
 function getPythonPath() {
     const appRoot = getAppRoot();
 
-    // 优先使用项目本地虚拟环境
+    // 优先方案1: 生产环境中的打包虚拟环境（最可靠）
+    const prodVenvPython = path.join(process.resourcesPath, 'paw_env', 'Scripts', 'python.exe');
+    if (fs.existsSync(prodVenvPython)) {
+        console.log('[Paw] 使用打包的虚拟环境 Python');
+        return prodVenvPython;
+    }
+
+    // 优先方案2: 开发模式的本地虚拟环境
     const venvPython = path.join(appRoot, 'paw_env', 'Scripts', 'python.exe');
     if (fs.existsSync(venvPython)) {
+        console.log('[Paw] 使用本地虚拟环境 Python');
         return venvPython;
     }
 
-    // Windows: python.exe, Unix: python3
+    // 最后回退: 系统 Python（可能缺少依赖！）
+    console.warn('[Paw] 警告: 使用系统 Python，可能缺少依赖！');
     return process.platform === 'win32' ? 'python.exe' : 'python3';
 }
 
@@ -63,7 +73,21 @@ function getPawEntryPath() {
     return null;
 }
 
-// 启动 Python 后端
+// 发送状态到加载页面
+function sendStatus(status) {
+    if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('startup-status', status);
+    }
+}
+
+// 发送错误到加载页面
+function sendError(error) {
+    if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('startup-error', error);
+    }
+}
+
+// 启动 Python 后端（异步，不阻塞窗口显示）
 async function startPythonBackend() {
     const appRoot = getAppRoot();
     const pythonPath = getPythonPath();
@@ -74,14 +98,16 @@ async function startPythonBackend() {
     console.log(`isDevMode: ${isDevMode()}`);
     console.log(`__dirname: ${__dirname}`);
     console.log(`appRoot: ${appRoot}`);
-    console.log(`paw.py 存在: ${fs.existsSync(path.join(appRoot, 'paw.py'))}`);
     console.log(`Python 路径: ${pythonPath}`);
     console.log(`Paw 入口: ${pawEntry}`);
     console.log('=====================');
 
     if (!pawEntry) {
         const potentialPath = path.join(appRoot, 'paw.py');
-        throw new Error(`Paw 入口文件未找到\n期望路径: ${potentialPath}\nappRoot: ${appRoot}`);
+        const errorMsg = `Paw 入口文件未找到\n期望路径: ${potentialPath}\nappRoot: ${appRoot}`;
+        console.error('[Paw]', errorMsg);
+        sendError(errorMsg);
+        throw new Error(errorMsg);
     }
 
     // 设置环境变量
@@ -91,6 +117,8 @@ async function startPythonBackend() {
         PAW_ELECTRON_MODE: '1',
         PYTHONUNBUFFERED: '1'
     };
+
+    sendStatus('正在启动 Python 后端...');
 
     // 启动 Python 进程
     pythonProcess = spawn(pythonPath, [pawEntry], {
@@ -106,6 +134,10 @@ async function startPythonBackend() {
         if (mainWindow && mainWindow.webContents) {
             mainWindow.webContents.send('python-log', { type: 'stdout', message: msg });
         }
+        // 检测 Uvicorn 启动成功消息
+        if (msg.includes('Uvicorn running') || msg.includes('Application startup complete')) {
+            onServerReady();
+        }
     });
 
     pythonProcess.stderr.on('data', (data) => {
@@ -118,6 +150,7 @@ async function startPythonBackend() {
 
     pythonProcess.on('error', (error) => {
         console.error('[Paw] 进程错误:', error);
+        sendError(`Python 进程启动失败: ${error.message}`);
         if (mainWindow) {
             mainWindow.webContents.send('python-error', { message: error.message });
         }
@@ -126,40 +159,71 @@ async function startPythonBackend() {
     pythonProcess.on('exit', (code, signal) => {
         console.log(`[Paw] 进程退出，代码: ${code}, 信号: ${signal}`);
         pythonProcess = null;
+        isServerReady = false;
         if (mainWindow) {
             mainWindow.webContents.send('python-exit', { code, signal });
         }
     });
 
-    // 等待服务器启动
+    // 等待服务器启动（带超时和进度反馈）
+    sendStatus('等待服务器就绪...');
     await waitForServer();
+}
+
+// 服务器就绪回调
+function onServerReady() {
+    if (isServerReady) return; // 避免重复触发
+
+    isServerReady = true;
+    console.log('[Paw] 服务器已就绪');
+
+    sendStatus('正在加载应用...');
+
+    // 切换到实际应用
+    if (mainWindow && mainWindow.webContents) {
+        setTimeout(() => {
+            mainWindow.loadURL('http://127.0.0.1:8080');
+        }, 500);
+    }
 }
 
 // 等待 Web 服务器就绪
 function waitForServer() {
     return new Promise((resolve) => {
-        const maxAttempts = 60;
         let attempts = 0;
 
         const checkServer = () => {
-            attempts++;
-            if (attempts >= maxAttempts) {
-                console.error('[Paw] 服务器启动超时');
-                resolve(false);
+            // 如果已经就绪，直接返回
+            if (isServerReady) {
+                resolve(true);
                 return;
+            }
+
+            attempts++;
+
+            // 更新进度（但不发送错误，让 loading 页面自己处理超时）
+            if (attempts <= 60) { // 最多显示 60 次进度
+                sendStatus(`正在启动... ${attempts}`);
             }
 
             const net = require('net');
             const socket = new net.Socket();
 
+            socket.setTimeout(2000);
+
             socket.connect(8080, '127.0.0.1', () => {
                 socket.destroy();
-                console.log('[Paw] 服务器已就绪');
+                onServerReady();
                 resolve(true);
             });
 
+            socket.on('timeout', () => {
+                socket.destroy();
+                setTimeout(checkServer, 500);
+            });
+
             socket.on('error', () => {
-                setTimeout(checkServer, 1000);
+                setTimeout(checkServer, 500);
             });
         };
 
@@ -179,6 +243,7 @@ function stopPythonBackend() {
         }, 5000);
         pythonProcess = null;
     }
+    isServerReady = false;
 }
 
 // 获取图标路径
@@ -201,6 +266,23 @@ function getIconPath() {
     return undefined;
 }
 
+// 获取加载页面路径
+function getLoadingPagePath() {
+    // 开发环境
+    const devLoading = path.join(__dirname, 'loading.html');
+    if (fs.existsSync(devLoading)) {
+        return devLoading;
+    }
+
+    // 生产环境：从 resources 加载
+    const prodLoading = path.join(process.resourcesPath, 'loading.html');
+    if (fs.existsSync(prodLoading)) {
+        return prodLoading;
+    }
+
+    return null;
+}
+
 // 创建主窗口
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -209,10 +291,10 @@ function createWindow() {
         minWidth: 800,
         minHeight: 600,
         title: 'Paw - AI Terminal Agent',
-        icon: getIconPath(),  // 设置图标
-        backgroundColor: '#000000',
-        show: false,
-        autoHideMenuBar: true,  // 隐藏菜单栏（按 Alt 可临时显示）
+        icon: getIconPath(),
+        backgroundColor: '#1a1a2e', // 与 loading 页面背景一致
+        show: true, // 立即显示窗口
+        autoHideMenuBar: true,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -221,24 +303,28 @@ function createWindow() {
         }
     });
 
-    mainWindow.once('ready-to-show', () => {
-        mainWindow.show();
-        if (isDevMode()) {
-            mainWindow.webContents.openDevTools();
-        }
-    });
+    // 先加载加载页面
+    const loadingPage = getLoadingPagePath();
+    if (loadingPage) {
+        mainWindow.loadFile(loadingPage);
+    } else {
+        // 如果没有加载页面，直接加载应用
+        mainWindow.loadURL('http://127.0.0.1:8080');
+    }
 
-    mainWindow.loadURL('http://127.0.0.1:8080');
+    if (isDevMode()) {
+        mainWindow.webContents.openDevTools();
+    }
 
+    // 处理页面加载失败（用于重试连接）
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-        if (errorCode === -102) {
+        if (errorCode === -102 || errorCode === -2) { // 连接被拒绝或未找到
             console.log('[Electron] 等待 Paw 服务器启动...');
-            setTimeout(() => {
-                mainWindow.loadURL('http://127.0.0.1:8080');
-            }, 3000);
+            // 不做任何事，等待 onServerReady 切换 URL
         }
     });
 
+    // 处理新窗口打开
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         shell.openExternal(url);
         return { action: 'deny' };
@@ -264,6 +350,12 @@ function setupIpcHandlers() {
 
     ipcMain.handle('restart-backend', async () => {
         stopPythonBackend();
+        isServerReady = false;
+        // 重新显示加载页面
+        const loadingPage = getLoadingPagePath();
+        if (loadingPage && mainWindow) {
+            mainWindow.loadFile(loadingPage);
+        }
         await startPythonBackend();
         return { success: true };
     });
@@ -295,14 +387,17 @@ function setupIpcHandlers() {
 app.whenReady().then(async () => {
     setupIpcHandlers();
 
-    try {
-        await startPythonBackend();
-        createWindow();
-    } catch (error) {
+    // 立即创建窗口（不等待 Python）
+    createWindow();
+
+    // 在后台启动 Python（不设超时，让 loading 页面自己处理）
+    startPythonBackend().catch(error => {
         console.error('启动失败:', error);
-        dialog.showErrorBox('启动失败', `无法启动 Paw 后端: ${error.message}`);
-        app.quit();
-    }
+        // 只有真正的错误才发送，超时不发送
+        if (!error.message.includes('超时')) {
+            sendError(error.message);
+        }
+    });
 });
 
 app.on('window-all-closed', () => {

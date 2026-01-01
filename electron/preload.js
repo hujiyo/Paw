@@ -32,6 +32,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const listener = (_event, data) => callback(data);
         ipcRenderer.on('python-exit', listener);
         return () => ipcRenderer.removeListener('python-exit', listener);
+    },
+
+    // 启动状态监听（用于 loading 页面）
+    onStartupStatus: (callback) => {
+        const listener = (_event, status) => callback(status);
+        ipcRenderer.on('startup-status', listener);
+        return () => ipcRenderer.removeListener('startup-status', listener);
+    },
+    onStartupError: (callback) => {
+        const listener = (_event, error) => callback(error);
+        ipcRenderer.on('startup-error', listener);
+        return () => ipcRenderer.removeListener('startup-error', listener);
     }
 });
 

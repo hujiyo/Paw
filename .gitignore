@@ -6,3 +6,5 @@ models/
 CLAUDE.md
 nul
 !.logo/
+build/
+dist/

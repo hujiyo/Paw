@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Paw</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .splash-container {
+            text-align: center;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .logo {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto;
+        }
+
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .app-name {
+            margin-top: 30px;
+            font-size: 28px;
+            font-weight: 500;
+            color: #333;
+            letter-spacing: 2px;
+        }
+
+        .tagline {
+            margin-top: 8px;
+            font-size: 13px;
+            color: #999;
+            letter-spacing: 1px;
+        }
+
+        .progress {
+            margin-top: 40px;
+            width: 180px;
+            height: 3px;
+            background: #f0f0f0;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 2px;
+            animation: loading 1.5s ease-in-out infinite;
+        }
+
+        @keyframes loading {
+            0% { width: 0%; margin-left: 0; }
+            50% { width: 60%; margin-left: 20%; }
+            100% { width: 0%; margin-left: 100%; }
+        }
+
+        .status {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #ccc;
+        }
+
+        .version {
+            position: fixed;
+            bottom: 30px;
+            font-size: 11px;
+            color: #ddd;
+        }
+
+        /* 错误状态 */
+        .error {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .error.show {
+            display: block;
+        }
+
+        .error-text {
+            color: #e74c3c;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        .btn {
+            padding: 8px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .btn:hover {
+            background: #5568d3;
+        }
+
+        /* 隐藏启动画面 */
+        .splash-container.hide {
+            animation: fadeOut 0.4s ease-out forwards;
+        }
+
+        @keyframes fadeOut {
+            to { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="splash-container" id="splash">
+        <div class="logo">
+            <img src="../.logo/图标2.png" alt="Paw" onerror="this.src='resources/icon.png'">
+        </div>
+        <div class="app-name">Paw</div>
+        <div class="tagline">Intelligent Terminal AI Agent</div>
+        <div class="progress">
+            <div class="progress-bar"></div>
+        </div>
+        <div class="status" id="status">正在启动...</div>
+    </div>
+
+    <div class="version" id="version"></div>
+
+    <div class="error" id="error">
+        <div class="error-text" id="errorText"></div>
+        <button class="btn" id="retryBtn">重试</button>
+    </div>
+
+    <script>
+        const splash = document.getElementById('splash');
+        const statusEl = document.getElementById('status');
+        const errorEl = document.getElementById('error');
+        const errorTextEl = document.getElementById('errorText');
+        const retryBtn = document.getElementById('retryBtn');
+        const versionEl = document.getElementById('version');
+
+        function showError(message) {
+            splash.classList.add('hide');
+            errorTextEl.textContent = message;
+            errorEl.classList.add('show');
+        }
+
+        function checkReady() {
+            fetch('http://127.0.0.1:8080')
+                .then(() => {
+                    location.href = 'http://127.0.0.1:8080';
+                })
+                .catch(() => {});
+        }
+
+        retryBtn.addEventListener('click', () => {
+            errorEl.classList.remove('show');
+            splash.classList.remove('hide');
+            if (window.electronAPI) {
+                window.electronAPI.restartBackend();
+            }
+        });
+
+        // 监听启动状态
+        if (window.electronAPI) {
+            window.electronAPI.onStartupStatus((status) => {
+                if (status.includes('启动')) {
+                    statusEl.textContent = '正在启动...';
+                } else if (status.includes('等待')) {
+                    statusEl.textContent = '正在加载...';
+                    setTimeout(checkReady, 1000);
+                }
+            });
+
+            window.electronAPI.onStartupError((error) => {
+                showError(error);
+            });
+
+            window.electronAPI.getAppInfo().then(info => {
+                versionEl.textContent = `v${info.version}`;
+            });
+        }
+
+        // 定期检查
+        setInterval(checkReady, 1500);
+    </script>
+</body>
+</html>

@@ -74,13 +74,15 @@ npm install
 npm start
 ```
 
-构建安装包：
+构建安装包（约 150-200MB）：
 
 ```bash
 npm run build:win    # Windows
 npm run build:mac    # macOS
 npm run build:linux  # Linux
 ```
+
+> 打包后的应用内置 Python 虚拟环境，用户无需安装 Python 即可使用。
 
 详细说明请参考 [electron/README.md](electron/README.md)
 

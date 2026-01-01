@@ -29,16 +29,25 @@
     "files": [
       "main.js",
       "preload.js",
-      "python/**/*",
+      "loading.html",
       "resources/**/*"
     ],
     "extraResources": [
+      {
+        "from": "../paw_env",
+        "to": "paw_env",
+        "filter": [
+          "**/*",
+          "!**/*.pyc",
+          "!**/__pycache__/**",
+          "!**/*.log"
+        ]
+      },
       {
         "from": "../",
         "to": "paw-core",
         "filter": [
           "**/*",
-          "!paw_env/**",
           "!electron/**",
           "!node_modules/**",
           "!dist/**",
