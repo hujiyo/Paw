@@ -9,8 +9,13 @@ from typing import List, Dict, Any
 import asyncio
 import webbrowser
 import uuid
+import yaml
+import json
+import aiohttp
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import Request
 import uvicorn
 
 class WebUI:
@@ -28,7 +33,13 @@ class WebUI:
         self._expect = None  # 控制输入预期类型（如 'model_choice'）
         self.ws_ready = asyncio.Event()
         self._pending: List[Dict[str, Any]] = []
+        self.is_webui = True  # 标识为 WebUI 模式
+        self._stop_callback = None  # 停止回调函数
         self._setup_routes()
+
+    def set_stop_callback(self, callback):
+        """设置停止回调函数，用于立即响应 /stop 命令"""
+        self._stop_callback = callback
 
     def _setup_routes(self):
         @self.app.get("/", response_class=HTMLResponse)
@@ -38,6 +49,42 @@ class WebUI:
                     return HTMLResponse(content=f.read())
             except FileNotFoundError:
                 return HTMLResponse(content="Error: index.html not found.", status_code=500)
+
+        @self.app.get("/api/config")
+        async def get_config():
+            """获取当前配置"""
+            config_path = Path(__file__).parent / "config.yaml"
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config = yaml.safe_load(f) or {}
+                    return JSONResponse(content={"success": True, "config": config})
+                except Exception as e:
+                    return JSONResponse(content={"success": False, "error": str(e)})
+            return JSONResponse(content={"success": False, "error": "配置文件不存在"})
+
+        @self.app.post("/api/config")
+        async def save_config(request: Request):
+            """保存配置"""
+            try:
+                data = await request.json()
+                config = data.get("config", {})
+                config_path = Path(__file__).parent / "config.yaml"
+
+                # 读取现有配置以保留注释（使用ruamel.yaml会更理想，但这里用标准yaml）
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    existing_config = yaml.safe_load(f) or {}
+
+                # 合并配置
+                existing_config.update(config)
+
+                # 保存配置
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    yaml.safe_dump(existing_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+                return JSONResponse(content={"success": True, "message": "配置已保存，请重启应用生效"})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -56,15 +103,95 @@ class WebUI:
             try:
                 while True:
                     data = await websocket.receive_text()
+
+                    # /stop 命令需要立即处理，不放入队列
+                    if data.strip() == '/stop':
+                        if self._stop_callback:
+                            self._stop_callback()
+                        # 不放入队列，直接返回
+                        continue
+
+                    # 尝试解析为 JSON 处理控制命令
+                    try:
+                        msg = json.loads(data)
+                        if isinstance(msg, dict) and msg.get('type') == 'fetch_models':
+                            await self._handle_fetch_models(websocket, msg)
+                            continue
+                    except (json.JSONDecodeError, ValueError):
+                        pass  # 不是 JSON，继续作为普通消息处理
+
                     # 控制类输入（模型选择等）优先路由到 control_queue
                     if getattr(self, "_expect", None):
-                        await self.control_queue.put(data)
-                        self._expect = None
+                        # 模型选择阶段，忽略命令（以/开头的输入）
+                        if data.strip().startswith('/'):
+                            # 命令放回 chat_queue 处理，不当作模型名
+                            await self.chat_queue.put(data)
+                            # 保持 _expect 不变，继续等待模型选择
+                        else:
+                            await self.control_queue.put(data)
+                            self._expect = None
                     else:
                         await self.chat_queue.put(data)
             except WebSocketDisconnect:
                 print("INFO:     WebSocket connection closed.")
                 self.websocket = None
+
+    async def _handle_fetch_models(self, websocket: WebSocket, msg: Dict):
+        """处理获取模型列表的请求"""
+        request_id = msg.get('request_id')
+        api_key = msg.get('api_key', '')
+        api_url = msg.get('api_url', '')
+
+        try:
+            models = await self._fetch_models_from_api(api_key, api_url)
+            await websocket.send_json({
+                "event": "models_fetched",
+                "data": {
+                    "request_id": request_id,
+                    "models": models
+                }
+            })
+        except Exception as e:
+            await websocket.send_json({
+                "event": "models_fetched",
+                "data": {
+                    "request_id": request_id,
+                    "models": [],
+                    "error": str(e)
+                }
+            })
+
+    async def _fetch_models_from_api(self, api_key: str, api_url: str) -> List[str]:
+        """从 API 获取可用模型列表"""
+        try:
+            headers = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            # 提取 base URL（去掉 /chat/completions）
+            base_url = api_url.replace("/chat/completions", "")
+            # 智谱 AI 的模型列表端点
+            if "bigmodel.cn" in base_url:
+                models_url = f"{base_url.replace('/v4', '')}/v4/models"
+            else:
+                models_url = f"{base_url.replace('/v1', '')}/v1/models"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    models_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # 智谱AI返回格式: {"data": [{"id": "model_name"}, ...]}
+                        models = [m["id"] for m in data.get("data", [])]
+                        return models
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"API 返回错误 ({response.status}): {error_text[:100]}")
+        except Exception as e:
+            raise Exception(f"获取模型失败: {str(e)}")
 
     async def send_message(self, event: str, data: Any):
         payload = {"event": event, "data": data}
@@ -109,6 +236,10 @@ class WebUI:
         if hasattr(self, '_current_stream_id'):
             asyncio.create_task(self.send_message("assistant_stream_end", {"id": self._current_stream_id}))
             del self._current_stream_id
+
+    def turn_end(self):
+        """整个对话轮次结束，可以接受新的用户输入"""
+        asyncio.create_task(self.send_message("turn_end", {}))
 
     def show_tool_start(self, tool_call_id: str, tool_name: str, args_str: str):
         asyncio.create_task(self.send_message("tool_start", {
@@ -156,7 +287,8 @@ class WebUI:
         asyncio.create_task(self.send_message("request_input", {"prompt": "无法自动获取模型列表，请输入模型名称:", "type": "model_input"}))
 
     def show_model_selected(self, model: str):
-        asyncio.create_task(self.send_message("system_message", {"text": f"已切换到模型: {model}", "type": "system"}))
+        # 不再显示消息，状态栏已经显示模型信息
+        pass
 
     # --- 空操作方法，保持接口兼容性 ---
     def clear_screen(self): pass

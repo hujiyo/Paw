@@ -180,7 +180,9 @@
         function checkReady() {
             fetch('http://127.0.0.1:8080')
                 .then(() => {
-                    location.href = 'http://127.0.0.1:8080';
+                    // 不再主动跳转，由Electron主进程的onServerReady()处理
+                    // 避免重复加载导致页面闪烁
+                    console.log('[Loading] Server is ready, waiting for Electron to load main page...');
                 })
                 .catch(() => {});
         }

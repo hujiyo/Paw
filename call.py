@@ -185,7 +185,7 @@ class LLMClient:
         )
     
     async def _handle_stream(
-        self, 
+        self,
         response: aiohttp.ClientResponse,
         on_content: Optional[Callable[[str], None]]
     ) -> LLMResponse:
@@ -194,65 +194,69 @@ class LLMClient:
         tool_calls_dict: Dict[int, Dict] = {}
         finish_reason = "stop"
         has_content = False
-        
-        async for line in response.content:
-            line = line.decode('utf-8').strip()
-            if not line or not line.startswith('data: '):
-                continue
-            
-            if line == 'data: [DONE]':
-                break
-            
-            try:
-                json_str = line[6:]  # 移除 'data: ' 前缀
-                chunk = json.loads(json_str)
-                
-                if 'choices' not in chunk or len(chunk['choices']) == 0:
+
+        try:
+            async for line in response.content:
+                line = line.decode('utf-8').strip()
+                if not line or not line.startswith('data: '):
                     continue
-                
-                delta = chunk['choices'][0].get('delta', {})
-                finish_reason = chunk['choices'][0].get('finish_reason', finish_reason)
-                
-                # 处理内容（流式打印）
-                if 'content' in delta and delta['content']:
-                    content_text = delta['content']
-                    # 首次输出时去除前导换行
-                    if not has_content:
-                        content_text = content_text.lstrip('\n')
-                        if not content_text:
-                            continue
-                        has_content = True
-                    content_chunks.append(content_text)
-                    
-                    if on_content:
-                        on_content(content_text)
-                
-                # 处理 tool_calls（累积）
-                if 'tool_calls' in delta:
-                    for tc_delta in delta['tool_calls']:
-                        idx = tc_delta.get('index', 0)
-                        if idx not in tool_calls_dict:
-                            tool_calls_dict[idx] = {
-                                'id': '',
-                                'type': 'function',
-                                'function': {'name': '', 'arguments': ''}
-                            }
-                        
-                        if 'id' in tc_delta:
-                            tool_calls_dict[idx]['id'] = tc_delta['id']
-                        if 'function' in tc_delta:
-                            if 'name' in tc_delta['function']:
-                                tool_calls_dict[idx]['function']['name'] += tc_delta['function']['name']
-                            if 'arguments' in tc_delta['function']:
-                                tool_calls_dict[idx]['function']['arguments'] += tc_delta['function']['arguments']
-            
-            except json.JSONDecodeError:
-                continue
-        
+
+                if line == 'data: [DONE]':
+                    break
+
+                try:
+                    json_str = line[6:]  # 移除 'data: ' 前缀
+                    chunk = json.loads(json_str)
+
+                    if 'choices' not in chunk or len(chunk['choices']) == 0:
+                        continue
+
+                    delta = chunk['choices'][0].get('delta', {})
+                    finish_reason = chunk['choices'][0].get('finish_reason', finish_reason)
+
+                    # 处理内容（流式打印）
+                    if 'content' in delta and delta['content']:
+                        content_text = delta['content']
+                        # 首次输出时去除前导换行
+                        if not has_content:
+                            content_text = content_text.lstrip('\n')
+                            if not content_text:
+                                continue
+                            has_content = True
+                        content_chunks.append(content_text)
+
+                        if on_content:
+                            on_content(content_text)
+
+                    # 处理 tool_calls（累积）
+                    if 'tool_calls' in delta:
+                        for tc_delta in delta['tool_calls']:
+                            idx = tc_delta.get('index', 0)
+                            if idx not in tool_calls_dict:
+                                tool_calls_dict[idx] = {
+                                    'id': '',
+                                    'type': 'function',
+                                    'function': {'name': '', 'arguments': ''}
+                                }
+
+                            if 'id' in tc_delta:
+                                tool_calls_dict[idx]['id'] = tc_delta['id']
+                            if 'function' in tc_delta:
+                                if 'name' in tc_delta['function']:
+                                    tool_calls_dict[idx]['function']['name'] += tc_delta['function']['name']
+                                if 'arguments' in tc_delta['function']:
+                                    tool_calls_dict[idx]['function']['arguments'] += tc_delta['function']['arguments']
+
+                except json.JSONDecodeError:
+                    continue
+        except Exception:
+            # 回调函数可能抛出异常（如停止信号），直接返回当前结果
+            pass
+
         # 组装最终结果
         full_content = ''.join(content_chunks) if content_chunks else None
         tool_calls = list(tool_calls_dict.values()) if tool_calls_dict else None
-        
+
         return LLMResponse(
             content=full_content,
             tool_calls=tool_calls,

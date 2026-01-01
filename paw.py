@@ -130,7 +130,14 @@ class Paw:
         # 会话管理器（用于保存/恢复完整对话状态）
         self.session_manager = SessionManager()
         self.current_session_id = None  # 当前会话ID（用于更新现有会话）
-        
+
+        # 停止事件（用于中断生成）
+        self._stop_event = None
+
+        # 注册停止回调（用于 WebUI 立即响应 /stop 命令）
+        if hasattr(ui, 'set_stop_callback'):
+            ui.set_stop_callback(self._handle_stop_request)
+
         # 系统提示词（第一人称）
         self.system_prompt = self._create_system_prompt()
         _mark("构建 system_prompt")
@@ -139,6 +146,11 @@ class Paw:
         # 不再使用self.messages
 
         # 启动耗时记录仅供内部排查，不对用户输出
+
+    def _handle_stop_request(self):
+        """处理停止请求（由 WebUI 直接调用，绕过消息队列）"""
+        if self._stop_event:
+            self._stop_event.set()
 
     def _load_config(self) -> dict:
         """加载config.yaml配置文件"""
@@ -563,7 +575,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
     
     async def _call_llm_with_tools(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用语言模型（支持Function Calling + 流式输出）
-        
+
         Returns:
             {
                 "role": "assistant",
@@ -575,14 +587,20 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 用于跟踪是否有内容输出（控制换行）
         has_content = [False]
         last_chunk = ['']
-        
+        was_stopped = [False]  # 是否被用户停止
+
         def on_content(text: str):
             """流式内容回调"""
+            # 检查停止请求
+            if self._stop_event and self._stop_event.is_set():
+                was_stopped[0] = True
+                raise RuntimeError("User stopped")
+
             if not has_content[0]:
                 has_content[0] = True
             last_chunk[0] = text
             self.ui.print_assistant(text, end='', flush=True)
-        
+
         # 使用统一的 LLM 客户端（传入当前 model，因为可能在运行时选择）
         response = await self.llm.chat(
             messages,
@@ -594,11 +612,27 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             stream=True,
             on_content=on_content
         )
-        
+
+        # 检查是否被用户停止
+        if was_stopped[0]:
+            if has_content[0] and last_chunk[0] and not last_chunk[0].endswith('\n'):
+                print()
+            # 通知 WebUI 流式结束
+            if hasattr(self.ui, 'assistant_stream_end') and callable(getattr(self.ui, 'assistant_stream_end')):
+                try:
+                    self.ui.assistant_stream_end()
+                except Exception:
+                    pass
+            return {
+                "content": last_chunk[0] if has_content[0] else None,
+                "tool_calls": [],
+                "finish_reason": "stopped"
+            }
+
         # 处理换行（只有当最后一行不是换行符时才打印换行）
         if has_content[0] and last_chunk[0] and not last_chunk[0].endswith('\n'):
             print()
-        
+
         # 通知 WebUI 流式结束（如果支持）
         if hasattr(self.ui, 'assistant_stream_end') and callable(getattr(self.ui, 'assistant_stream_end')):
             try:
@@ -865,6 +899,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
     
     async def process_input(self, user_input: str) -> str:
         """处理用户输入 - 完全符合OpenAI Function Calling标准"""
+        # 重置停止事件
+        self._stop_event = asyncio.Event()
+
         # 0. 添加用户输入
         self.chunk_manager.add_user_input(user_input)
         
@@ -928,7 +965,13 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             
             # 调用支持Function Calling的API
             assistant_message = await self._call_llm_with_tools(messages)
-            
+
+            # 检查是否被停止
+            if assistant_message.get("finish_reason") == "stopped":
+                # 用户停止了生成，退出循环
+                self.stop_requested = False  # 重置标志
+                break
+
             # 提取内容和工具调用
             content = assistant_message.get("content")
             tool_calls = assistant_message.get("tool_calls")
@@ -940,15 +983,21 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 final_response = content
             
             # 注意：响应已在_call_llm_with_tools中流式显示
-            
+
             # 执行工具调用
             if tool_calls:
                 for i, tool_call in enumerate(tool_calls):
+                    # 检查是否被停止
+                    if self._stop_event and self._stop_event.is_set():
+                        self.ui.print_dim("\n[已停止]")
+                        # 标记为停止状态，退出主循环
+                        return
+
                     # 提取工具信息
                     tool_call_id = tool_call.get("id")
                     function_name = tool_call["function"]["name"]
                     raw_args = tool_call["function"]["arguments"]
-                    
+
                     # 安全解析工具参数（处理 API 返回的无效 JSON）
                     try:
                         function_args = json.loads(raw_args) if raw_args else {}
@@ -1288,6 +1337,12 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 等待前端通过WebSocket返回模型名称（显式模型选择通道）
             chosen_model = await self.ui.get_model_choice_async("请选择模型或输入模型名")
             chosen_model = (chosen_model or '').strip()
+
+            # 检查是否是命令输入（以 / 开头）
+            if chosen_model.startswith('/'):
+                self.ui.print_error(f"请先选择模型后再使用命令。输入的 '{chosen_model}' 被识别为命令而非模型名。")
+                continue
+
             if chosen_model:
                 # 若提供了列表且选择不在其中，给出提示并继续循环
                 if models and chosen_model not in models:
@@ -1325,7 +1380,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 记忆系统延迟初始化：确保先进入首屏
         if self.memory_manager is None:
             try:
-                self.ui.print_dim("[Memory] 正在初始化记忆系统（首次可能较慢）...")
+                # WebUI 模式下静默初始化，不打印信息
+                if not hasattr(self.ui, 'is_webui'):
+                    self.ui.print_dim("[Memory] 正在初始化记忆系统（首次可能较慢）...")
                 config = self._load_config()
                 emb_cfg = (config.get('embeddings') or {})
                 embedding_path = emb_cfg.get('path')  # 可选：显式指定 .gguf
@@ -1333,11 +1390,16 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     project_path=self.workspace_dir,
                     embedding_path=embedding_path,
                 )
-                self.ui.print_dim("[Memory] 本地 llama.cpp embedding 模型已加载")
+                if not hasattr(self.ui, 'is_webui'):
+                    self.ui.print_dim("[Memory] 本地 llama.cpp embedding 模型已加载")
                 # 记忆系统初始化完成后，重建 system_prompt 以注入记忆
                 self.system_prompt = self._create_system_prompt()
             except Exception as e:
-                self.ui.print_error(f"[Memory] 初始化失败，将以无记忆模式运行: {e}")
+                # WebUI 模式下用弹窗报错
+                if hasattr(self.ui, 'is_webui'):
+                    asyncio.create_task(self.ui.send_message("show_error", {"text": f"记忆系统初始化失败: {e}"}))
+                else:
+                    self.ui.print_error(f"[Memory] 初始化失败，将以无记忆模式运行: {e}")
                 self.memory_manager = None
         
         # 标记对话区域起始位置（用于编辑后重渲染）
@@ -1348,6 +1410,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
         # 主循环
         while True:
+            # 标记是否需要发送 turn_end（只有处理普通消息时才需要）
+            should_send_turn_end = False
             try:
                 # 获取用户输入
                 user_input = await self.ui.get_user_input()
@@ -1369,7 +1433,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         # 有对话历史，添加继续标记
                         user_input = "[系统提示:继续]"
                 
-                # 特殊命令
+                # 特殊命令（不触发 turn_end）
                 if user_input == '/clear':
                     self.clear_history()
                     continue
@@ -1532,21 +1596,33 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 用户跳过本轮输入，不发送任何内容给 LLM
                     self.ui.print_dim("[跳过本轮输入]")
                     continue
+
+                if user_input == '/stop':
+                    # /stop 命令现在由 WebUI 直接处理，不会进入这里
+                    # 保留此分支以兼容终端模式
+                    if self._stop_event:
+                        self._stop_event.set()
+                    continue
                 
                 if user_input.startswith('/'):
                     help_msg = UIPrompts.get_command_help()
                     self.ui.show_command_help(help_msg)
                     continue
-                
-                # 处理正常输入
+
+                # 处理正常输入（需要发送 turn_end）
+                should_send_turn_end = True
                 await self.process_input(user_input)
-                
             except KeyboardInterrupt:
                 interrupted_msg = UIPrompts.get_startup_messages()["interrupted"]
                 self.ui.print_dim(interrupted_msg)
                 break
             except Exception as e:
                 self.ui.print_error(f"Error: {e}")
+                # 异常时也需要发送 turn_end（如果之前标记了）
+            finally:
+                # 只有处理普通消息时才发送 turn_end
+                if should_send_turn_end and hasattr(self.ui, 'turn_end'):
+                    self.ui.turn_end()
 
 
 async def main():

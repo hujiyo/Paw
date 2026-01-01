@@ -268,14 +268,16 @@ function getIconPath() {
 
 // 获取加载页面路径
 function getLoadingPagePath() {
-    // 开发环境
-    const devLoading = path.join(__dirname, 'loading.html');
+    const appRoot = getAppRoot();
+
+    // 开发环境：从项目 templates 目录加载
+    const devLoading = path.join(appRoot, 'templates', 'loading.html');
     if (fs.existsSync(devLoading)) {
         return devLoading;
     }
 
-    // 生产环境：从 resources 加载
-    const prodLoading = path.join(process.resourcesPath, 'loading.html');
+    // 生产环境：从 paw-core/templates 加载
+    const prodLoading = path.join(appRoot, 'templates', 'loading.html');
     if (fs.existsSync(prodLoading)) {
         return prodLoading;
     }
@@ -292,7 +294,7 @@ function createWindow() {
         minHeight: 600,
         title: 'Paw - AI Terminal Agent',
         icon: getIconPath(),
-        backgroundColor: '#1a1a2e', // 与 loading 页面背景一致
+        backgroundColor: '#000000', // 与 loading 页面背景一致
         show: true, // 立即显示窗口
         autoHideMenuBar: true,
         webPreferences: {
@@ -312,9 +314,8 @@ function createWindow() {
         mainWindow.loadURL('http://127.0.0.1:8080');
     }
 
-    if (isDevMode()) {
-        mainWindow.webContents.openDevTools();
-    }
+    // 开发模式按 F12 打开 DevTools
+    // mainWindow.webContents.openDevTools();
 
     // 处理页面加载失败（用于重试连接）
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
