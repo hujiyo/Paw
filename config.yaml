@@ -8,6 +8,13 @@ api:
   model: glm-4.7
 embeddings:
   path: ''
+recall:
+  # 是否启用意图判断（只在判断为"回忆型"问题时才检索记忆）
+  enabled: true
+  # 意图判断阈值：与"回忆意图"向量的相似度超过此值才进行 RAG 检索
+  # 较高阈值 = 更严格，只有明确的回忆型问题才触发
+  # 较低阈值 = 更宽松，更多问题会尝试回忆
+  threshold: 0.38
 terminal:
   shell: powershell
   encoding: utf-8

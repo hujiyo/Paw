@@ -164,6 +164,18 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
     return dot / denom
 
 
+# ============================================================
+# 回忆意图判断（RAG 触发机制）
+# ============================================================
+
+# B 文本：描述"回忆型问题"的语义特征
+# 其 embedding 向量用作判断用户输入是否需要回忆历史的锚点
+_RECALL_INTENT_TEXT = """这个问题需要调取我们之前对话中的具体信息才能回答。它不是一个可以独立解答的新问题，而是在延续先前的讨论主题或引用已经交流过的内容。用户正在回忆、确认或复用历史对话中的某个细节、结论、代码或概念。问题的前提是"我们之前提到过"或"根据先前的讨论"，答案存在于过往的交流记录中，而非实时查询或通用知识。"""
+
+# 默认配置
+_DEFAULT_RECALL_THRESHOLD = 0.35  # 意图判断阈值
+
+
 class SQLiteConversationStore:
     def __init__(self, storage_path: Path, embedding_client: LlamaCppEmbeddingClient):
         self.storage_path = Path(storage_path)
@@ -646,6 +658,67 @@ class MemoryManager:
             base_life=3,        # 基础生命值3轮
             decay_rate=1        # 每轮衰减1
         )
+
+        # 加载回忆意图判断配置
+        self._load_recall_config()
+
+        # 预计算"回忆意图"锚点向量 B
+        self._recall_intent_vector: List[float] = []
+        self._init_recall_intent_vector()
+
+    # ==================== 回忆意图判断配置 ====================
+
+    def _load_recall_config(self):
+        """加载回忆相关配置（从项目根目录的 config.yaml）"""
+        import os
+        config_path = self.project_path / "config.yaml"
+        self._recall_enabled = True
+        self._recall_threshold = _DEFAULT_RECALL_THRESHOLD
+
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f) or {}
+                recall_config = config.get('recall', {})
+                self._recall_enabled = recall_config.get('enabled', True)
+                self._recall_threshold = recall_config.get('threshold', _DEFAULT_RECALL_THRESHOLD)
+            except Exception as e:
+                print(f"[Memory] 加载 recall 配置失败: {e}")
+
+    def _init_recall_intent_vector(self):
+        """预计算'回忆意图'锚点向量 B"""
+        if not self._recall_enabled:
+            return
+        try:
+            # 使用同步方法预计算（初始化时可以接受阻塞）
+            self._recall_intent_vector = self.embedding_client._embed_sync(_RECALL_INTENT_TEXT)
+            print(f"[Memory] 回忆意图锚点向量已预计算 (阈值: {self._recall_threshold})")
+        except Exception as e:
+            print(f"[Memory] 预计算回忆意图向量失败: {e}")
+            self._recall_enabled = False
+
+    def _should_recall(self, query: str) -> tuple[bool, float]:
+        """
+        判断用户输入是否需要回忆历史
+
+        Args:
+            query: 用户输入
+
+        Returns:
+            (是否需要回忆, 相似度分数)
+        """
+        if not self._recall_enabled or not self._recall_intent_vector:
+            # 未启用或向量未初始化，默认进行回忆（保持向后兼容）
+            return True, 1.0
+
+        try:
+            query_vector = self.embedding_client._embed_sync(query)
+            similarity = _cosine_similarity(query_vector, self._recall_intent_vector)
+            should = similarity >= self._recall_threshold
+            return should, similarity
+        except Exception as e:
+            print(f"[Memory] 意图判断失败: {e}")
+            return True, 1.0  # 出错时默认进行回忆
     
     # ==================== 规则加载 ====================
     
@@ -833,26 +906,34 @@ class MemoryManager:
         return self.save_conversation(user_message, assistant_message, metadata)
     
     # ==================== 记忆回忆（生命值递减法）====================
-    
-    def recall(self, 
-               query: str, 
+
+    def recall(self,
+               query: str,
                n_results: int = 3,
                min_score: float = 0.35,
                project_only: bool = True) -> int:
         """
-        回忆相关对话（RAG 检索 + 生命值管理）
-        
+        回忆相关对话（意图判断 + RAG 检索 + 生命值管理）
+
         Args:
             query: 用户输入
             n_results: 返回数量
             min_score: 最低相似度
             project_only: 是否只检索当前项目
-            
+
         Returns:
             新唤醒的记忆数量
         """
+        # 意图判断：判断用户输入是否需要回忆历史
+        should_recall, intent_score = self._should_recall(query)
+        if not should_recall:
+            # 不需要回忆，跳过 RAG 检索
+            print(f"[Memory] 意图判断: 跳过回忆 (相似度: {intent_score:.3f} < 阈值: {self._recall_threshold})")
+            return 0
+        print(f"[Memory] 意图判断: 触发回忆 (相似度: {intent_score:.3f})")
+
         project = self.project_path.name if project_only else None
-        
+
         # RAG 检索
         if asyncio.iscoroutinefunction(getattr(self.conversation_store, "search", None)):
             raise RuntimeError("SQLiteConversationStore 需要异步检索，请调用 recall_async")
@@ -862,24 +943,24 @@ class MemoryManager:
             n_results=n_results,
             min_score=min_score
         )
-        
+
         # 唤醒记忆（加入生命值系统）
         new_count = 0
         for conv in results:
             doc_id = conv.get('id', '')
             similarity = conv.get('similarity', 0.5)
-            
+
             # 格式化回忆内容
             meta = conv.get('metadata', {})
             timestamp = meta.get('timestamp', '')
             user_msg = meta.get('user_message', '')[:200]
             assistant_msg = meta.get('assistant_message', '')[:300]
             content = f"[{timestamp[:10]}] 用户问: {user_msg}\n我答: {assistant_msg}{'...' if len(meta.get('assistant_message', '')) > 300 else ''}"
-            
+
             # 唤醒（传入时间戳用于排序）
             if self.recall_manager.awaken(doc_id, content, similarity, timestamp):
                 new_count += 1
-        
+
         return new_count
 
     async def recall_async(self,
@@ -887,6 +968,15 @@ class MemoryManager:
                            n_results: int = 3,
                            min_score: float = 0.35,
                            project_only: bool = True) -> int:
+        """异步版本：回忆相关对话（意图判断 + RAG 检索 + 生命值管理）"""
+        # 意图判断：判断用户输入是否需要回忆历史
+        should_recall, intent_score = self._should_recall(query)
+        if not should_recall:
+            # 不需要回忆，跳过 RAG 检索
+            print(f"[Memory] 意图判断: 跳过回忆 (相似度: {intent_score:.3f} < 阈值: {self._recall_threshold})")
+            return 0
+        print(f"[Memory] 意图判断: 触发回忆 (相似度: {intent_score:.3f})")
+
         project = self.project_path.name if project_only else None
         if asyncio.iscoroutinefunction(getattr(self.conversation_store, "search", None)):
             results = await self.conversation_store.search(
