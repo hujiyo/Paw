@@ -91,7 +91,7 @@ npm run build:linux  # Linux
 
 > 打包后的应用内置 Python 虚拟环境，用户无需安装 Python 即可使用。
 
-详细说明请参考 [electron/README.md](electron/README.md)
+详细说明请参考 [doc/PACKAGE.md](doc/PACKAGE.md)
 
 ## 内置指令
 

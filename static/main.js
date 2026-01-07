@@ -11,10 +11,10 @@ let isServerReady = false;
 
 // 获取项目根目录（开发环境自动检测）
 function getAppRoot() {
-    // 首先尝试：从 electron 文件夹向上找 paw.py
-    const fromElectronDir = path.resolve(path.join(__dirname, '..'));
-    if (fs.existsSync(path.join(fromElectronDir, 'paw.py'))) {
-        return fromElectronDir;
+    // 首先尝试：从 static 文件夹向上找 paw.py
+    const fromStaticDir = path.resolve(path.join(__dirname, '..'));
+    if (fs.existsSync(path.join(fromStaticDir, 'paw.py'))) {
+        return fromStaticDir;
     }
 
     // 其次尝试：生产环境 extraResources
@@ -36,8 +36,8 @@ function isDevMode() {
     if (process.argv.includes('--dev')) return true;
     // 检查环境变量
     if (process.env.NODE_ENV === 'development') return true;
-    // 检查是否从 electron 文件夹运行
-    if (__dirname.includes('electron') && !app.isPackaged) return true;
+    // 检查是否从 static 文件夹运行（开发模式）
+    if (__dirname.includes('static') && !app.isPackaged) return true;
     return false;
 }
 
@@ -252,8 +252,8 @@ function getIconPath() {
     const iconFile = process.platform === 'win32' ? 'icon.ico' :
                      process.platform === 'darwin' ? 'icon.icns' : 'icon.png';
 
-    // 开发环境：从 electron/resources 加载
-    const devIcon = path.join(__dirname, 'resources', iconFile);
+    // 开发环境：从项目根目录的 resources 文件夹加载
+    const devIcon = path.join(__dirname, '..', 'resources', iconFile);
     if (fs.existsSync(devIcon)) {
         return devIcon;
     }

@@ -7,7 +7,6 @@ Web UI系统 - 重构版
 
 from typing import List, Dict, Any
 import asyncio
-import webbrowser
 import uuid
 import yaml
 import json
@@ -208,10 +207,6 @@ class WebUI:
         config = uvicorn.Config(self.app, host=self.host, port=self.port, log_level="warning")
         server = uvicorn.Server(config)
         print(f"INFO:     Starting Web UI on http://{self.host}:{self.port}")
-        # 检查是否在 Electron 环境中运行（通过环境变量）
-        import os
-        if not os.environ.get('PAW_ELECTRON_MODE'):
-            webbrowser.open(f"http://{self.host}:{self.port}")
         # uvicorn.run is blocking, so we need to run it in a separate thread
         # or use server.serve() which is async.
         return server.serve()

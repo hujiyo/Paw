@@ -2,7 +2,7 @@
   "name": "paw-desktop",
   "version": "1.0.0",
   "description": "Paw - Intelligent Terminal AI Agent",
-  "main": "main.js",
+  "main": "static/main.js",
   "author": "Paw",
   "license": "MIT",
   "scripts": {
@@ -28,8 +28,8 @@
       "output": "dist"
     },
     "files": [
-      "main.js",
-      "preload.js",
+      "static/main.js",
+      "static/preload.js",
       "resources/**/*"
     ],
     "extraResources": [
@@ -48,7 +48,6 @@
         "to": "paw-core",
         "filter": [
           "**/*",
-          "!electron/**",
           "!node_modules/**",
           "!dist/**",
           "!*.log",
