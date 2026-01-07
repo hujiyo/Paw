@@ -13,6 +13,7 @@ import json
 import aiohttp
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi import Request
 import uvicorn
@@ -41,6 +42,9 @@ class WebUI:
         self._stop_callback = callback
 
     def _setup_routes(self):
+        # 挂载静态文件
+        self.app.mount("/static", StaticFiles(directory="static"), name="static")
+
         @self.app.get("/", response_class=HTMLResponse)
         async def get_index():
             try:

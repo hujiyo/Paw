@@ -4,6 +4,7 @@ paw_env/
 models/
 *.gguf
 CLAUDE.md
+WARP.md
 nul
 !.logo/
 build/
