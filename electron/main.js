@@ -319,9 +319,9 @@ function createWindow() {
     const themeColors = getThemeColors();
 
     mainWindow = new BrowserWindow({
-        width: 1200,
+        width: 1400,
         height: 800,
-        minWidth: 800,
+        minWidth: 1000,
         minHeight: 600,
         title: 'Paw - AI Desktop Agent',
         icon: getIconPath(),

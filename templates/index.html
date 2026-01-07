@@ -8,8 +8,28 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.css">
     <style>
+        /* 本地字体引入 */
+        @font-face {
+            font-family: 'Noto Sans SC';
+            src: url('/static/fonts/NotoSansSC-Light.ttf') format('truetype');
+            font-weight: 300;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: 'Noto Sans SC';
+            src: url('/static/fonts/NotoSansSC-Regular.ttf') format('truetype');
+            font-weight: 400;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: 'Noto Sans SC';
+            src: url('/static/fonts/NotoSansSC-Bold.ttf') format('truetype');
+            font-weight: 700;
+            font-display: swap;
+        }
+
         :root {
-            --font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            --font-family: 'JetBrains Mono', 'Noto Sans SC', 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
             --bg-color: #000000;
             --bg-secondary: #0a0a0a;
             --text-primary: #EAEAEA;
@@ -154,7 +174,7 @@
         }
         .chain-header__title {
             font-size: 0.85rem;
-            font-weight: 600;
+            font-weight: 700;
             margin-bottom: 0.15rem;
         }
         .chain-header__hint {
@@ -193,7 +213,7 @@
         }
         .chain-item__role {
             font-size: 0.65rem;
-            font-weight: 600;
+            font-weight: 300;
         }
         .chain-item__role--user { color: var(--accent-user); }
         .chain-item__role--assistant { color: var(--accent-assistant); }
@@ -207,6 +227,7 @@
         .chain-item__meta {
             font-size: 0.6rem;
             color: var(--text-secondary);
+            font-weight: 300;
             margin-left: auto;
         }
         .chain-item__details {
@@ -261,7 +282,7 @@
         }
         .memory-header__title {
             font-size: 0.85rem;
-            font-weight: 600;
+            font-weight: 700;
         }
         .memory-header__actions {
             display: flex;
@@ -412,7 +433,7 @@
         }
         .settings__title {
             font-size: 1rem;
-            font-weight: 600;
+            font-weight: 700;
         }
         .settings__close {
             background: none;
@@ -436,7 +457,7 @@
         }
         .settings__section-title {
             font-size: 0.85rem;
-            font-weight: 600;
+            font-weight: 700;
             color: var(--accent-assistant);
             margin-bottom: 0.75rem;
             padding-bottom: 0.25rem;
@@ -580,7 +601,7 @@
         }
         .theme-option__name {
             font-size: 0.85rem;
-            font-weight: 600;
+            font-weight: 700;
             color: var(--text-primary);
             margin-bottom: 0.1rem;
         }
@@ -719,7 +740,7 @@
             color: #000;
             font-size: 0.75rem;
             cursor: pointer;
-            font-weight: 600;
+            font-weight: 700;
         }
         .model-select__add:hover {
             opacity: 0.85;
@@ -750,7 +771,7 @@
         .settings__btn--primary {
             background: var(--accent-assistant);
             color: #000;
-            font-weight: 600;
+            font-weight: 700;
         }
         .settings__btn--primary:hover {
             opacity: 0.9;
@@ -857,18 +878,42 @@
         }
 
         /* 消息 */
-        .msg { margin-bottom: 1.25rem; }
+        .msg { 
+            margin-bottom: 1.25rem; 
+            display: flex;
+            flex-direction: column;
+        }
+        /* 用户消息靠右 */
+        .msg--user {
+            align-items: flex-end;
+        }
+        /* 助手消息靠左 */
+        .msg--assistant {
+            align-items: flex-start;
+        }
+
         .msg__header {
-            display: inline-block;
             font-weight: bold;
             padding: 0.15rem 0.5rem;
             margin-bottom: 0.35rem;
             border-radius: 4px;
             font-size: 0.75rem;
+            width: fit-content;
         }
         .msg--user .msg__header { background: var(--accent-user); color: #000; }
         .msg--assistant .msg__header { background: var(--accent-assistant); color: #000; }
-        .msg__content { line-height: 1.65; padding-left: 0.4rem; }
+        
+        .msg__content { 
+            line-height: 1.65; 
+            padding-left: 0.4rem;
+            max-width: 100%;
+        }
+        
+        .msg--user .msg__content {
+            text-align: left;
+            padding-left: 0;
+            padding-right: 0.4rem;
+        }
         .msg__content--continued { 
             margin-top: 0.5rem; 
             padding-top: 0.5rem; 
