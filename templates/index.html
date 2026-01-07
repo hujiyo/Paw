@@ -1281,6 +1281,11 @@
                     <label class="settings__label">字符编码</label>
                     <input type="text" class="settings__input" id="cfg-encoding" placeholder="utf-8">
                 </div>
+                <div class="settings__field">
+                    <label class="settings__label">输出缓冲区大小 (KB)</label>
+                    <input type="number" class="settings__input" id="cfg-buffer-size" min="4" max="64" value="24">
+                    <div class="settings__hint">终端输出缓冲区上限，范围 4-64 KB，默认 24 KB</div>
+                </div>
             </div>
 
             <!-- Web 配置 -->
@@ -2955,6 +2960,7 @@
                 const terminal = config.terminal || {};
                 $('#cfg-shell').value = terminal.shell || 'powershell';
                 $('#cfg-encoding').value = terminal.encoding || 'utf-8';
+                $('#cfg-buffer-size').value = terminal.buffer_size || 24;
 
                 // Web 配置
                 const web = config.web || {};
@@ -3003,7 +3009,8 @@
                     },
                     terminal: {
                         shell: $('#cfg-shell').value,
-                        encoding: $('#cfg-encoding').value || 'utf-8'
+                        encoding: $('#cfg-encoding').value || 'utf-8',
+                        buffer_size: Math.max(4, Math.min(64, parseInt($('#cfg-buffer-size').value) || 24))
                     },
                     web: {
                         search_engine: $('#cfg-search-engine').value,

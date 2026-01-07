@@ -27,9 +27,12 @@ class ThreadedTerminal:
         self.is_running = False
         self.worker_thread = None
         
-        # 输出缓冲（保留最近N行作为屏幕快照）
+        # 输出缓冲（按字节长度限制，以整行为单位截断）
         self.output_buffer = []
-        self.max_screen_lines = 50  # 屏幕最大行数
+        # 从配置读取缓冲区大小（KB），默认24KB，范围4-64KB
+        buffer_size_kb = self.shell_config.get('buffer_size', 24)
+        buffer_size_kb = max(4, min(64, buffer_size_kb))  # 限制范围
+        self.max_buffer_size = buffer_size_kb * 1024  # 转换为字节
         self.lock = threading.Lock()
         
         # 控制信号
@@ -191,7 +194,7 @@ class ThreadedTerminal:
     def get_screen_snapshot(self) -> str:
         """获取终端屏幕快照（不清空缓冲区）
         
-        返回最近 max_screen_lines 行的内容，模拟真实终端屏幕。
+        返回缓冲区内容，模拟真实终端屏幕。
         会自动去除 ANSI 颜色代码，避免影响上下文显示。
         """
         with self.lock:
@@ -199,6 +202,21 @@ class ThreadedTerminal:
                 return ""
             raw_output = ''.join(self.output_buffer)
             return self._remove_ansi_codes(raw_output)
+    
+    def _trim_buffer_by_size(self):
+        """按字节长度限制缓冲区，以整行为单位截断
+        
+        当缓冲区总长度超过 max_buffer_size 时，从头部删除整行，
+        直到总长度不超过限制。
+        注意：此方法应在持有 self.lock 的情况下调用。
+        """
+        # 计算当前缓冲区总字节数
+        total_size = sum(len(line.encode('utf-8')) for line in self.output_buffer)
+        
+        # 如果超过限制，从头部删除整行
+        while total_size > self.max_buffer_size and len(self.output_buffer) > 1:
+            removed_line = self.output_buffer.pop(0)
+            total_size -= len(removed_line.encode('utf-8'))
     
     def _worker_loop(self):
         """工作线程：管理终端进程和命令执行"""
@@ -322,8 +340,8 @@ class ThreadedTerminal:
     def _read_output_loop(self):
         """输出读取线程
         
-        持续读取终端输出，保留最近 max_screen_lines 行作为屏幕快照
-        使用逐字符读取以确保不带换行符的提示符也能被及时读取
+        持续读取终端输出，按字节长度限制缓冲区，以整行为单位截断。
+        使用逐字符读取以确保不带换行符的提示符也能被及时读取。
         """
         try:
             current_line = []
@@ -358,9 +376,8 @@ class ThreadedTerminal:
                                     # 注意：这里为了避免频繁锁操作，可以优化，但为了实时性先这样
                                     current_line = []
                                 
-                                # 保持 buffer 大小
-                                if len(self.output_buffer) > self.max_screen_lines:
-                                    self.output_buffer = self.output_buffer[-self.max_screen_lines:]
+                                # 按字节长度限制缓冲区，以整行为单位截断
+                                self._trim_buffer_by_size()
                     else:
                         # 进程可能结束了
                         if self.process.poll() is not None:
