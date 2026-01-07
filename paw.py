@@ -1352,8 +1352,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
     
     async def run(self):
         """主运行循环"""
-        # 模型选择
-        self.model = await self._select_model()
+        # 模型选择（仅当未配置时）
+        if not self.model:
+            self.model = await self._select_model()
         if hasattr(self.ui, 'show_model_selected'):
             self.ui.show_model_selected(self.model)
 

@@ -1,15 +1,18 @@
+# Paw 项目依赖
+# 仅包含项目实际使用的依赖，无冗余
+
 # 核心依赖
-requests>=2.31.0
 pyyaml>=6.0
 llama-cpp-python>=0.3.0
 colorama>=0.4.6
-tiktoken>=0.5.0
 
-# Web 工具依赖
-ddgs>=8.0.0
-beautifulsoup4>=4.12.0
-html2text>=2024.2.26
-aiohttp>=3.13.2
+# Web UI
 fastapi>=0.122.0
 uvicorn>=0.38.0
 websockets>=15.0.1
+aiohttp>=3.13.2
+
+# Web 工具
+ddgs>=8.0.0
+beautifulsoup4>=4.12.0
+html2text>=2024.2.26

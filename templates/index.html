@@ -530,6 +530,65 @@
             border-radius: 3px;
             cursor: pointer;
         }
+
+        /* 主题选择器 */
+        .theme-selector {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+        .theme-option {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            background: var(--bg-color);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .theme-option:hover {
+            border-color: var(--accent-assistant);
+            transform: translateY(-2px);
+        }
+        .theme-option--active {
+            border-color: var(--accent-assistant);
+            box-shadow: 0 0 0 2px rgba(255,158,128,0.3);
+        }
+        .theme-option__preview {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            width: 24px;
+            flex-shrink: 0;
+        }
+        .theme-option__color {
+            width: 24px;
+            height: 8px;
+            border-radius: 2px;
+            border: 1px solid transparent;
+        }
+        .theme-option__color--titlebar {
+            border-radius: 2px 2px 0 0;
+        }
+        .theme-option__color--main {
+            border-radius: 0 0 2px 2px;
+        }
+        .theme-option__info {
+            flex: 1;
+        }
+        .theme-option__name {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.1rem;
+        }
+        .theme-option__desc {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
         .settings__checkbox-group {
             display: flex;
             align-items: center;
@@ -1054,8 +1113,9 @@
             <!-- 侧边栏底部 -->
             <div class="sidebar__footer">
                 <button class="settings-btn" id="settings-open-btn">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8 1a2 2 0 012 2v.1a5 5 0 012.5 1.1l.09-.06a2 2 0 012.83 2.83l-.06.09A5 5 0 0115.9 8h.1a2 2 0 010 4h-.1a5 5 0 01-1.1 2.5l.06.09a2 2 0 01-2.83 2.83l-.09-.06A5 5 0 018 15.9v.1a2 2 0 01-4 0v-.1a5 5 0 01-2.5-1.1l-.09.06a2 2 0 01-2.83-2.83l.06-.09A5 5 0 01.1 8H0a2 2 0 010-4h.1a5 5 0 011.1-2.5l-.06-.09a2 2 0 012.83-2.83l.09.06A5 5 0 014 .1V3a2 2 0 014 0zm-4 8a4 4 0 100-8 4 4 0 000 8z"/>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                     </svg>
                     设置
                 </button>
@@ -1224,46 +1284,55 @@
                 <div class="settings__section-title">颜色主题</div>
 
                 <div class="settings__field">
-                    <label class="settings__label">标题栏颜色</label>
-                    <select class="settings__select" id="cfg-color-titlebar">
-                        <option value="#000000">黑色（深色主题）</option>
-                        <option value="#FFFFFF">白色（浅色主题）</option>
-                    </select>
-                    <div class="settings__hint">Windows 标题栏仅支持黑白</div>
-                </div>
-
-                <div class="settings__field">
-                    <label class="settings__label">启动界面背景</label>
-                    <div class="color-picker" data-color-id="loading">
-                        <div class="color-picker__presets">
-                            <div class="color-picker__preset" style="background:#000000" data-color="#000000" title="黑色"></div>
-                            <div class="color-picker__preset" style="background:#FFFFFF" data-color="#FFFFFF" title="白色"></div>
-                            <div class="color-picker__preset" style="background:#FFD6E0" data-color="#FFD6E0" title="淡粉色"></div>
-                            <div class="color-picker__preset" style="background:#FFF4D6" data-color="#FFF4D6" title="淡黄色"></div>
+                    <label class="settings__label">主题样式</label>
+                    <div class="theme-selector" id="theme-selector">
+                        <div class="theme-option" data-theme="yaoye">
+                            <div class="theme-option__preview">
+                                <div class="theme-option__color theme-option__color--titlebar" style="background:#000000"></div>
+                                <div class="theme-option__color theme-option__color--loading" style="background:#000000"></div>
+                                <div class="theme-option__color theme-option__color--main" style="background:#000000"></div>
+                            </div>
+                            <div class="theme-option__info">
+                                <div class="theme-option__name">耀夜</div>
+                                <div class="theme-option__desc">深邃黑</div>
+                            </div>
                         </div>
-                        <input type="text" class="color-picker__input" id="cfg-color-loading" placeholder="#000000" maxlength="7">
-                        <div class="color-picker__preview">
-                            <input type="color" id="cfg-color-loading-picker" class="color-preview-btn" value="#000000">
+                        <div class="theme-option" data-theme="shuangbai">
+                            <div class="theme-option__preview">
+                                <div class="theme-option__color theme-option__color--titlebar" style="background:#FFFFFF;border-color:#ddd"></div>
+                                <div class="theme-option__color theme-option__color--loading" style="background:#FFFFFF;border-color:#ddd"></div>
+                                <div class="theme-option__color theme-option__color--main" style="background:#FFFFFF;border-color:#ddd"></div>
+                            </div>
+                            <div class="theme-option__info">
+                                <div class="theme-option__name">霜白</div>
+                                <div class="theme-option__desc">纯净白</div>
+                            </div>
+                        </div>
+                        <div class="theme-option" data-theme="xingnuan">
+                            <div class="theme-option__preview">
+                                <div class="theme-option__color theme-option__color--titlebar" style="background:#FFFFFF;border-color:#ddd"></div>
+                                <div class="theme-option__color theme-option__color--loading" style="background:#FFF4D6"></div>
+                                <div class="theme-option__color theme-option__color--main" style="background:#FFFAF0"></div>
+                            </div>
+                            <div class="theme-option__info">
+                                <div class="theme-option__name">杏暖</div>
+                                <div class="theme-option__desc">温暖淡黄</div>
+                            </div>
+                        </div>
+                        <div class="theme-option" data-theme="taoxi">
+                            <div class="theme-option__preview">
+                                <div class="theme-option__color theme-option__color--titlebar" style="background:#FFFFFF;border-color:#ddd"></div>
+                                <div class="theme-option__color theme-option__color--loading" style="background:#FFD6E0"></div>
+                                <div class="theme-option__color theme-option__color--main" style="background:#FFF0F5"></div>
+                            </div>
+                            <div class="theme-option__info">
+                                <div class="theme-option__name">桃汐</div>
+                                <div class="theme-option__desc">温柔淡粉</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="settings__hint">启动加载页面背景色</div>
-                </div>
-
-                <div class="settings__field">
-                    <label class="settings__label">主界面背景</label>
-                    <div class="color-picker" data-color-id="main">
-                        <div class="color-picker__presets">
-                            <div class="color-picker__preset" style="background:#000000" data-color="#000000" title="黑色"></div>
-                            <div class="color-picker__preset" style="background:#FFFFFF" data-color="#FFFFFF" title="白色"></div>
-                            <div class="color-picker__preset" style="background:#FFF0F5" data-color="#FFF0F5" title="淡粉色"></div>
-                            <div class="color-picker__preset" style="background:#FFFAF0" data-color="#FFFAF0" title="淡黄色"></div>
-                        </div>
-                        <input type="text" class="color-picker__input" id="cfg-color-main" placeholder="#000000" maxlength="7">
-                        <div class="color-picker__preview">
-                            <input type="color" id="cfg-color-main-picker" class="color-preview-btn" value="#000000">
-                        </div>
-                    </div>
-                    <div class="settings__hint">主界面背景色（需刷新生效）</div>
+                    <input type="hidden" id="cfg-theme" value="yaoye">
+                    <div class="settings__hint">选择预设主题样式，统一配色方案</div>
                 </div>
             </div>
         </div>
@@ -1285,6 +1354,35 @@
 ╚═╝       ╚═╝  ╚═╝   ╚══╝╚══╝ `;
 
         // ========== 颜色主题管理 ==========
+
+        // 主题预设配置
+        const THEME_PRESETS = {
+            yaoye: {
+                name: '耀夜',
+                titlebar: '#000000',
+                loading: '#000000',
+                main: '#000000'
+            },
+            shuangbai: {
+                name: '霜白',
+                titlebar: '#FFFFFF',
+                loading: '#FFFFFF',
+                main: '#FFFFFF'
+            },
+            xingnuan: {
+                name: '杏暖',
+                titlebar: '#FFFFFF',
+                loading: '#FFF4D6',
+                main: '#FFFAF0'
+            },
+            taoxi: {
+                name: '桃汐',
+                titlebar: '#FFFFFF',
+                loading: '#FFD6E0',
+                main: '#FFF0F5'
+            }
+        };
+
         const ThemeColors = {
             // 深色主题颜色
             dark: {
@@ -2586,65 +2684,39 @@
                 // 模型选择下拉
                 this.setupModelSelect();
 
-                // 颜色选择器
-                this.setupColorPickers();
+                // 主题选择器
+                this.setupThemeSelector();
             },
 
-            setupColorPickers() {
-                // 颜色预设配置（标题栏已改为select）
-                const colorConfigs = ['loading', 'main'];
+            setupThemeSelector() {
+                const selector = $('#theme-selector');
+                const themeInput = $('#cfg-theme');
+                const options = selector.querySelectorAll('.theme-option');
 
-                colorConfigs.forEach(configId => {
-                    const picker = $(`.color-picker[data-color-id="${configId}"]`);
-                    if (!picker) return;
-
-                    const textInput = $(`#cfg-color-${configId}`);
-                    const colorInput = $(`#cfg-color-${configId}-picker`);
-                    const presets = picker.querySelectorAll('.color-picker__preset');
-
-                    // 预设颜色点击
-                    presets.forEach(preset => {
-                        preset.addEventListener('click', () => {
-                            const color = preset.dataset.color;
-                            this.setColorValue(configId, color);
-                        });
-                    });
-
-                    // 文本输入框变化
-                    textInput.addEventListener('input', () => {
-                        const color = textInput.value.trim();
-                        if (/^#[0-9A-Fa-f]{6}$/.test(color)) {
-                            this.setColorValue(configId, color);
-                        }
-                    });
-
-                    // 颜色选择器变化
-                    colorInput.addEventListener('input', () => {
-                        this.setColorValue(configId, colorInput.value);
+                // 主题选项点击
+                options.forEach(option => {
+                    option.addEventListener('click', () => {
+                        const theme = option.dataset.theme;
+                        this.selectTheme(theme);
                     });
                 });
+
+                // 初始化选中状态
+                this.selectTheme(themeInput.value || 'yaoye');
             },
 
-            setColorValue(configId, color) {
-                if (configId === 'titlebar') {
-                    // 标题栏是select，直接设置值
-                    $('#cfg-color-titlebar').value = color;
-                    return;
-                }
-
-                const textInput = $(`#cfg-color-${configId}`);
-                const colorInput = $(`#cfg-color-${configId}-picker`);
-                const picker = $(`.color-picker[data-color-id="${configId}"]`);
-                const presets = picker.querySelectorAll('.color-picker__preset');
+            selectTheme(theme) {
+                const selector = $('#theme-selector');
+                const themeInput = $('#cfg-theme');
+                const options = selector.querySelectorAll('.theme-option');
 
                 // 更新输入框
-                textInput.value = color;
-                colorInput.value = color;
+                themeInput.value = theme;
 
-                // 更新预设选中状态
-                presets.forEach(preset => {
-                    preset.classList.toggle('color-picker__preset--active',
-                        preset.dataset.color.toUpperCase() === color.toUpperCase());
+                // 更新选中状态
+                options.forEach(option => {
+                    option.classList.toggle('theme-option--active',
+                        option.dataset.theme === theme);
                 });
             },
 
@@ -2853,11 +2925,23 @@
                 const embeddings = config.embeddings || {};
                 $('#cfg-embedding-path').value = embeddings.path || '';
 
-                // 颜色主题配置
+                // 颜色主题配置 - 根据颜色值匹配主题预设
                 const theme = config.theme || {};
-                $('#cfg-color-titlebar').value = theme.titlebar || '#000000';
-                this.setColorValue('loading', theme.loading || '#000000');
-                this.setColorValue('main', theme.main || '#000000');
+                const themeTitlebar = theme.titlebar || '#000000';
+                const themeLoading = theme.loading || '#000000';
+                const themeMain = theme.main || '#000000';
+
+                // 根据颜色值匹配主题预设
+                let matchedTheme = 'yaoye'; // 默认
+                for (const [id, preset] of Object.entries(THEME_PRESETS)) {
+                    if (preset.titlebar === themeTitlebar &&
+                        preset.loading === themeLoading &&
+                        preset.main === themeMain) {
+                        matchedTheme = id;
+                        break;
+                    }
+                }
+                this.selectTheme(matchedTheme);
             },
 
             async save() {
@@ -2888,11 +2972,15 @@
                     embeddings: {
                         path: $('#cfg-embedding-path').value
                     },
-                    theme: {
-                        titlebar: $('#cfg-color-titlebar').value || '#000000',
-                        loading: $('#cfg-color-loading').value || '#000000',
-                        main: $('#cfg-color-main').value || '#000000'
-                    }
+                    theme: (() => {
+                        const themeId = $('#cfg-theme').value || 'yaoye';
+                        const preset = THEME_PRESETS[themeId] || THEME_PRESETS.yaoye;
+                        return {
+                            titlebar: preset.titlebar,
+                            loading: preset.loading,
+                            main: preset.main
+                        };
+                    })()
                 };
 
                 try {

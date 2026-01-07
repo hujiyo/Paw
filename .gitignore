@@ -8,3 +8,6 @@ nul
 !.logo/
 build/
 dist/
+
+# Auto Claude data directory
+.auto-claude/
