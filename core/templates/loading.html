@@ -181,7 +181,7 @@
 <body>
     <div class="splash-container" id="splash">
         <div class="logo">
-            <img src="../.logo/图标2.png" alt="Paw" onerror="this.src='resources/icon.png'">
+            <img src="../logo/图标2.png" alt="Paw" onerror="this.style.display='none'">
         </div>
         <div class="app-name">Paw</div>
         <div class="tagline">Intelligent Terminal AI Agent</div>
@@ -196,6 +196,7 @@
     <div class="error" id="error">
         <div class="error-text" id="errorText"></div>
         <button class="btn" id="retryBtn">重试</button>
+        <button class="btn" id="logBtn" style="margin-left: 10px;">查看日志</button>
     </div>
 
     <script>
@@ -256,6 +257,15 @@
                 window.electronAPI.restartBackend();
             }
         });
+
+        const logBtn = document.getElementById('logBtn');
+        if (logBtn) {
+            logBtn.addEventListener('click', () => {
+                if (window.electronAPI && window.electronAPI.openLogFolder) {
+                    window.electronAPI.openLogFolder();
+                }
+            });
+        }
 
         // 监听启动状态
         if (window.electronAPI) {

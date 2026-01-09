@@ -90,10 +90,10 @@ class Paw:
         register_all_tools(self.tools)
         _mark("注册工具")
         
-        # API配置（优先级：参数 > config.yaml > 环境变量 > 默认值）
-        self.api_url = api_url or config.get('api', {}).get('url') or os.getenv("API_URL", "http://localhost:1234/v1/chat/completions")
-        self.model = model or config.get('api', {}).get('model') or os.getenv("MODEL", None)
-        self.api_key = api_key or config.get('api', {}).get('key') or os.getenv("OPENAI_API_KEY", None)
+        # API配置（优先级：参数 > config.yaml > 默认值）
+        self.api_url = api_url or config.get('api', {}).get('url') or "http://localhost:1234/v1/chat/completions"
+        self.model = model or config.get('api', {}).get('model') or "default"
+        self.api_key = api_key or config.get('api', {}).get('key') or ""
         
         # LLM 客户端（统一的 API 调用）
         self.llm = LLMClient(LLMConfig(
@@ -1634,19 +1634,16 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 示例:
-  paw                      # 使用 PAW_HOME 环境变量指定的默认工作目录
+  paw                      # 使用用户主目录作为默认工作目录
   paw my_project/          # 使用 my_project 作为工作目录
   paw /path/to/workspace   # 使用绝对路径作为工作目录
-
-环境变量:
-  PAW_HOME                 # 默认工作目录路径
 '''
     )
     parser.add_argument(
         'workspace',
         nargs='?',
         default=None,
-        help='工作目录路径 (默认: PAW_HOME 环境变量)'
+        help='工作目录路径 (默认: 用户主目录 ~)'
     )
     parser.add_argument(
         '--host', '-H',
@@ -1661,14 +1658,8 @@ async def main():
     )
     args = parser.parse_args()
 
-    # 确定工作目录: 命令行参数 > PAW_HOME 环境变量
-    workspace_dir = args.workspace or os.getenv('PAW_HOME')
-    if not workspace_dir:
-        print("\033[31m错误: 未指定工作目录\033[0m")
-        print("\n请通过以下方式之一指定工作目录:")
-        print("  1. 命令行参数: paw <workspace_path>")
-        print("  2. 设置环境变量: set PAW_HOME=<workspace_path>")
-        return
+    # 确定工作目录: 命令行参数 > 默认用户主目录
+    workspace_dir = args.workspace or str(Path.home())
 
     # 检查Web UI依赖
     try:

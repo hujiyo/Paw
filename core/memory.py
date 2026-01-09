@@ -752,7 +752,7 @@ class MemoryManager:
 
     def _resolve_embedding_model(self, embedding_path: Optional[Path]) -> Path:
         """
-        优先使用显式指定的模型路径，否则自动查找项目根目录下 embedding/*.gguf
+        优先使用显式指定的模型路径，否则自动查找 paw.py 所在目录下 embedding/*.gguf
         """
         if embedding_path:
             p = Path(embedding_path).expanduser()
@@ -763,7 +763,9 @@ class MemoryManager:
                 f"请重新安装 Paw，或将 *.gguf 模型文件放入 embedding/ 目录"
             )
 
-        default_dir = self.project_path / "embedding"
+        # embedding 目录在 paw.py 所在目录，而不是 workspace
+        paw_root = Path(__file__).parent
+        default_dir = paw_root / "embedding"
         if default_dir.exists():
             candidates = sorted(default_dir.glob("*.gguf"))
             if candidates:

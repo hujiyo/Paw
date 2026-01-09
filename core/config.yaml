@@ -23,6 +23,6 @@ web:
 system:
   chunk_size: 96000
 theme:
-  titlebar: '#000000'
-  loading: '#000000'
-  main: '#000000'
+  titlebar: '#FFFFFF'
+  loading: '#FFD6E0'
+  main: '#FFF0F5'

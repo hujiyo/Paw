@@ -64,10 +64,9 @@ recall:
 python paw.py <workspace_dir>
 ```
 
-或设置环境变量后直接运行：
+或直接运行（默认使用用户主目录）：
 
 ```bash
-set PAW_HOME=<workspace_dir>
 python paw.py
 ```
 

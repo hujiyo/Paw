@@ -1,0 +1,70 @@
+{
+  "name": "paw-desktop",
+  "version": "1.0.0",
+  "description": "Paw - 智能终端 AI Agent 桌面应用",
+  "main": "main.js",
+  "author": "Paw Team",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-serve": "^1.1.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.paw.desktop",
+    "productName": "Paw",
+    "directories": {
+      "output": "../dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "resources/**/*",
+      "!resources/generate-icon.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../core",
+        "to": "core"
+      },
+      {
+        "from": "../paw_env",
+        "to": "paw_env"
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "resources/icon.ico"
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "icon": "resources/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [{ "target": "AppImage", "arch": ["x64"] }],
+      "icon": "resources/icon.png",
+      "category": "Development"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Paw"
+    },
+    "asar": true
+  }
+}
