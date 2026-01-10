@@ -1,113 +1,189 @@
-<img src=".logo/图标2.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src=".logo/图标3.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src=".logo/图标.png" width="128" height="128" alt="Paw">
+<img src="core/logo/图标2.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="core/logo/图标3.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="core/logo/图标.png" width="128" height="128" alt="Paw">
 
-# Paw: 一个桌面 Agent
+# Paw - 桌面 AI Agent
+
+Paw 是一个基于 Electron 的桌面 AI Agent 应用，支持文件操作、终端控制、Web 搜索等丰富的工具链，并具备会话管理、记忆系统和 Skill 扩展能力。
 
 ## 特性
 
-- **工具链**: 文件操作、目录搜索、终端控制、Web 搜索、网页阅读
-- **记忆系统**:
-  - 基于 RAG 的本地向量检索，支持规则层和对话历史
-  - **意图判断机制**: 在检索前智能判断用户问题是否需要回忆历史，避免对"今天天气怎么样"等即时查询误触发记忆检索
-- **会话管理**: 保存/恢复/删除对话历史，支持多会话切换
-- **Skill 系统**: 用户自定义脚本扩展能力
-- **Web UI**: 现代化的浏览器界面
-- **上下文管理**: 智能管理大窗口上下文 (64K+ tokens)
+- **Electron 桌面应用**：原生桌面体验，自动管理 Python 后端，内置虚拟环境
+- **丰富的工具链**：
+  - 文件操作：读取、创建、编辑、删除文件
+  - 目录搜索：按名称搜索、grep 内容搜索
+  - 异步终端：run_command 执行命令，支持中断
+  - Web 搜索：DuckDuckGo 搜索 + Jina Reader 网页阅读
+- **会话管理**：自动保存对话历史，支持多会话切换
+- **Skill 系统**：用户可在 `~/.paw/skills/` 自定义扩展能力
+- **上下文管理**：智能管理 64K+ tokens 大窗口上下文
+- **记忆系统**（可选）：基于 RAG 的对话记忆检索
 
 ## 快速开始
 
-### 环境要求
-
-- Python 3.8+
-- Windows / Linux / macOS
-
-### 安装
+### 方式一：Electron 桌面应用（推荐）
 
 ```bash
-git clone https://github.com/hujiyo/Paw.git
-cd Paw
-pip install -r requirements.txt
-```
+# 1. 创建 Python 虚拟环境
+python -m venv paw_env
 
-### 配置
+# 激活虚拟环境
+# Windows:
+paw_env\Scripts\activate
+# macOS/Linux:
+# source paw_env/bin/activate
 
-编辑 `config.yaml` 配置 API 和其他设置：
+# 2. 安装 Python 依赖
+pip install -r core/requirements.txt
 
-```yaml
-# API 配置
-api:
-  key: "your-api-key"
-  url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-  model: null  # 留空则启动时选择
-
-# 终端配置
-terminal:
-  shell: 'powershell'  # 或 'cmd' / 'bash'
-  encoding: 'utf-8'
-
-# Web 工具配置
-web:
-  search_engine: 'duckduckgo'
-  max_results: 5
-  use_jina_reader: true  # 推荐，支持 JS 渲染
-
-# 记忆意图判断配置
-recall:
-  enabled: true     # 是否启用意图判断
-  threshold: 0.38   # 相似度阈值（越高越严格，只有明确的回忆型问题才触发检索）
-```
-
-### 运行
-
-#### 方式一：Python 直接运行
-
-```bash
-python paw.py <workspace_dir>
-```
-
-或直接运行（默认使用用户主目录）：
-
-```bash
-python paw.py
-```
-
-默认启动 Web UI: http://127.0.0.1:8080
-
-#### 方式二：Electron 桌面应用
-
-```bash
+# 3. 安装 Node 依赖并启动
 cd electron
 npm install
 npm start
 ```
 
-构建安装包（约 150-200MB）：
+### 方式二：Python 直接运行
 
 ```bash
-npm run build:win    # Windows
-npm run build:mac    # macOS
-npm run build:linux  # Linux
+# 安装依赖
+pip install -r core/requirements.txt
+
+# 运行（默认使用用户主目录作为工作目录）
+python core/paw.py
+
+# 或指定工作目录
+python core/paw.py /path/to/workspace
 ```
 
-> 打包后的应用内置 Python 虚拟环境，用户无需安装 Python 即可使用。
+启动后访问 http://localhost:8080
 
-详细说明请参考 [doc/PACKAGE.md](doc/PACKAGE.md)
+## 打包发布
+
+打包后的应用内置 Python 虚拟环境，用户无需安装 Python 即可使用。
+
+```bash
+cd electron
+
+# Windows
+npm run build:win
+
+# macOS
+npm run build:mac
+
+# Linux
+npm run build:linux
+```
+
+安装包输出到 `dist/` 目录，约 150-200MB。
+
+## 配置
+
+编辑 `core/config.yaml` 配置 API 和其他设置：
+
+```yaml
+# 身份配置（自定义 Paw 的名字和用户称谓）
+identity:
+  name: Paw          # Paw 的名字
+  username: hujiyo   # 用户名
+  honey: 老公        # 用户昵称
+
+# API 配置
+api:
+  key: "your-api-key"
+  url: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+  model: glm-4.7     # 留空则启动时选择
+
+# 终端配置
+terminal:
+  shell: powershell  # 或 cmd / bash
+  encoding: utf-8
+
+# Web 工具配置
+web:
+  search_engine: duckduckgo
+  max_results: 5
+  use_jina_reader: true
+
+# 记忆系统配置（可选，默认关闭）
+memory:
+  enabled: false
+  embedding_url: http://localhost:1234/v1/embeddings
+  embedding_model: text-embedding-qwen3-embedding-0.6b
+
+# 主题配置
+theme:
+  id: taoxi
+  titlebar: '#FFFFFF'
+  loading: '#FFD6E0'
+  main: '#FFF0F5'
+```
 
 ## 内置指令
 
 | 指令 | 说明 |
 |------|------|
-| `/clear` | 清空对话历史 |
-| `/model` | 重新选择模型 |
 | `/new` | 开始新对话 |
 | `/sessions` | 显示会话列表 |
 | `/load <id>` | 恢复指定会话 |
 | `/delete-session <id>` | 删除会话 |
+| `/model` | 重新选择模型 |
+| `/clear` | 清空对话历史 |
 | `/edit` | 进入对话编辑模式 |
 | `/memory` | 查看记忆状态 |
-| `/memory edit` | 管理记忆记录 |
-| `/chunks` | 查看上下文详情 |
-| `/messages` | 查看消息历史 |
 | `/ctx` | 手动触发上下文优化 |
+| `/stop` | 停止当前生成 |
+
+## 项目结构
+
+```
+Paw/
+├── core/                   # Python 后端核心代码
+│   ├── paw.py              # 主程序入口
+│   ├── config.yaml         # 配置文件
+│   ├── requirements.txt    # Python 依赖
+│   │
+│   ├── tools.py            # 基础工具（文件/终端/Web）
+│   ├── tool_definitions.py # 工具 Schema 定义
+│   ├── tool_registry.py    # 工具注册中心
+│   │
+│   ├── chunk_system.py     # 上下文管理
+│   ├── context_branch.py   # 上下文分支编辑
+│   ├── branch_executor.py  # 分支执行器
+│   │
+│   ├── memory.py           # 记忆系统
+│   ├── session_manager.py  # 会话管理
+│   │
+│   ├── prompts.py          # 提示词配置
+│   ├── call.py             # LLM API 客户端
+│   ├── ui_web.py           # Web UI 服务
+│   ├── terminal.py         # 异步终端管理
+│   │
+│   ├── templates/          # 前端 HTML 模板
+│   ├── static/             # 前端静态资源
+│   │   ├── css/
+│   │   └── js/
+│   └── logo/               # 应用图标
+│
+├── electron/               # Electron 桌面封装
+│   ├── main.js             # Electron 主进程
+│   ├── preload.js          # 预加载脚本
+│   ├── package.json        # Node.js 配置
+│   └── resources/          # 应用图标资源
+│
+├── paw_env/                # Python 虚拟环境
+├── skills/                 # 用户自定义 Skill
+└── dist/                   # 打包输出目录
+```
+
+## 依赖
+
+**Python 依赖** (core/requirements.txt):
+- pyyaml, colorama, requests
+- fastapi, uvicorn, websockets, aiohttp
+- ddgs (DuckDuckGo 搜索)
+- beautifulsoup4, html2text
+
+**Node.js 依赖** (electron/package.json):
+- electron, electron-builder
+- js-yaml
 
 ## Paw记忆意图判断机制
 
@@ -132,47 +208,6 @@ recall:
   enabled: true
   threshold: 0.38   # 可调整：0.30(宽松) ~ 0.45(严格)
 ```
-
-## 项目结构
-
-```
-Paw/
-├── paw.py              # 主程序入口
-├── config.yaml         # 配置文件
-├── requirements.txt    # 依赖列表
-│
-├── tools.py            # 基础工具（文件/终端）
-├── tool_definitions.py # 工具 Schema 定义
-├── tool_registry.py    # 工具注册中心
-│
-├── chunk_system.py     # 上下文管理
-├── context_branch.py   # 上下文分支
-├── branch_executor.py  # 分支执行器
-│
-├── memory.py           # 记忆系统
-├── session_manager.py  # 会话管理
-│
-├── prompts.py          # 提示词配置
-├── call.py             # LLM 客户端
-├── ui_web.py           # Web UI
-├── terminal.py         # 终端管理
-│
-├── templates/          # 前端模板
-├── embedding/          # 本地 Embedding 模型
-├── electron/           # Electron 桌面封装
-│   ├── main.js         # Electron 主进程
-│   ├── preload.js      # 预加载脚本
-│   └── package.json    # Node.js 配置
-└── scripts/            # 启动脚本
-```
-
-## 依赖
-
-- **核心**: requests, pyyaml, colorama, tiktoken
-- **LLM**: llama-cpp-python (本地 Embeddings)
-- **Web**: fastapi, uvicorn, websockets
-- **搜索**: ddgs (DuckDuckGo)
-- **解析**: beautifulsoup4, html2text
 
 ## License
 
