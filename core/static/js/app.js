@@ -23,13 +23,6 @@ const THEME_PRESETS = {
         main: '#FFFFFF',
         accent: '#ff6b35'
     },
-    xingnuan: {
-        name: '杏暖',
-        titlebar: '#FFFFFF',
-        loading: '#FFF4D6',
-        main: '#FFFAF0',
-        accent: '#ff6b35'
-    },
     taoxi: {
         name: '桃汐',
         titlebar: '#FFFFFF',
@@ -37,8 +30,8 @@ const THEME_PRESETS = {
         main: '#FFF0F5',
         accent: '#ff6b35'
     },
-    hacker: {
-        name: '骇客',
+    cuimo: {
+        name: '翠墨',
         titlebar: '#000000',
         loading: '#000000',
         main: '#000000',

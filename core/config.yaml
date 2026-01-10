@@ -26,8 +26,8 @@ web:
 system:
   chunk_size: 96000
 theme:
-  id: hacker
-  titlebar: '#000000'
-  loading: '#000000'
-  main: '#000000'
-  accent: '#10b981'
+  id: taoxi
+  titlebar: '#FFFFFF'
+  loading: '#FFD6E0'
+  main: '#FFF0F5'
+  accent: '#ff6b35'

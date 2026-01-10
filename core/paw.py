@@ -982,6 +982,46 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         sessions = self.session_manager.list_sessions(limit=50)
         self.ui.send_session_list(sessions, self.current_session_id)
     
+    async def _ensure_active_session(self):
+        """确保启动时有一个活动会话
+        
+        逻辑：
+        1. 如果已有会话，加载最近的会话
+        2. 如果没有会话，创建一个新的空会话
+        """
+        sessions = self.session_manager.list_sessions(limit=50)
+        
+        if sessions:
+            # 有历史会话，加载最近的一个
+            latest_session = sessions[0]
+            if self._load_session(latest_session['session_id'], sync_ui=True):
+                self.system_prompt = self._create_system_prompt()
+        else:
+            # 没有历史会话，创建新会话
+            from chunk_system import ChunkManager
+            self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+            
+            new_session = self.session_manager.save_session(
+                chunk_manager=self.chunk_manager,
+                workspace_dir=str(self.workspace_dir),
+                model=self.model,
+                shell_open=False,
+                shell_pid=None,
+                session_id=None
+            )
+            self.current_session_id = new_session.session_id
+            
+            # 通知前端
+            if hasattr(self.ui, 'send_message'):
+                sessions = self.session_manager.list_sessions(limit=50)
+                await self.ui.send_message("session_list", {
+                    "sessions": sessions,
+                    "current_id": self.current_session_id
+                })
+                await self.ui.send_message('new_chat', {
+                    'session_id': new_session.session_id
+                })
+    
     async def process_input(self, user_input: str) -> str:
         """处理用户输入 - 完全符合OpenAI Function Calling标准"""
         # 重置停止事件
@@ -1496,8 +1536,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 标记对话区域起始位置（用于编辑后重渲染）
         self.ui.mark_conversation_start()
 
-        # 同步会话列表到 Web UI
-        self._sync_session_list()
+        # 同步会话列表到 Web UI，并确保有活动会话
+        await self._ensure_active_session()
 
         # 主循环
         while True:
