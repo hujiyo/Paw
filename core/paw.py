@@ -164,6 +164,47 @@ class Paw:
                 return {}
         return {}
     
+    async def _init_memory_system_async(self):
+        """异步初始化记忆系统（不阻塞主流程）"""
+        try:
+            config = self._load_config()
+            memory_cfg = config.get('memory') or {}
+            
+            # 检查是否启用记忆系统
+            if not memory_cfg.get('enabled', False):
+                self.memory_manager = None
+                if hasattr(self.ui, 'send_message'):
+                    await self.ui.send_message("memory_ready", {"status": "disabled"})
+                return
+            
+            embedding_url = memory_cfg.get('embedding_url', 'http://localhost:11434/api/embeddings')
+            embedding_key = memory_cfg.get('embedding_key', '')
+            embedding_model = memory_cfg.get('embedding_model', 'nomic-embed-text')
+            
+            # 在后台线程中执行初始化
+            def _load_memory():
+                return MemoryManager(
+                    project_path=self.workspace_dir,
+                    embedding_url=embedding_url,
+                    embedding_key=embedding_key,
+                    embedding_model=embedding_model,
+                )
+            
+            self.memory_manager = await asyncio.to_thread(_load_memory)
+            
+            # 记忆系统初始化完成后，重建 system_prompt 以注入记忆
+            self.system_prompt = self._create_system_prompt()
+            
+            # 通知前端记忆系统已就绪
+            if hasattr(self.ui, 'send_message'):
+                await self.ui.send_message("memory_ready", {"status": "ok"})
+                
+        except Exception as e:
+            # 记忆系统初始化失败，静默降级为无记忆模式
+            self.memory_manager = None
+            if hasattr(self.ui, 'send_message'):
+                await self.ui.send_message("memory_ready", {"status": "failed", "error": str(e)})
+    
     def _create_system_prompt(self) -> str:
         """创建系统提示词 - 第一人称视角"""
         # 获取终端状态
@@ -796,12 +837,56 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         print(f"共 {len(sessions)} 个会话")
         print("使用 /load <id> 恢复会话，/delete-session <id> 删除会话")
     
+    def _build_recent_context(self, max_chars: int = 16000) -> str:
+        """构建近期对话上下文（用于记忆意图判断）
+        
+        只包含用户输入和 AI 回复，排除系统提示词、工具调用等。
+        从最新的对话开始向前收集，直到达到字符限制。
+        
+        Args:
+            max_chars: 最大字符数
+            
+        Returns:
+            近期对话的纯文本
+        """
+        from chunk_system import ChunkType
+        
+        parts = []
+        total_chars = 0
+        
+        # 从最新的 chunk 开始向前遍历
+        for chunk in reversed(self.chunk_manager.chunks):
+            # 只包含用户输入和 AI 回复
+            if chunk.chunk_type == ChunkType.USER:
+                text = f"用户: {chunk.content}"
+            elif chunk.chunk_type == ChunkType.ASSISTANT:
+                if chunk.content:  # 排除空内容（如纯工具调用）
+                    text = f"AI: {chunk.content}"
+                else:
+                    continue
+            else:
+                continue
+            
+            # 检查是否超出限制
+            if total_chars + len(text) > max_chars:
+                break
+            
+            parts.append(text)
+            total_chars += len(text)
+        
+        # 反转回时间顺序（旧 -> 新）
+        parts.reverse()
+        return "\n".join(parts)
+
     def _save_conversation(self, user_message: str, assistant_message: str):
         """保存一轮对话到记忆系统"""
         if not user_message or not assistant_message:
             return
         # 过滤掉系统消息
         if user_message.startswith("[系统"):
+            return
+        # 记忆系统未初始化则跳过
+        if self.memory_manager is None:
             return
         try:
             # 新记忆后端可能需要异步保存（llama.cpp embeddings + SQLite）
@@ -918,10 +1003,17 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         #        临时记忆只被唤醒一次 -> 几轮后自然遗忘
         if self.memory_manager and (not user_input.startswith("[系统")):
             try:
+                # 构建近期上下文用于意图判断（最多 16K 字符）
+                recent_context = self._build_recent_context(max_chars=16000)
+                
                 if hasattr(self.memory_manager, "recall_async"):
-                    new_recalled = await self.memory_manager.recall_async(user_input, n_results=3, min_score=0.4)
+                    new_recalled = await self.memory_manager.recall_async(
+                        user_input, n_results=3, min_score=0.4, context=recent_context
+                    )
                 else:
-                    new_recalled = self.memory_manager.recall(user_input, n_results=3, min_score=0.4)
+                    new_recalled = self.memory_manager.recall(
+                        user_input, n_results=3, min_score=0.4, context=recent_context
+                    )
                 if new_recalled:
                     self.ui.print_dim(f"[Memory] 新唤醒 {new_recalled} 条记忆")
             except Exception as e:
@@ -976,6 +1068,18 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             content = assistant_message.get("content")
             tool_calls = assistant_message.get("tool_calls")
             
+            # 检测 stay_silent 调用：如果存在，丢弃所有其他内容和工具调用
+            stay_silent_call = None
+            if tool_calls:
+                for tc in tool_calls:
+                    if tc.get("function", {}).get("name") == "stay_silent":
+                        stay_silent_call = tc
+                        break
+            
+            if stay_silent_call:
+                # stay_silent 模式：丢弃 content 和其他工具调用，只保留这个
+                content = None
+                tool_calls = [stay_silent_call]
             
             # 添加assistant消息到chunk_manager（不包含recall，保持历史干净）
             self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
@@ -1057,6 +1161,12 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 避免插在 Assistant 和 Tool Result 之间破坏 API 规范
                     if tool_config and tool_config.category == "shell":
                         self._refresh_shell_chunk(move_to_end=True)
+                    
+                    # stay_silent 调用后立即退出，不继续循环
+                    if function_name == "stay_silent":
+                        # 自动保存会话但不保存到记忆（沉默回复无需记忆）
+                        self._save_session()
+                        return None
 
             # 检查是否完成
             if not tool_calls:
@@ -1378,30 +1488,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         if hasattr(self.ui, 'show_status_bar') and callable(self.ui.show_status_bar):
             self.ui.show_status_bar(self.model)
 
-        # 记忆系统延迟初始化：确保先进入首屏
+        # 记忆系统异步初始化：不阻塞首屏加载
+        # 在后台线程中初始化，用户可以立即开始对话
         if self.memory_manager is None:
-            try:
-                # WebUI 模式下静默初始化，不打印信息
-                if not hasattr(self.ui, 'is_webui'):
-                    self.ui.print_dim("[Memory] 正在初始化记忆系统（首次可能较慢）...")
-                config = self._load_config()
-                emb_cfg = (config.get('embeddings') or {})
-                embedding_path = emb_cfg.get('path')  # 可选：显式指定 .gguf
-                self.memory_manager = MemoryManager(
-                    project_path=self.workspace_dir,
-                    embedding_path=embedding_path,
-                )
-                if not hasattr(self.ui, 'is_webui'):
-                    self.ui.print_dim("[Memory] 本地 llama.cpp embedding 模型已加载")
-                # 记忆系统初始化完成后，重建 system_prompt 以注入记忆
-                self.system_prompt = self._create_system_prompt()
-            except Exception as e:
-                # WebUI 模式下用弹窗报错
-                if hasattr(self.ui, 'is_webui'):
-                    asyncio.create_task(self.ui.send_message("show_error", {"text": f"记忆系统初始化失败: {e}"}))
-                else:
-                    self.ui.print_error(f"[Memory] 初始化失败，将以无记忆模式运行: {e}")
-                self.memory_manager = None
+            asyncio.create_task(self._init_memory_system_async())
         
         # 标记对话区域起始位置（用于编辑后重渲染）
         self.ui.mark_conversation_start()

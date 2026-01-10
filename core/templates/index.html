@@ -7,7 +7,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.css">
-    <link rel="stylesheet" href="/static/css/main.css?v=1.0.1">
+    <link rel="stylesheet" href="/static/css/main.css?v=1.0.2">
 </head>
 <body>
     <div id="app-shell">
@@ -219,13 +219,63 @@
                 </div>
             </div>
 
-            <!-- Embedding 配置 -->
+            <!-- 记忆系统配置 -->
             <div class="settings__section">
                 <div class="settings__section-title">记忆系统</div>
                 <div class="settings__field">
-                    <label class="settings__label">Embedding 模型路径</label>
-                    <input type="text" class="settings__input" id="cfg-embedding-path" placeholder="留空自动选择">
-                    <div class="settings__hint">.gguf 格式的本地 embedding 模型路径</div>
+                    <label class="settings__label">启用记忆系统</label>
+                    <div class="settings__checkbox-group">
+                        <input type="checkbox" class="settings__checkbox" id="cfg-memory-enabled">
+                        <span class="settings__hint">启用后可记住历史对话，需要配置 Embedding 服务</span>
+                    </div>
+                </div>
+                <div id="memory-config-fields" class="settings__collapsible" style="display:none;">
+                    <div class="settings__field">
+                        <label class="settings__label">Embedding URL</label>
+                        <select class="settings__select" id="cfg-embedding-url-preset">
+                            <option value="ollama">Ollama (http://localhost:11434/api/embeddings)</option>
+                            <option value="lm_studio">LM Studio (http://localhost:1234/v1/embeddings)</option>
+                            <option value="custom">自定义 URL...</option>
+                        </select>
+                        <input type="text" class="settings__input" id="cfg-embedding-url" placeholder="http://localhost:11434/api/embeddings" style="margin-top:8px;">
+                        <div class="settings__hint">选择预设或输入自定义 Embedding API 地址</div>
+                    </div>
+                    <div class="settings__field">
+                        <label class="settings__label">API Key</label>
+                        <input type="password" class="settings__input" id="cfg-embedding-key" placeholder="本地服务可留空">
+                        <div class="settings__hint">本地 Ollama/LM Studio 无需填写，远程 API 需要填写</div>
+                    </div>
+                    <div class="settings__field">
+                        <label class="settings__label">默认模型</label>
+                        <div class="model-select" id="embed-model-select">
+                            <div class="model-select__trigger" id="embed-model-select-trigger">
+                                <span class="model-select__value" id="embed-model-select-value">留空或选择模型</span>
+                                <span class="model-select__arrow">▼</span>
+                            </div>
+                            <div class="model-select__dropdown" id="embed-model-select-dropdown">
+                                <div class="model-select__option" data-value="nomic-embed-text">nomic-embed-text (Ollama默认)</div>
+                                <div class="model-select__option" data-value="mxbai-embed-large">mxbai-embed-large (推荐)</div>
+                                <div class="model-select__option" data-value="text-embedding-3-small">text-embedding-3-small (OpenAI)</div>
+                                <div class="model-select__loading" id="embed-model-select-loading" style="display:none">加载中...</div>
+                                <div class="model-select__error" id="embed-model-select-error" style="display:none"></div>
+                                <div class="model-select__manual" id="embed-model-select-manual">
+                                    <input type="text" class="model-select__input" id="embed-model-select-input" placeholder="或输入自定义模型">
+                                    <button class="model-select__add" id="embed-model-select-add">确定</button>
+                                </div>
+                            </div>
+                        </div>
+                        <input type="hidden" id="cfg-embedding-model" value="">
+                        <div class="settings__hint">点击获取可用模型，或输入自定义模型名</div>
+                    </div>
+                    <div class="settings__field">
+                        <label class="settings__label">回忆意图阈值</label>
+                        <div class="settings__input-with-btn">
+                            <input type="number" class="settings__input" id="cfg-recall-threshold" placeholder="0.35" step="0.01" min="0" max="1" value="0.35">
+                            <button type="button" class="settings__btn settings__btn--small" id="btn-calibrate-threshold">推荐</button>
+                        </div>
+                        <div class="settings__hint">越高越不容易触发回忆，点击"推荐"自动计算最佳阈值</div>
+                        <div id="calibrate-status" class="settings__status" style="display:none;"></div>
+                    </div>
                 </div>
             </div>
 
@@ -278,6 +328,17 @@
                             <div class="theme-option__info">
                                 <div class="theme-option__name">桃汐</div>
                                 <div class="theme-option__desc">温柔淡粉</div>
+                            </div>
+                        </div>
+                        <div class="theme-option" data-theme="hacker">
+                            <div class="theme-option__preview">
+                                <div class="theme-option__color theme-option__color--titlebar" style="background:#000000;border-color:#10b981"></div>
+                                <div class="theme-option__color theme-option__color--loading" style="background:#000000;border-color:#10b981"></div>
+                                <div class="theme-option__color theme-option__color--main" style="background:#000000;border-color:#10b981"></div>
+                            </div>
+                            <div class="theme-option__info">
+                                <div class="theme-option__name">骇客</div>
+                                <div class="theme-option__desc">故障绿</div>
                             </div>
                         </div>
                     </div>

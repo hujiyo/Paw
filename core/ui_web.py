@@ -89,6 +89,31 @@ class WebUI:
             except Exception as e:
                 return JSONResponse(content={"success": False, "error": str(e)})
 
+        @self.app.post("/api/calibrate-threshold")
+        async def calibrate_threshold(request: Request):
+            """校准记忆意图判断阈值"""
+            try:
+                data = await request.json()
+                embedding_url = data.get('embedding_url', '')
+                embedding_model = data.get('embedding_model', '')
+                
+                if not embedding_url or not embedding_model:
+                    return JSONResponse(content={"success": False, "error": "请先配置 Embedding URL 和模型"})
+                
+                # 导入并调用校准函数
+                from calibrate_threshold import calibrate_api
+                
+                result = await asyncio.to_thread(
+                    calibrate_api, 
+                    embedding_url, 
+                    embedding_model
+                )
+                
+                return JSONResponse(content=result)
+                
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
@@ -165,19 +190,40 @@ class WebUI:
             })
 
     async def _fetch_models_from_api(self, api_key: str, api_url: str) -> List[str]:
-        """从 API 获取可用模型列表"""
+        """从 API 获取可用模型列表 (通用实现)"""
         try:
             headers = {}
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
 
-            # 提取 base URL（去掉 /chat/completions）
-            base_url = api_url.replace("/chat/completions", "")
-            # 智谱 AI 的模型列表端点
-            if "bigmodel.cn" in base_url:
-                models_url = f"{base_url.replace('/v4', '')}/v4/models"
+            # 智能判断 API 类型并构建 models URL
+            # 1. 智谱 AI
+            if "bigmodel.cn" in api_url:
+                base_url = api_url.split("/v4/")[0]
+                models_url = f"{base_url}/v4/models"
+            # 2. Ollama 
+            elif "11434" in api_url or "/api/" in api_url:
+                # Ollama Embedding: .../api/embeddings -> .../api/tags
+                # Ollama Chat: .../api/chat -> .../api/tags
+                if "/api/embeddings" in api_url:
+                    models_url = api_url.replace("/api/embeddings", "/api/tags")
+                elif "/api/chat" in api_url:
+                    models_url = api_url.replace("/api/chat", "/api/tags")
+                elif "/v1/" in api_url: # Ollama 兼容接口
+                    models_url = api_url.split("/v1/")[0] + "/api/tags"
+                else:
+                    # 尝试直接访问 /api/tags (假设 api_url 是 base url)
+                    base_url = api_url.rstrip("/")
+                    models_url = f"{base_url}/api/tags"
+            # 3. OpenAI 兼容接口 (v1)
+            elif "/v1/" in api_url:
+                # .../v1/chat/completions -> .../v1/models
+                # .../v1/embeddings -> .../v1/models
+                base_url = api_url.split("/v1/")[0]
+                models_url = f"{base_url}/v1/models"
             else:
-                models_url = f"{base_url.replace('/v1', '')}/v1/models"
+                # 默认尝试追加 /models
+                models_url = f"{api_url.rstrip('/')}/models"
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -187,13 +233,27 @@ class WebUI:
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
-                        # 智谱AI返回格式: {"data": [{"id": "model_name"}, ...]}
-                        models = [m["id"] for m in data.get("data", [])]
-                        return models
+                        
+                        # 解析不同格式的响应
+                        # Ollama: {"models": [{"name": "llama3:latest", ...}]}
+                        if "models" in data and isinstance(data["models"], list):
+                            return [m["name"] for m in data["models"]]
+                        
+                        # OpenAI / 智谱: {"data": [{"id": "gpt-4", ...}]}
+                        if "data" in data and isinstance(data["data"], list):
+                            return [m["id"] for m in data.get("data", [])]
+                            
+                        # 简单的列表: ["model1", "model2"]
+                        if isinstance(data, list):
+                            return data
+                            
+                        raise Exception(f"未知的响应格式: {str(data)[:100]}")
                     else:
                         error_text = await response.text()
                         raise Exception(f"API 返回错误 ({response.status}): {error_text[:100]}")
         except Exception as e:
+            # 记录错误但不崩溃
+            print(f"获取模型列表失败 ({models_url if 'models_url' in locals() else api_url}): {e}")
             raise Exception(f"获取模型失败: {str(e)}")
 
     async def send_message(self, event: str, data: Any):

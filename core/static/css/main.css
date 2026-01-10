@@ -837,6 +837,75 @@ body {
     box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 
+/* 输入框 + 按钮组合 */
+.settings__input-with-btn {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+.settings__input-with-btn .settings__input {
+    flex: 1;
+    min-width: 0;
+    width: auto !important;
+}
+.settings__btn--small {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.85rem;
+    background: var(--accent-assistant);
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+.settings__btn--small:hover {
+    opacity: 0.9;
+}
+.settings__btn--small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 状态提示 */
+.settings__status {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.settings__status--loading {
+    background: rgba(255, 193, 7, 0.1);
+    color: #ffc107;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+.settings__status--success {
+    background: rgba(76, 175, 80, 0.1);
+    color: var(--success-color);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+.settings__status--error {
+    background: rgba(244, 67, 54, 0.1);
+    color: var(--error-color);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+}
+.settings__status .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 .settings__toast {
     position: fixed;
     bottom: 2rem;

@@ -370,17 +370,17 @@ SCHEMA_GET_PLAN = {
     }
 }
 
-SCHEMA_PASS = {
+SCHEMA_STAY_SILENT = {
     "type": "function",
     "function": {
-        "name": "pass_turn",
-        "description": "Skip this turn without generating a response. Use when: 1) The user said something that doesn't need a reply (like 'ok', 'got it'). 2) You've completed a task and are waiting for user's next instruction. 3) The conversation naturally pauses.",
+        "name": "stay_silent",
+        "description": "Produce no response. ONLY use when user's message clearly requires no reply (e.g. 'ok', 'thanks', 'got it'). Do NOT use after completing tasks - always confirm completion instead.",
         "parameters": {
             "type": "object",
             "properties": {
                 "reason": {
                     "type": "string",
-                    "description": "Brief reason for skipping (optional)"
+                    "description": "Why silence is appropriate"
                 }
             },
             "required": []
@@ -777,9 +777,9 @@ def register_all_tools(tools_instance):
     )
     
     register_tool(
-        name="pass_turn",
-        schema=SCHEMA_PASS,
-        handler=tools_instance.pass_turn,
+        name="stay_silent",
+        schema=SCHEMA_STAY_SILENT,
+        handler=tools_instance.stay_silent,
         max_call_pairs=1,
         category="utility"
     )
@@ -938,8 +938,8 @@ MAIN_TOOL_NAMES = [
     # TODO-list 工具
     "update_plan",
     "get_plan",
-    # 跳过回复
-    "pass_turn",
+    # 保持沉默（极少使用）
+    "stay_silent",
 ]
 
 
@@ -989,8 +989,8 @@ TOOLS_SCHEMA = [
     # TODO-list 工具
     SCHEMA_UPDATE_PLAN,
     SCHEMA_GET_PLAN,
-    # 跳过回复工具
-    SCHEMA_PASS,
+    # 保持沉默工具
+    SCHEMA_STAY_SILENT,
     # Skill 工具
     SCHEMA_LOAD_SKILL,
     SCHEMA_RUN_SKILL_SCRIPT,

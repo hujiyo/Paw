@@ -858,23 +858,21 @@ class BaseTools:
         except Exception as e:
             return f"Error: Failed to execute script: {e}"
 
-    def pass_turn(self, reason: str = "") -> str:
-        """跳过当前回合，不生成响应
+    def stay_silent(self, reason: str = "") -> str:
+        """保持沉默，不生成响应
 
-        用于以下情况：
-        1) 用户说的内容不需要回复（如 "ok"、"got it"）
-        2) 已完成任务，等待用户下一步指示
-        3) 对话自然暂停
+        仅当用户消息明显不需要回复时使用（如 "ok"、"thanks"）。
+        完成任务后不要使用此工具 - 应该确认任务完成。
 
         Args:
-            reason: 跳过的原因（可选）
+            reason: 为何保持沉默
 
         Returns:
             确认消息
         """
         if reason:
-            return f"[Turn skipped: {reason}]"
-        return "[Turn skipped]"
+            return f"[Silent: {reason}]"
+        return "[Silent]"
 
     def cleanup(self):
         """清理沙盒目录"""

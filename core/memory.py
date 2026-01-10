@@ -1,89 +1,42 @@
 #!/usr/bin/env python
 """
-Paw 记忆系统 - Memory System v3
+Paw 记忆系统 - Memory System v4
 
-核心改动:
-- 删除自动规则生成，只保留用户手动配置的规则
-- 使用 RAG 检索完整对话记录，而非 LLM 判断摘要
+核心改动 (v4):
+- 移除本地 llama-cpp embedding，改用外部 API
+- 支持 Ollama / LM Studio 等本地服务，也支持远程 API
+- 记忆系统默认关闭，用户可在设置中启用
 
 架构:
 ├── Rules (永远注入，用户手动配置)
 │   ├── 用户规则: ~/.paw/rules.yaml
 │   └── 项目规范: {project}/.paw/conventions.yaml
 │
-└── Conversations (RAG 检索)
-    └── ~/.paw/conversations/  # ChromaDB 向量数据库
+└── Conversations (RAG 检索，需启用记忆系统)
+    └── ~/.paw/conversations/  # SQLite 向量数据库
 """
 
 import os
-import sys
 import yaml
 import json
 import hashlib
 import sqlite3
 import math
 import asyncio
+import aiohttp
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
-from llama_cpp import Llama
-
 
 EMBED_MAX_LEN = 2048
 
-
-# ============================================================
-# stderr 屏蔽器（持久化，在整个程序生命周期内生效）
-# ============================================================
-
-class _SuppressStderr:
-    """持久屏蔽 stderr 的类"""
-    def __init__(self):
-        self.original_stderr = None
-        self.null_fd = None
-
-    def __enter__(self):
-        try:
-            if os.name == 'nt':  # Windows
-                self.null_fd = open('NUL', 'w')
-            else:  # Unix/Linux/macOS
-                self.null_fd = open('/dev/null', 'w')
-            self.original_stderr = sys.stderr
-            sys.stderr = self.null_fd
-        except Exception:
-            pass
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.original_stderr is not None:
-            sys.stderr = self.original_stderr
-        if self.null_fd is not None:
-            try:
-                self.null_fd.close()
-            except Exception:
-                pass
-
-
-# 全局 stderr 屏蔽器（在整个程序生命周期内生效）
-_llama_stderr_suppressor = None
-
-
-def _enable_llama_stderr_suppression():
-    """启用 llama.cpp stderr 屏蔽（全局）"""
-    global _llama_stderr_suppressor
-    if _llama_stderr_suppressor is None:
-        _llama_stderr_suppressor = _SuppressStderr()
-        _llama_stderr_suppressor.__enter__()
-
-
-def _disable_llama_stderr_suppression():
-    """禁用 llama.cpp stderr 屏蔽（全局）"""
-    global _llama_stderr_suppressor
-    if _llama_stderr_suppressor is not None:
-        _llama_stderr_suppressor.__exit__(None, None, None)
-        _llama_stderr_suppressor = None
+# 默认的本地 embedding 服务 URL
+DEFAULT_EMBEDDING_URLS = {
+    "ollama": "http://localhost:11434/api/embeddings",
+    "lm_studio": "http://localhost:1234/v1/embeddings",
+}
 
 
 # ============================================================
@@ -112,40 +65,125 @@ class ConversationChunk:
 
 
 # ============================================================
-# 对话存储（基于 ChromaDB）
+# 外部 Embedding API 客户端
 # ============================================================
 
-class LlamaCppEmbeddingClient:
+class ExternalEmbeddingClient:
     """
-    本地 llama-cpp-python embedding 客户端，加载 embedding/*.gguf
+    外部 Embedding API 客户端
+    
+    支持:
+    - Ollama: http://localhost:11434/api/embeddings
+    - LM Studio: http://localhost:1234/v1/embeddings  
+    - OpenAI 兼容 API: https://api.xxx.com/v1/embeddings
     """
 
-    def __init__(self, *, model_path: Path, n_ctx: int = 32768, verbose: bool = False):
-        self.model_path = Path(model_path)
-        if not self.model_path.exists():
-            raise FileNotFoundError(f"未找到 embedding 模型文件: {self.model_path}")
-        # 静音底层日志
-        os.environ.setdefault("LLAMA_LOG_LEVEL", "fatal")
-        os.environ.setdefault("LLAMA_CPP_LOG_LEVEL", "fatal")
-        # 启用全局 stderr 屏蔽（llama.cpp 会持续输出到 stderr）
-        _enable_llama_stderr_suppression()
-        # 预加载模型，避免每次调用重复加载
-        self.llama = Llama(
-            model_path=str(self.model_path),
-            embedding=True,
-            n_ctx=n_ctx,
-            verbose=verbose,  # 关闭底层加载日志
-        )
-
+    def __init__(self, *, 
+                 api_url: str,
+                 api_key: str = "",
+                 model: str = "",
+                 timeout: int = 30):
+        """
+        初始化 Embedding 客户端
+        
+        Args:
+            api_url: API 地址
+            api_key: API 密钥（本地服务可留空）
+            model: 模型名称（如 nomic-embed-text、text-embedding-ada-002 等）
+            timeout: 请求超时时间（秒）
+        """
+        self.api_url = api_url
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+        self._is_ollama = "11434" in api_url or "/api/embeddings" in api_url
+        
     def _embed_sync(self, text: str) -> List[float]:
-        # llama-cpp-python 的 embed 同步接口
-        result = self.llama.embed(text)
-        if not isinstance(result, list) or not result:
-            raise RuntimeError(f"embedding 结果异常: {result}")
-        return result
+        """同步 embedding（用于初始化时预计算向量）"""
+        import requests
+        
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        
+        # Ollama 和 OpenAI 兼容 API 请求格式不同
+        if self._is_ollama:
+            payload = {
+                "model": self.model,
+                "prompt": text
+            }
+        else:
+            payload = {
+                "model": self.model,
+                "input": text
+            }
+        
+        try:
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # 解析响应
+            if self._is_ollama:
+                # Ollama 格式: {"embedding": [...]}
+                embedding = data.get("embedding", [])
+            else:
+                # OpenAI 兼容格式: {"data": [{"embedding": [...]}]}
+                embedding = data.get("data", [{}])[0].get("embedding", [])
+            
+            if not embedding:
+                raise RuntimeError(f"Embedding 结果为空: {data}")
+            return embedding
+            
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Embedding API 请求失败: {e}")
 
     async def embed(self, text: str) -> List[float]:
-        return await asyncio.to_thread(self._embed_sync, text)
+        """异步 embedding"""
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        
+        # Ollama 和 OpenAI 兼容 API 请求格式不同
+        if self._is_ollama:
+            payload = {
+                "model": self.model,
+                "prompt": text
+            }
+        else:
+            payload = {
+                "model": self.model,
+                "input": text
+            }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout)
+                ) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    
+                    # 解析响应
+                    if self._is_ollama:
+                        embedding = data.get("embedding", [])
+                    else:
+                        embedding = data.get("data", [{}])[0].get("embedding", [])
+                    
+                    if not embedding:
+                        raise RuntimeError(f"Embedding 结果为空: {data}")
+                    return embedding
+                    
+        except aiohttp.ClientError as e:
+            raise RuntimeError(f"Embedding API 请求失败: {e}")
 
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
@@ -169,15 +207,15 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
 # ============================================================
 
 # B 文本：描述"回忆型问题"的语义特征
-# 其 embedding 向量用作判断用户输入是否需要回忆历史的锚点
-_RECALL_INTENT_TEXT = """这个问题需要调取我们之前对话中的具体信息才能回答。它不是一个可以独立解答的新问题，而是在延续先前的讨论主题或引用已经交流过的内容。用户正在回忆、确认或复用历史对话中的某个细节、结论、代码或概念。问题的前提是"我们之前提到过"或"根据先前的讨论"，答案存在于过往的交流记录中，而非实时查询或通用知识。"""
+# 其 embedding 向量用作判断用户输入是否需要回忆历史的锚点，这个值禁止修改！已经经过内测效果非常好了！
+_RECALL_INTENT_TEXT = """这个问题需要调取我们曾经对话中的具体信息才能回答，即答案在当前对话上下文内是找不到的，可能是用户曾经和我的对话记录。它不是一个可以独立解答的新问题，而是在延续昨天/过去的讨论主题或引用早已交流过的内容。用户正在回忆、确认或复用历史对话中的某个细节、结论或概念。问题的前提是"我们之前提到过"或"根据先前的讨论"，答案存在于过往的交流记录中，而非实时查询或通用知识。"""
 
 # 默认配置
 _DEFAULT_RECALL_THRESHOLD = 0.35  # 意图判断阈值
 
 
 class SQLiteConversationStore:
-    def __init__(self, storage_path: Path, embedding_client: LlamaCppEmbeddingClient):
+    def __init__(self, storage_path: Path, embedding_client: ExternalEmbeddingClient):
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.db_path = self.storage_path / "conversations.sqlite3"
@@ -609,19 +647,22 @@ class MemoryManager:
     
     核心特性:
     1. Rules: 用户手动配置，永远注入
-    2. Conversations: RAG 检索历史对话
+    2. Conversations: RAG 检索历史对话（需启用记忆系统）
     """
     
     def __init__(self, 
                  project_path: Path,
-                 embedding_path: Optional[Path] = None,
-                 n_ctx: int = 32768):
+                 embedding_url: str = "",
+                 embedding_key: str = "",
+                 embedding_model: str = ""):
         """
         初始化记忆管理器
         
         Args:
             project_path: 当前项目路径
-            embedding_path: embedding 模型文件路径 (.gguf)
+            embedding_url: Embedding API 地址
+            embedding_key: Embedding API 密钥（本地服务可留空）
+            embedding_model: Embedding 模型名称
         """
         self.project_path = Path(project_path)
         
@@ -642,10 +683,10 @@ class MemoryManager:
         
         # 初始化对话存储
         conversations_dir = self.user_dir / "conversations"
-        resolved_model = self._resolve_embedding_model(embedding_path)
-        self.embedding_client = LlamaCppEmbeddingClient(
-            model_path=resolved_model,
-            n_ctx=n_ctx,
+        self.embedding_client = ExternalEmbeddingClient(
+            api_url=embedding_url,
+            api_key=embedding_key,
+            model=embedding_model,
         )
         self.conversation_store = SQLiteConversationStore(
             storage_path=conversations_dir,
@@ -697,12 +738,16 @@ class MemoryManager:
             print(f"[Memory] 预计算回忆意图向量失败: {e}")
             self._recall_enabled = False
 
-    def _should_recall(self, query: str) -> tuple[bool, float]:
+    def _should_recall(self, query: str, context: str = "") -> tuple[bool, float]:
         """
         判断用户输入是否需要回忆历史
 
+        原理：将用户问题和近期上下文一起 embedding，判断是否需要检索历史记忆。
+        如果问题在当前上下文中已有答案（如"那个函数"刚刚讨论过），则不需要回忆。
+
         Args:
             query: 用户输入
+            context: 近期对话上下文（最多 16K 字符）
 
         Returns:
             (是否需要回忆, 相似度分数)
@@ -712,7 +757,18 @@ class MemoryManager:
             return True, 1.0
 
         try:
-            query_vector = self.embedding_client._embed_sync(query)
+            # 构建 embedding 文本：上下文 + 用户问题
+            # 限制上下文长度，避免超出 embedding 模型限制
+            max_context_len = 14000  # 为用户问题预留空间
+            if context and len(context) > max_context_len:
+                context = context[-max_context_len:]  # 取最近的部分
+            
+            if context:
+                embed_text = f"对话上下文:\n{context}\n\n用户新问题: {query}"
+            else:
+                embed_text = query
+            
+            query_vector = self.embedding_client._embed_sync(embed_text)
             similarity = _cosine_similarity(query_vector, self._recall_intent_vector)
             should = similarity >= self._recall_threshold
             return should, similarity
@@ -747,35 +803,6 @@ class MemoryManager:
                 print(f"[Memory] 加载项目规范失败: {e}")
         
         return rules
-    
-    # ==================== 模型路径解析 ====================
-
-    def _resolve_embedding_model(self, embedding_path: Optional[Path]) -> Path:
-        """
-        优先使用显式指定的模型路径，否则自动查找 paw.py 所在目录下 embedding/*.gguf
-        """
-        if embedding_path:
-            p = Path(embedding_path).expanduser()
-            if p.exists():
-                return p
-            raise FileNotFoundError(
-                f"指定的 embedding 模型不存在: {p}\n"
-                f"请重新安装 Paw，或将 *.gguf 模型文件放入 embedding/ 目录"
-            )
-
-        # embedding 目录在 paw.py 所在目录，而不是 workspace
-        paw_root = Path(__file__).parent
-        default_dir = paw_root / "embedding"
-        if default_dir.exists():
-            candidates = sorted(default_dir.glob("*.gguf"))
-            if candidates:
-                return candidates[0]
-
-        raise FileNotFoundError(
-            "未找到 embedding 模型文件 (*.gguf)\n"
-            f"期望位置: {default_dir}\n"
-            "请重新安装 Paw，或下载模型文件放入 embedding/ 目录"
-        )
     
     def reload_rules(self):
         """重新加载规则"""
@@ -913,7 +940,8 @@ class MemoryManager:
                query: str,
                n_results: int = 3,
                min_score: float = 0.35,
-               project_only: bool = True) -> int:
+               project_only: bool = True,
+               context: str = "") -> int:
         """
         回忆相关对话（意图判断 + RAG 检索 + 生命值管理）
 
@@ -922,12 +950,13 @@ class MemoryManager:
             n_results: 返回数量
             min_score: 最低相似度
             project_only: 是否只检索当前项目
+            context: 近期对话上下文（用于意图判断，最多 16K 字符）
 
         Returns:
             新唤醒的记忆数量
         """
-        # 意图判断：判断用户输入是否需要回忆历史
-        should_recall, intent_score = self._should_recall(query)
+        # 意图判断：结合上下文判断用户输入是否需要回忆历史
+        should_recall, intent_score = self._should_recall(query, context)
         if not should_recall:
             # 不需要回忆，跳过 RAG 检索
             print(f"[Memory] 意图判断: 跳过回忆 (相似度: {intent_score:.3f} < 阈值: {self._recall_threshold})")
@@ -969,10 +998,20 @@ class MemoryManager:
                            query: str,
                            n_results: int = 3,
                            min_score: float = 0.35,
-                           project_only: bool = True) -> int:
-        """异步版本：回忆相关对话（意图判断 + RAG 检索 + 生命值管理）"""
-        # 意图判断：判断用户输入是否需要回忆历史
-        should_recall, intent_score = self._should_recall(query)
+                           project_only: bool = True,
+                           context: str = "") -> int:
+        """
+        异步版本：回忆相关对话（意图判断 + RAG 检索 + 生命值管理）
+        
+        Args:
+            query: 用户输入
+            n_results: 返回数量
+            min_score: 最低相似度
+            project_only: 是否只检索当前项目
+            context: 近期对话上下文（用于意图判断，最多 16K 字符）
+        """
+        # 意图判断：结合上下文判断用户输入是否需要回忆历史
+        should_recall, intent_score = self._should_recall(query, context)
         if not should_recall:
             # 不需要回忆，跳过 RAG 检索
             print(f"[Memory] 意图判断: 跳过回忆 (相似度: {intent_score:.3f} < 阈值: {self._recall_threshold})")
