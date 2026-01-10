@@ -595,6 +595,16 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             brief = result.replace('\n', ' ')[:40]
             return {'line1': brief, 'line2': '', 'has_line2': False}
     
+    def _update_status_bar(self):
+        """更新状态栏显示"""
+        if hasattr(self.ui, 'show_status_bar') and callable(self.ui.show_status_bar):
+            # 完整上下文 token = 消息 token + 工具 schema token
+            total_tokens = self.chunk_manager.current_tokens + self.chunk_manager.tools_tokens
+            self.ui.show_status_bar(
+                model=self.model,
+                tokens=total_tokens
+            )
+    
     def _refresh_shell_chunk(self, move_to_end: bool = False):
         """刷新Shell输出到chunk（如果终端已打开）
         
@@ -968,6 +978,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 self.ui.send_session_loaded(snapshot.session_id, snapshot.title)
 
             self.ui.print_success(f"已恢复会话: {snapshot.title}")
+            
+            # 更新状态栏
+            self._update_status_bar()
+            
             return True
 
         except Exception as e:
@@ -1225,6 +1239,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
         # 自动保存会话
         self._save_session()
+
+        # 更新状态栏（显示当前 token 用量）
+        self._update_status_bar()
 
         return final_response
     
@@ -1524,10 +1541,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 启动横幅
         self.ui.print_welcome()
 
-        # 显示状态栏（只打印一次）
-        if hasattr(self.ui, 'show_status_bar') and callable(self.ui.show_status_bar):
-            self.ui.show_status_bar(self.model)
-
         # 记忆系统异步初始化：不阻塞首屏加载
         # 在后台线程中初始化，用户可以立即开始对话
         if self.memory_manager is None:
@@ -1538,6 +1551,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
         # 同步会话列表到 Web UI，并确保有活动会话
         await self._ensure_active_session()
+
+        # 显示状态栏（在会话加载后，此时 token 数已正确计算）
+        self._update_status_bar()
 
         # 主循环
         while True:

@@ -19,8 +19,6 @@ Paw 是一个基于 Electron 的桌面 AI Agent 应用，支持文件操作、�
 
 ## 快速开始
 
-### 方式一：Electron 桌面应用（推荐）
-
 ```bash
 # 1. 创建 Python 虚拟环境
 python -m venv paw_env
@@ -40,22 +38,7 @@ npm install
 npm start
 ```
 
-### 方式二：Python 直接运行
-
-```bash
-# 安装依赖
-pip install -r core/requirements.txt
-
-# 运行（默认使用用户主目录作为工作目录）
-python core/paw.py
-
-# 或指定工作目录
-python core/paw.py /path/to/workspace
-```
-
-启动后访问 http://localhost:8080
-
-## 打包发布
+## 打包安装
 
 打包后的应用内置 Python 虚拟环境，用户无需安装 Python 即可使用。
 
@@ -73,48 +56,6 @@ npm run build:linux
 ```
 
 安装包输出到 `dist/` 目录，约 150-200MB。
-
-## 配置
-
-编辑 `core/config.yaml` 配置 API 和其他设置：
-
-```yaml
-# 身份配置（自定义 Paw 的名字和用户称谓）
-identity:
-  name: Paw          # Paw 的名字
-  username: hujiyo   # 用户名
-  honey: 老公        # 用户昵称
-
-# API 配置
-api:
-  key: "your-api-key"
-  url: "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
-  model: glm-4.7     # 留空则启动时选择
-
-# 终端配置
-terminal:
-  shell: powershell  # 或 cmd / bash
-  encoding: utf-8
-
-# Web 工具配置
-web:
-  search_engine: duckduckgo
-  max_results: 5
-  use_jina_reader: true
-
-# 记忆系统配置（可选，默认关闭）
-memory:
-  enabled: false
-  embedding_url: http://localhost:1234/v1/embeddings
-  embedding_model: text-embedding-qwen3-embedding-0.6b
-
-# 主题配置
-theme:
-  id: taoxi
-  titlebar: '#FFFFFF'
-  loading: '#FFD6E0'
-  main: '#FFF0F5'
-```
 
 ## 内置指令
 
@@ -197,16 +138,6 @@ Paw的记忆系统会预计算一个"回忆意图锚点向量 B"，描述"回忆
                               ↓
                     相似度 < 阈值 → 跳过记忆系统的回忆阶段（如"今天天气怎么样"）
                     相似度 ≥ 阈值 → 触发 RAG 检索（如"之前说的那个函数"）
-```
-
-### 配置调整
-
-在 `config.yaml` 中可根据偏好调整：
-
-```yaml
-recall:
-  enabled: true
-  threshold: 0.38   # 可调整：0.30(宽松) ~ 0.45(严格)
 ```
 
 ## License

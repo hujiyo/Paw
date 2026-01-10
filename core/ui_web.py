@@ -351,18 +351,18 @@ class WebUI:
 
     # --- 空操作方法，保持接口兼容性 ---
     def clear_screen(self): pass
-    def show_status_bar(self, model: str = None, start_time=None):
-        from datetime import datetime
-        runtime_str = ""
-        if start_time:
-            runtime = datetime.now() - start_time
-            runtime_str = str(runtime).split('.')[0]
-
-        status_data = {
-            "time": runtime_str,
-            "model": model,
-            "mode": ""
-        }
+    def show_status_bar(self, **kwargs):
+        """更新状态栏
+        
+        支持任意字段，常用字段:
+            model: 模型名称
+            tokens: 当前上下文 token 数
+        
+        示例:
+            show_status_bar(model='gpt-4', tokens=12500)
+        """
+        # 过滤掉空值
+        status_data = {k: v for k, v in kwargs.items() if v is not None and v != ''}
         asyncio.create_task(self.send_message("status_update", status_data))
     def mark_conversation_start(self): pass
     def refresh_conversation_history(self, *args, **kwargs): pass

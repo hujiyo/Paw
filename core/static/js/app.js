@@ -5,7 +5,7 @@ import { createMsgEl, addSysMsg, updateToolElement, renderModalContent, getToolD
 import { ChatHistory } from './modules/chat.js';
 import { Memory } from './modules/memory.js';
 import { Settings } from './modules/settings.js';
-import { AppState } from './modules/store.js';
+import { AppState, StatusBar } from './modules/store.js';
 
 // ========== 配置 ==========
 const LOGO = `██████╗    █████╗   ██╗    ██╗
@@ -65,6 +65,7 @@ initMarkdown();
 Settings.init(send);
 Memory.init(dom, send);
 ChatHistory.init(dom);
+StatusBar.init(dom.statusBar);
 
 // ========== 工具栏功能 ==========
 function toggleSidebar() {
@@ -293,12 +294,16 @@ function updateTool({ id, name, display, success }) {
 // ========== 会话管理 ==========
 function handleSessionList({ sessions, current_id }) {
     AppState.cachedSessions = sessions || [];
+    
+    // 确定要使用的 currentSessionId：优先使用后端传来的 current_id，否则保留现有值
+    const effectiveCurrentId = current_id || ChatHistory.currentSessionId;
+    
     dom.historyList.innerHTML = '';
     sessions.forEach(s => {
         const el = document.createElement('div');
         el.className = 'history-item';
         el.dataset.id = s.session_id;
-        if (s.session_id === current_id) el.classList.add('history-item--active');
+        if (s.session_id === effectiveCurrentId) el.classList.add('history-item--active');
         el.innerHTML = `
             <div class="history-item__title">${escapeHtml(s.title || '新对话')}</div>
             <div class="history-item__meta">${s.timestamp || ''} · ${s.message_count || 0} 消息</div>
@@ -306,7 +311,11 @@ function handleSessionList({ sessions, current_id }) {
         `;
         dom.historyList.appendChild(el);
     });
-    ChatHistory.currentSessionId = current_id;
+    
+    // 只有当 current_id 有效时才更新 ChatHistory.currentSessionId
+    if (current_id) {
+        ChatHistory.currentSessionId = current_id;
+    }
 }
 
 function updateSidebarHighlight(sessionId) {
@@ -331,7 +340,15 @@ dom.historyList.addEventListener('click', e => {
             showInfoDialog('我正在回答中，可以先点 Stop 中断当前会话哦~');
             return;
         }
-        ws.send(`/delete-session ${deleteBtn.dataset.delete}`);
+        const sessionIdToDelete = deleteBtn.dataset.delete;
+        // 检查是否为当前会话（也检查侧边栏高亮状态作为后备判断）
+        const isCurrentSession = sessionIdToDelete === ChatHistory.currentSessionId || 
+            dom.historyList.querySelector(`.history-item--active[data-id="${sessionIdToDelete}"]`);
+        if (isCurrentSession) {
+            showInfoDialog('无法删除当前会话，请先切换到其它会话');
+            return;
+        }
+        ws.send(`/delete-session ${sessionIdToDelete}`);
         return;
     }
     const item = e.target.closest('.history-item');
@@ -381,11 +398,7 @@ function setGeneratingState(generating) {
 }
 
 function updateStatus(data) {
-    const parts = [];
-    if (data.time) parts.push(`time: ${data.time}`);
-    if (data.model) parts.push(`model: ${data.model}`);
-    if (data.mode) parts.push(`mode: ${data.mode}`);
-    dom.statusBar.textContent = parts.join(' · ');
+    StatusBar.update(data);
 }
 
 // ========== 输入框 ==========
