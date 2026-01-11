@@ -117,7 +117,7 @@ export function getToolDisplay(toolName: string, resultText: string, args: ToolA
             return { line1: `"${query}" 无匹配`, line2: '', has_line2: false };
         }
         const lines = resultTextTrimmed.split('\n');
-        const summary = (lines[0]?.slice(0, 60) || '') + (lines[0]?.length > 60 ? '...' : '');
+        const summary = (lines[0]?.slice(0, 100) || '') + (lines[0]?.length > 100 ? '...' : '');
         return {
             line1: `"${query}"`,
             line2: summary + (lines.length > 1 ? ` (+${lines.length-1})` : ''),
@@ -153,7 +153,7 @@ export function getToolDisplay(toolName: string, resultText: string, args: ToolA
                     url_id?: string; 
                     pages?: Array<{ page_id: string; summary: string }> 
                 };
-                const title = (data.title || '无标题').slice(0, 40);
+                const title = (data.title || '无标题').slice(0, 100);
                 const urlId = data.url_id || '';
                 const pages = data.pages || [];
                 return {
@@ -163,7 +163,7 @@ export function getToolDisplay(toolName: string, resultText: string, args: ToolA
                 };
             }
         } catch (e) { /* ignore */ }
-        return { line1: args.url?.slice(0, 40) || '', line2: '', has_line2: false };
+        return { line1: args.url?.slice(0, 100) || '', line2: '', has_line2: false };
     }
 
     // read_page
@@ -194,13 +194,13 @@ export function getToolDisplay(toolName: string, resultText: string, args: ToolA
     if (content.includes('\n')) {
         const lines = content.split('\n');
         return {
-            line1: lines[0]?.slice(0, 60) || '',
+            line1: lines[0]?.slice(0, 100) || '',
             line2: lines.slice(1, 10).join('\n'),
             has_line2: true
         };
     }
 
-    return { line1: content.slice(0, 60), line2: '', has_line2: false };
+    return { line1: content.slice(0, 100), line2: '', has_line2: false };
 }
 
 // ============ 工具UI更新 ============
@@ -228,9 +228,12 @@ export function updateToolElement(el: HTMLElement | null, name: string, display:
             if (line.startsWith('│')) {
                 bodyHtml += `<div class="tool__body-line">${escapeHtml(line)}</div>`;
             } else {
-                // 第一行用 ⎿，后续行用空格对齐
-                const prefix = firstLine ? '⎿ ' : '  ';
-                bodyHtml += `<div class="tool__body-line">${prefix}${escapeHtml(line)}</div>`;
+                // 使用 Flex 布局结构：左侧是固定宽度的分支符号，右侧是内容
+                const branch = firstLine ? '⎿ ' : '';
+                bodyHtml += `<div class="tool__body-line">
+                    <span class="tool__branch">${branch}</span>
+                    <span class="tool__content">${escapeHtml(line)}</span>
+                </div>`;
                 firstLine = false;
             }
         });

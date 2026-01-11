@@ -135,6 +135,18 @@
         </div>
     </div>
 
+    <!-- 确认弹窗 -->
+    <div id="confirm-modal" class="modal-overlay">
+        <div class="modal">
+            <div id="confirm-title" class="modal__header">确认</div>
+            <div id="confirm-body" class="modal__body"></div>
+            <div class="modal__actions">
+                <button id="confirm-cancel" class="settings__btn settings__btn--secondary">取消</button>
+                <button id="confirm-ok" class="settings__btn settings__btn--primary" style="background:var(--error-color);color:#fff">删除</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 新建对话配置弹窗 -->
     <div id="new-chat-modal-overlay" class="modal-overlay">
         <div class="modal new-chat-modal">
@@ -433,6 +445,44 @@
 
     <!-- 提示消息 -->
     <div id="settings-toast" class="settings__toast"></div>
+
+    <!-- 工具详情弹窗 -->
+    <div id="tool-detail-modal" class="tool-detail-modal">
+        <div class="tool-detail-modal__content">
+            <div class="tool-detail-modal__header">
+                <div class="tool-detail-modal__title">
+                    <span class="tool-detail-modal__title-icon">⚙️</span>
+                    <span id="tool-detail-title">工具调用详情</span>
+                </div>
+                <button class="tool-detail-modal__close" id="tool-detail-close">&times;</button>
+            </div>
+            <div class="tool-detail-modal__body" id="tool-detail-body">
+                <!-- LLM 请求区域 -->
+                <div class="tool-detail-section">
+                    <div class="tool-detail-section__title">
+                        <span>LLM 请求</span>
+                        <span class="tool-detail-section__title-badge">Request</span>
+                    </div>
+                    <div class="tool-detail-section__content" id="tool-detail-request">
+                        <button class="tool-detail-copy-btn" data-copy="request">Copy</button>
+                        <pre></pre>
+                    </div>
+                </div>
+                
+                <!-- 系统响应区域 -->
+                <div class="tool-detail-section">
+                    <div class="tool-detail-section__title">
+                        <span>系统响应</span>
+                        <span class="tool-detail-section__title-badge">Response</span>
+                    </div>
+                    <div class="tool-detail-section__content" id="tool-detail-response">
+                        <button class="tool-detail-copy-btn" data-copy="response">Copy</button>
+                        <pre></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script type="module" src="/static/js/app.js?v=1.0.2"></script>
 </body>

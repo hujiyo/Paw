@@ -345,255 +345,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         
         return None
     
-    def _get_tool_display(self, tool_name: str, result: str, args: dict = None) -> dict:
-        """生成工具显示信息
-        
-        Returns:
-            {
-                'line1': 第一行内容,
-                'line2': 第二行内容(可选),
-                'has_line2': 是否有第二行
-            }
-        """
-        args = args or {}
-        
-        if tool_name == "open_shell":
-            cwd = args.get("working_directory", ".")
-            return {'line1': cwd, 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "run_command":
-            cmd = args.get("command", "")[:60]
-            return {'line1': cmd, 'line2': '', 'has_line2': False, 'is_command': True}
-        
-        elif tool_name == "interrupt_command":
-            return {'line1': '已中断', 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "read_file":
-            path = args.get("file_path", "")
-            filename = path.split('/')[-1].split('\\')[-1] if path else ""
-            total_lines = result.count('\n') + 1 if result else 0
-            offset = args.get("offset")
-            limit = args.get("limit")
-            if offset and limit:
-                end = offset + limit - 1
-                range_str = f"({offset}-{end}/{total_lines})"
-            elif offset:
-                range_str = f"({offset}-end/{total_lines})"
-            else:
-                range_str = f"(all {total_lines}行)"
-            return {'line1': f"{filename} {range_str}", 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "write_to_file":
-            path = args.get("file_path", "")
-            filename = path.split('/')[-1].split('\\')[-1] if path else ""
-            return {'line1': filename, 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "delete_file":
-            path = args.get("file_path", "")
-            filename = path.split('/')[-1].split('\\')[-1] if path else ""
-            return {'line1': filename, 'line2': '', 'has_line2': False}
-        
-        elif tool_name in ["edit", "multi_edit"]:
-            path = args.get("file_path", "")
-            filename = path.split('/')[-1].split('\\')[-1] if path else ""
-            return {'line1': filename, 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "list_dir":
-            path = args.get("directory_path", ".")
-            # 解析 list_dir 返回格式: "[dir] name/" 或 "[file] name (size)"
-            lines = result.strip().split('\n') if result.strip() else []
-            # 跳过第一行 "Contents of ..." 
-            items = [l for l in lines if l.startswith('[')]
-            count = len(items)
-            # 提取文件/目录名
-            names = []
-            for item in items[:3]:
-                # "[dir] name/" 或 "[file] name (size)"
-                if '] ' in item:
-                    name = item.split('] ')[1].split(' (')[0].rstrip('/')
-                    names.append(name)
-            preview = ', '.join(names)
-            if count > 3:
-                preview += f'... (+{count-3})'
-            return {'line1': path, 'line2': preview, 'has_line2': count > 0}
-        
-        elif tool_name == "find_by_name":
-            pattern = args.get("pattern", "")
-            search_dir = args.get("search_directory", ".")
-            items = result.strip().split('\n') if result.strip() else []
-            count = len(items) if items and items[0] else 0
-            if count == 0:
-                return {'line1': f'"{pattern}" 无匹配', 'line2': '', 'has_line2': False}
-            # 提取文件名
-            names = [i.split('/')[-1].split('\\')[-1] for i in items[:3]]
-            preview = ', '.join(names)
-            if count > 3:
-                preview += f'... (+{count-3})'
-            return {'line1': f'"{pattern}" {count}匹配', 'line2': preview, 'has_line2': True}
-        
-        elif tool_name == "grep_search":
-            query = args.get("query", "")
-            # 结果可能是 "Found X matches in Y files" 或具体匹配行
-            result_text = result.strip()
-            if not result_text or "no matches" in result_text.lower():
-                return {'line1': f'"{query}" 无匹配', 'line2': '', 'has_line2': False}
-            # 第一行显示搜索词，第二行显示结果摘要
-            lines = result_text.split('\n')
-            summary = lines[0][:60] + '...' if len(lines[0]) > 60 else lines[0]
-            if len(lines) > 1:
-                summary += f' (+{len(lines)-1})'
-            return {'line1': f'"{query}"', 'line2': summary, 'has_line2': True}
-        
-        elif tool_name == "wait":
-            seconds = args.get("seconds", 0)
-            return {'line1': f"{seconds}s", 'line2': '', 'has_line2': False}
-
-        elif tool_name == "load_skill":
-            skill_name = args.get("skill_name", "")
-            # 解析结果（格式：Base Path: xxx\n\nSKILL内容）
-            if result.startswith("Base Path:"):
-                parts = result.split('\n\n', 1)
-                base_path = parts[0].replace("Base Path:", "").strip()
-                # 提取 SKILL.md 第一行作为摘要
-                if len(parts) > 1:
-                    skill_lines = parts[1].strip().split('\n')
-                    summary = skill_lines[0][:50] + '...' if len(skill_lines[0]) > 50 else skill_lines[0]
-                else:
-                    summary = "SKILL.md"
-                return {'line1': f"Skill: {skill_name}", 'line2': summary, 'has_line2': True}
-            elif result.startswith("Error:"):
-                return {'line1': f"Skill: {skill_name}", 'line2': result[:60], 'has_line2': True}
-            else:
-                return {'line1': f"Skill: {skill_name}", 'line2': '', 'has_line2': False}
-
-        elif tool_name == "run_skill_script":
-            skill_name = args.get("skill_name", "")
-            script_name = args.get("script_name", "")
-            if result.startswith("Error:"):
-                return {'line1': f"Script: {script_name}", 'line2': result[:60], 'has_line2': True}
-            elif result.startswith("STDOUT:"):
-                # 提取第一行作为摘要
-                lines = result.split('\n')
-                first_line = lines[0][:50] + '...' if len(lines[0]) > 50 else lines[0]
-                return {'line1': f"Script: {script_name}", 'line2': first_line, 'has_line2': True}
-            else:
-                return {'line1': f"Script: {script_name}", 'line2': 'executed', 'has_line2': True}
-
-        elif tool_name == "update_plan":
-            # 解析 JSON 结果
-            try:
-                data = json.loads(result) if isinstance(result, str) else result
-                if not data.get("success"):
-                    return {'line1': data.get("error", "未知错误"), 'line2': '', 'has_line2': False}
-                completed = data.get("completed", 0)
-                total = data.get("total", 0)
-                explanation = data.get("explanation", "")
-                plan = data.get("plan", [])
-                # line1: 进度摘要
-                line1 = f"{completed}/{total} completed"
-                if explanation:
-                    line1 = f"{explanation} ({line1})"
-                # line2: 每个步骤一行
-                if plan:
-                    status_icons = {"pending": "○", "in_progress": "◉", "completed": "●"}
-                    lines = []
-                    for item in plan:
-                        icon = status_icons.get(item["status"], "○")
-                        step = item["step"][:50] + "..." if len(item["step"]) > 50 else item["step"]
-                        lines.append(f"{icon} {step}")
-                    return {'line1': line1, 'line2': '\n'.join(lines), 'has_line2': True}
-                return {'line1': line1, 'line2': '', 'has_line2': False}
-            except:
-                return {'line1': '计划已更新', 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "get_plan":
-            # 解析 JSON 结果
-            try:
-                data = json.loads(result) if isinstance(result, str) else result
-                plan = data.get("plan", [])
-                completed = data.get("completed", 0)
-                total = data.get("total", 0)
-                if not plan:
-                    return {'line1': '无计划', 'line2': '', 'has_line2': False}
-                # line1: 进度
-                line1 = f"{completed}/{total} completed"
-                # line2: 步骤列表
-                status_icons = {"pending": "○", "in_progress": "◉", "completed": "●"}
-                lines = []
-                for item in plan:
-                    icon = status_icons.get(item["status"], "○")
-                    step = item["step"][:50] + "..." if len(item["step"]) > 50 else item["step"]
-                    lines.append(f"{icon} {step}")
-                return {'line1': line1, 'line2': '\n'.join(lines), 'has_line2': True}
-            except:
-                return {'line1': '查询计划', 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "search_web":
-            query = args.get("query", "")
-            # 解析 JSON 结果
-            try:
-                import json
-                data = json.loads(result) if isinstance(result, str) else result
-                results = data.get("results", [])
-                count = len(results)
-                if count == 0:
-                    return {'line1': f'无结果 "{query}"', 'line2': '', 'has_line2': False}
-                # 每行显示: [id] title
-                lines = []
-                for r in results:
-                    url_id = r.get("id", "????")
-                    title = r.get("title", "")
-                    if len(title) > 55:
-                        title = title[:52] + "..."
-                    lines.append(f"[{url_id}] {title}")
-                # 把条数放前面，query 放后面（会被截断）
-                return {'line1': f'{count}条 "{query}"', 'line2': '\n'.join(lines), 'has_line2': True}
-            except:
-                return {'line1': f'"{query}"', 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "load_url_content":
-            url_arg = args.get("url", "")
-            # 解析 JSON 结果
-            try:
-                import json
-                data = json.loads(result) if isinstance(result, str) else result
-                title = data.get("title", "无标题")[:40]
-                url_id = data.get("url_id", "")
-                pages = data.get("pages", [])
-                # line1 显示: [url_id] title 或 title
-                if url_id:
-                    line1 = f"[{url_id}] {title}"
-                else:
-                    line1 = title
-                if not pages:
-                    return {'line1': line1, 'line2': '(空内容)', 'has_line2': True}
-                # 每行显示一个 page: page_id + summary（摘要最多30字，不截断）
-                lines = []
-                for p in pages:
-                    pid = p.get("page_id", "????")
-                    summary = p.get("summary", "")
-                    lines.append(f"[{pid}] {summary}")
-                return {'line1': line1, 'line2': '\n'.join(lines), 'has_line2': True}
-            except:
-                return {'line1': url_arg[:40], 'line2': '', 'has_line2': False}
-        
-        elif tool_name == "read_page":
-            page_id = args.get("page_id", "")
-            # 解析 JSON 结果
-            try:
-                import json
-                data = json.loads(result) if isinstance(result, str) else result
-                page_num = data.get("page_num", "?")
-                total = data.get("total_pages", "?")
-                size = data.get("size", 0)
-                return {'line1': f"[{page_id}] 第{page_num}/{total}页 ({size}字节)", 'line2': '', 'has_line2': False}
-            except:
-                return {'line1': f"[{page_id}]", 'line2': '', 'has_line2': False}
-        
-        else:
-            # 默认
-            brief = result.replace('\n', ' ')[:40]
-            return {'line1': brief, 'line2': '', 'has_line2': False}
     
     def _update_status_bar(self):
         """更新状态栏显示"""
@@ -1197,7 +948,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     
                     # 显示工具调用（简洁格式，紧凑排列）
                     args_str = json.dumps(function_args, ensure_ascii=False) if function_args else ""
-                    self.ui.show_tool_start(tool_call_id, function_name, args_str)
+                    # 传递原始 tool_call 数据用于详情显示
+                    self.ui.show_tool_start(tool_call_id, function_name, args_str, raw_request=tool_call)
 
                     # 执行工具
                     result = await self._execute_tool({
@@ -1211,13 +963,14 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 确保result_text总是被定义
                     if success:
                         result_text = str(result.get("result", ""))
-                        # 获取显示信息
-                        display = self._get_tool_display(function_name, result_text, function_args)
-                        self.ui.show_tool_result(tool_call_id, function_name, display, success=True)
+                        # 不再在后端生成显示信息，完全交由前端处理
+                        # display = self._get_tool_display(function_name, result_text, function_args)
+                        self.ui.show_tool_result(tool_call_id, function_name, None, success=True, raw_response=result)
                     else:
                         error_msg = result.get('error', '未知错误')
                         result_text = f"错误: {error_msg}"
-                        self.ui.show_tool_result(tool_call_id, function_name, {'line1': error_msg, 'line2': '', 'has_line2': False}, success=False)
+                        # 错误信息也只传递原始数据
+                        self.ui.show_tool_result(tool_call_id, function_name, None, success=False, raw_response=result)
 
                     # 获取工具配置，检查上下文策略
                     tool_config = ToolRegistry.get(function_name)

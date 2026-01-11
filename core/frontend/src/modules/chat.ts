@@ -349,6 +349,9 @@ export const ChatHistory: ChatHistoryManager = {
                         toolEl.className = 'tool';
                         toolEl.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${func.name || ''}</span> <span class="tool__args">${typeof args === 'string' ? args : JSON.stringify(args)}</span></div>`;
                         
+                        // 保存原始请求数据
+                        toolEl.dataset.rawRequest = JSON.stringify(tc);
+                        
                         const toolsContainer = currentAssistantMsgEl?.querySelector('.msg__tools');
                         if (toolsContainer) {
                             toolsContainer.appendChild(toolEl);
@@ -381,6 +384,14 @@ export const ChatHistory: ChatHistoryManager = {
             const display = getToolDisplay(result.toolName, result.content, args);
             const el = document.getElementById(`tool-${result.toolCallId}`);
             updateToolElement(el, result.toolName, display, true);
+            
+            // 保存原始响应数据
+            if (el) {
+                el.dataset.rawResponse = JSON.stringify({
+                    success: true,
+                    result: result.content
+                });
+            }
         });
 
         scrollToBottom(this.dom!.msgWrap);

@@ -14,6 +14,7 @@ interface ToolStartData {
     id: string;
     name: string;
     args: string;
+    raw_request?: Record<string, unknown>;
 }
 
 interface ToolResultData {
@@ -25,6 +26,7 @@ interface ToolResultData {
         has_line2: boolean;
     };
     success: boolean;
+    raw_response?: Record<string, unknown>;
 }
 
 interface StreamData {
@@ -113,6 +115,12 @@ interface DomElements {
     terminalStatus: HTMLElement;
     terminalContent: HTMLElement;
     terminalOutput: HTMLElement;
+    // 确认弹窗
+    confirmModal: HTMLElement;
+    confirmTitle: HTMLElement;
+    confirmBody: HTMLElement;
+    confirmCancel: HTMLButtonElement;
+    confirmOk: HTMLButtonElement;
 }
 
 const dom: DomElements = {
@@ -153,7 +161,13 @@ const dom: DomElements = {
     // 工作区终端输出
     terminalStatus: $<HTMLElement>('#terminal-status')!,
     terminalContent: $<HTMLElement>('#terminal-content')!,
-    terminalOutput: $<HTMLElement>('#terminal-output')!
+    terminalOutput: $<HTMLElement>('#terminal-output')!,
+    // 确认弹窗
+    confirmModal: $<HTMLElement>('#confirm-modal')!,
+    confirmTitle: $<HTMLElement>('#confirm-title')!,
+    confirmBody: $<HTMLElement>('#confirm-body')!,
+    confirmCancel: $<HTMLButtonElement>('#confirm-cancel')!,
+    confirmOk: $<HTMLButtonElement>('#confirm-ok')!
 };
 
 // ============ WebSocket ============
@@ -401,7 +415,7 @@ function endStream(id: string): void {
 }
 
 // ============ 工具渲染逻辑 ============
-function createTool({ id, name, args }: ToolStartData): void {
+function createTool({ id, name, args, raw_request }: ToolStartData): void {
     if (name === 'stay_silent') {
         const msgEl = dom.messages.querySelector('.msg--assistant:last-child');
         if (msgEl) msgEl.remove();
@@ -418,6 +432,11 @@ function createTool({ id, name, args }: ToolStartData): void {
     el.id = `tool-${id}`;
     el.className = 'tool';
     el.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${name}</span> <span class="tool__args">${args}</span></div>`;
+    
+    // 存储原始请求数据
+    if (raw_request) {
+        el.dataset.rawRequest = JSON.stringify(raw_request);
+    }
 
     let msgEl = dom.messages.querySelector('.msg--assistant:last-child');
     
@@ -446,7 +465,7 @@ function createTool({ id, name, args }: ToolStartData): void {
     scrollToBottom(dom.msgWrap);
 }
 
-function updateTool({ id, name, display, success }: ToolResultData): void {
+function updateTool({ id, name, display, success, raw_response }: ToolResultData): void {
     const el = document.getElementById(`tool-${id}`);
     if (!el) return;
     
@@ -460,7 +479,45 @@ function updateTool({ id, name, display, success }: ToolResultData): void {
         return;
     }
     
-    updateToolElement(el, name, display, success);
+    // 如果后端没有提供 display 数据（或者数据不完整），则在前端动态计算
+    // 这是为了解耦前后端，让前端全权负责渲染逻辑
+    let finalDisplay = display;
+    if (!finalDisplay || (!finalDisplay.line1 && !finalDisplay.line2)) {
+        // 尝试从 raw_response 获取结果文本
+        let resultText = '';
+        if (raw_response) {
+            if (raw_response.result !== undefined) resultText = String(raw_response.result);
+            else if (raw_response.error !== undefined) resultText = String(raw_response.error);
+            else if (raw_response.content !== undefined) resultText = String(raw_response.content);
+        }
+
+        // 尝试从 dataset.rawRequest 获取参数
+        let args = {};
+        try {
+            if (el.dataset.rawRequest) {
+                const req = JSON.parse(el.dataset.rawRequest);
+                // rawRequest 结构通常是 { function: { arguments: "{...}" } } 或直接是参数对象
+                // 这里我们要适配 OpenAI 标准结构
+                const rawArgs = req.function?.arguments;
+                if (typeof rawArgs === 'string') {
+                    args = JSON.parse(rawArgs);
+                } else if (typeof rawArgs === 'object') {
+                    args = rawArgs;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to parse args for display generation', e);
+        }
+
+        finalDisplay = getToolDisplay(name, resultText, args);
+    }
+    
+    updateToolElement(el, name, finalDisplay, success);
+    
+    // 存储原始响应数据
+    if (raw_response) {
+        el.dataset.rawResponse = JSON.stringify(raw_response);
+    }
 }
 
 // ============ 会话管理 ============
@@ -520,7 +577,12 @@ dom.historyList.addEventListener('click', (e: MouseEvent) => {
             showInfoDialog('无法删除当前会话，请先切换到其它会话');
             return;
         }
-        ws.send(`/delete-session ${sessionIdToDelete}`);
+        
+        showConfirmDialog(
+            '确认删除',
+            `<div style="padding:0.5rem 0;color:var(--text-secondary)">确定要删除这个会话吗？此操作无法撤销。</div>`,
+            () => ws.send(`/delete-session ${sessionIdToDelete}`)
+        );
         return;
     }
     const item = (e.target as HTMLElement).closest('.history-item');
@@ -631,6 +693,34 @@ dom.modal.addEventListener('click', (e: MouseEvent) => {
     }
 });
 
+// ============ 确认弹窗逻辑 ============
+let confirmCallback: (() => void) | null = null;
+
+function showConfirmDialog(title: string, messageHtml: string, onConfirm: () => void): void {
+    dom.confirmTitle.textContent = title;
+    dom.confirmBody.innerHTML = messageHtml;
+    confirmCallback = onConfirm;
+    dom.confirmModal.classList.add('visible');
+}
+
+dom.confirmCancel.addEventListener('click', () => {
+    dom.confirmModal.classList.remove('visible');
+    confirmCallback = null;
+});
+
+dom.confirmOk.addEventListener('click', () => {
+    if (confirmCallback) confirmCallback();
+    dom.confirmModal.classList.remove('visible');
+    confirmCallback = null;
+});
+
+dom.confirmModal.addEventListener('click', (e) => {
+    if (e.target === dom.confirmModal) {
+        dom.confirmModal.classList.remove('visible');
+        confirmCallback = null;
+    }
+});
+
 function showErrorDialog(message: string): void {
     renderModalContent('错误', `<div style="color:var(--error-color);padding:1rem;text-align:center">${escapeHtml(message)}</div>`);
 }
@@ -639,6 +729,122 @@ function showInfoDialog(message: string): void {
     renderModalContent('提示', `<div style="color:var(--text-primary);padding:1rem;text-align:center">${escapeHtml(message)}</div>`);
     setTimeout(() => dom.modal.classList.remove('visible'), 2000);
 }
+
+// ============ 工具详情弹窗 ============
+const toolDetailModal = document.getElementById('tool-detail-modal') as HTMLElement;
+const toolDetailTitle = document.getElementById('tool-detail-title') as HTMLElement;
+const toolDetailRequestContainer = document.getElementById('tool-detail-request') as HTMLElement;
+const toolDetailResponseContainer = document.getElementById('tool-detail-response') as HTMLElement;
+const toolDetailClose = document.getElementById('tool-detail-close') as HTMLElement;
+
+function showToolDetail(toolElement: HTMLElement): void {
+    if (!toolDetailModal) {
+        console.error('toolDetailModal not found');
+        return;
+    }
+    
+    const toolName = toolElement.querySelector('.tool__name')?.textContent || '未知工具';
+    const rawRequest = toolElement.dataset.rawRequest;
+    const rawResponse = toolElement.dataset.rawResponse;
+    
+    // 设置标题
+    if (toolDetailTitle) {
+        toolDetailTitle.textContent = `工具调用详情: ${toolName}`;
+    }
+    
+    // 获取 pre 元素
+    const toolDetailRequest = toolDetailRequestContainer?.querySelector('pre');
+    const toolDetailResponse = toolDetailResponseContainer?.querySelector('pre');
+    
+    // 显示原始 JSON 数据（就像 LLM 实际看到的那样）
+    if (toolDetailRequest) {
+        if (rawRequest) {
+            try {
+                // 解析后重新格式化，保持 2 空格缩进
+                const requestData = JSON.parse(rawRequest);
+                toolDetailRequest.textContent = JSON.stringify(requestData, null, 2);
+            } catch (e) {
+                // 如果解析失败，直接显示原始数据
+                toolDetailRequest.textContent = rawRequest;
+            }
+        } else {
+            toolDetailRequest.textContent = '暂无请求数据';
+        }
+    }
+    
+    // 显示原始响应数据
+    if (toolDetailResponse) {
+        if (rawResponse) {
+            try {
+                const responseData = JSON.parse(rawResponse);
+                toolDetailResponse.textContent = JSON.stringify(responseData, null, 2);
+            } catch (e) {
+                toolDetailResponse.textContent = rawResponse;
+            }
+        } else {
+            toolDetailResponse.textContent = '暂无响应数据';
+        }
+    }
+    
+    // 显示弹窗
+    toolDetailModal.classList.add('tool-detail-modal--visible');
+}
+
+function hideToolDetail(): void {
+    toolDetailModal.classList.remove('tool-detail-modal--visible');
+}
+
+// 绑定关闭按钮
+if (toolDetailClose) {
+    toolDetailClose.addEventListener('click', hideToolDetail);
+}
+
+// 点击遮罩层关闭
+if (toolDetailModal) {
+    toolDetailModal.addEventListener('click', (e) => {
+        if (e.target === toolDetailModal) {
+            hideToolDetail();
+        }
+    });
+}
+
+// 绑定复制按钮
+document.querySelectorAll('.tool-detail-copy-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const copyType = (btn as HTMLElement).dataset.copy;
+        let textToCopy = '';
+        
+        const toolDetailRequest = toolDetailRequestContainer?.querySelector('pre');
+        const toolDetailResponse = toolDetailResponseContainer?.querySelector('pre');
+        
+        if (copyType === 'request' && toolDetailRequest) {
+            textToCopy = toolDetailRequest.textContent || '';
+        } else if (copyType === 'response' && toolDetailResponse) {
+            textToCopy = toolDetailResponse.textContent || '';
+        }
+        
+        if (textToCopy) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 1500);
+            });
+        }
+    });
+});
+
+// 使用事件委托，监听所有工具元素的点击
+dom.messages.addEventListener('click', (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const toolElement = target.closest('.tool') as HTMLElement;
+    
+    if (toolElement) {
+        showToolDetail(toolElement);
+    }
+});
 
 // 启动初始化
 autoResize();

@@ -404,21 +404,38 @@ class WebUI:
         """整个对话轮次结束，可以接受新的用户输入"""
         self.queue_message("turn_end", {})
 
-    def show_tool_start(self, tool_call_id: str, tool_name: str, args_str: str):
-        """显示工具调用开始"""
+    def show_tool_start(self, tool_call_id: str, tool_name: str, args_str: str, raw_request: dict = None):
+        """显示工具调用开始
+        
+        Args:
+            tool_call_id: 工具调用 ID
+            tool_name: 工具名称
+            args_str: 参数字符串（显示用）
+            raw_request: 原始请求数据（包含完整的工具调用信息）
+        """
         self.queue_message("tool_start", {
             "id": tool_call_id,
             "name": tool_name,
-            "args": args_str
+            "args": args_str,
+            "raw_request": raw_request
         })
 
-    def show_tool_result(self, tool_call_id: str, tool_name: str, display: dict, success: bool = True):
-        """显示工具调用结果"""
+    def show_tool_result(self, tool_call_id: str, tool_name: str, display: dict, success: bool = True, raw_response: dict = None):
+        """显示工具调用结果
+        
+        Args:
+            tool_call_id: 工具调用 ID
+            tool_name: 工具名称
+            display: 显示信息
+            success: 是否成功
+            raw_response: 原始响应数据（包含完整的工具执行结果）
+        """
         self.queue_message("tool_result", {
             "id": tool_call_id,
             "name": tool_name,
             "display": display,
-            "success": success
+            "success": success,
+            "raw_response": raw_response
         })
 
     async def get_user_input(self, prompt: str = None) -> str:
