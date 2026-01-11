@@ -5,7 +5,7 @@ identity:
 api:
   key: aef418d2241a4e008fcdd61370cef5cc.VDXiXUnwJLWHcliy
   url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
-  model: glm-4.7
+  model: glm-4.5-air
 memory:
   enabled: false
   embedding_url: http://localhost:1234/v1/embeddings
@@ -24,6 +24,7 @@ web:
   page_size: 4096
   use_jina_reader: true
 system:
+  home_dir: D:\桌面\Paw
   chunk_size: 96000
 theme:
   id: shuangbai

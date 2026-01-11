@@ -1,3 +1,40 @@
+
+/* ========== 新建对话配置弹窗 ========== */
+.new-chat-modal {
+    width: 500px;
+    max-width: 90vw;
+}
+.recent-workspaces {
+    margin-top: 0.8rem;
+    padding-top: 0.8rem;
+    border-top: 1px dashed var(--border-color);
+}
+.recent-workspaces__title {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+.recent-workspaces__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.recent-item {
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+.recent-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
 /* ========== 本地字体引入 ========== */
 @font-face {
     font-family: 'Noto Sans SC';
@@ -885,6 +922,18 @@ body {
     opacity: 0.9;
 }
 
+/* 在新建对话弹窗中，下拉菜单改为上拉 */
+.new-chat-modal .model-select__dropdown {
+    top: auto;
+    bottom: calc(100% + 6px);
+    animation: fadeInUp 0.15s ease;
+}
+
+@keyframes fadeInUp { 
+    from { opacity: 0; transform: translateY(5px); } 
+    to { opacity: 1; transform: translateY(0); } 
+}
+
 .settings__footer {
     padding: 1.2rem;
     border-top: 1px solid var(--border-color);
@@ -1324,13 +1373,18 @@ body {
     inset: 0;
     background: rgba(0,0,0,0.6);
     backdrop-filter: blur(5px);
-    display: none;
+    display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
     transition: opacity 0.2s;
 }
-.modal-overlay.visible { display: flex; }
+.modal-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
 .modal {
     width: min(450px, 90vw);
     background: var(--modal-bg);
@@ -1339,7 +1393,7 @@ body {
     box-shadow: var(--shadow-lg);
     transform: scale(0.95);
     transition: transform 0.2s;
-    overflow: hidden;
+    overflow: visible;
 }
 .modal-overlay.visible .modal { transform: scale(1); }
 
@@ -1349,8 +1403,12 @@ body {
     font-weight: 600;
     font-size: 1rem;
     background: rgba(255,255,255,0.02);
+    border-radius: 16px 16px 0 0;
 }
-.modal__body { padding: 1.2rem; }
+.modal__body { 
+    padding: 1.2rem;
+    overflow: visible;
+}
 .modal__item {
     padding: 0.6rem 0.8rem;
     border: 1px solid var(--border-color);
@@ -1381,7 +1439,8 @@ body {
 .modal__actions { 
     padding: 0 1.2rem 1.2rem; 
     display: flex; 
-    justify-content: flex-end; 
+    justify-content: flex-end;
+    gap: 0.6rem;
 }
 .modal__btn {
     background: var(--accent-assistant);

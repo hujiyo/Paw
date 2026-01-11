@@ -123,6 +123,13 @@ class WebUI:
             except Exception as e:
                 return JSONResponse(content={"success": False, "error": str(e)})
 
+        @self.app.post("/api/browse-folder")
+        async def browse_folder(request: Request):
+            """Mock 文件夹选择接口 (仅 Web 模式使用，Electron 模式使用 IPC)"""
+            # 目前 Web 端无法直接调用系统对话框，这里只是返回一个 mock 结果
+            # 或者可以返回主目录作为默认值
+            return JSONResponse(content={"success": True, "path": str(Path.home())})
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
@@ -156,9 +163,15 @@ class WebUI:
                     # 尝试解析为 JSON 处理控制命令
                     try:
                         msg = json.loads(data)
-                        if isinstance(msg, dict) and msg.get('type') == 'fetch_models':
-                            await self._handle_fetch_models(websocket, msg)
-                            continue
+                        if isinstance(msg, dict):
+                            msg_type = msg.get('type')
+                            if msg_type == 'fetch_models':
+                                await self._handle_fetch_models(websocket, msg)
+                                continue
+                            elif msg_type == 'create_new_chat':
+                                # 路由到 chat_queue，由 paw.py 处理
+                                await self.chat_queue.put(data)
+                                continue
                     except (json.JSONDecodeError, ValueError):
                         pass  # 不是 JSON，继续作为普通消息处理
 

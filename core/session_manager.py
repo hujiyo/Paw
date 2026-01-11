@@ -30,6 +30,7 @@ class SessionSnapshot:
     chunks: List[Dict[str, Any]]                 # ChunkManager 的 chunks
     token_count: int                             # token 总数
     message_count: int                           # 消息数量（用户+助手）
+    is_manual_title: bool = False                # 是否为手动设置的标题
     shell_open: bool = False                     # 终端是否打开
     shell_pid: Optional[int] = None              # 终端PID（如果打开）
 
@@ -87,6 +88,7 @@ class SessionManager:
             "model": snapshot.model,
             "message_count": snapshot.message_count,
             "token_count": snapshot.token_count,
+            "is_manual_title": snapshot.is_manual_title,
             "shell_open": snapshot.shell_open
         }
         self._save_index()
@@ -120,7 +122,8 @@ class SessionManager:
                      model: str,
                      shell_open: bool = False,
                      shell_pid: Optional[int] = None,
-                     session_id: Optional[str] = None) -> SessionSnapshot:
+                     session_id: Optional[str] = None,
+                     title: Optional[str] = None) -> SessionSnapshot:
         """保存当前会话
 
         Args:
@@ -130,6 +133,7 @@ class SessionManager:
             shell_open: 终端是否打开
             shell_pid: 终端PID
             session_id: 已存在的会话ID（更新现有会话时使用）
+            title: 手动设置的标题（仅在创建或重命名时传入）
 
         Returns:
             SessionSnapshot 对象
@@ -141,19 +145,40 @@ class SessionManager:
         if session_id is None:
             session_id = str(uuid.uuid4())[:8]
 
-        # 生成标题
-        title = self._generate_title(chunks_data)
+        # 处理标题逻辑
+        is_manual_title = False
+        final_title = ""
+        
+        # 1. 尝试从现有索引获取旧状态
+        old_info = self._index.get(session_id, {})
+        old_is_manual = old_info.get("is_manual_title", False)
+        old_title = old_info.get("title", "")
+
+        # 2. 确定标题
+        if title:
+            # 明确传入了新标题，强制使用并标记为手动
+            final_title = title
+            is_manual_title = True
+        elif old_is_manual:
+            # 之前已经是手动标题，且本次未传入新标题，保持原样
+            final_title = old_title
+            is_manual_title = True
+        else:
+            # 自动生成
+            final_title = self._generate_title(chunks_data)
+            is_manual_title = False
 
         # 创建快照
         snapshot = SessionSnapshot(
             session_id=session_id,
-            title=title,
+            title=final_title,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             workspace_dir=str(workspace_dir),
             model=model,
             chunks=chunks_data,
             token_count=chunk_manager.current_tokens,
             message_count=self._count_messages(chunks_data),
+            is_manual_title=is_manual_title,
             shell_open=shell_open,
             shell_pid=shell_pid
         )
@@ -171,6 +196,7 @@ class SessionManager:
                     "chunks": snapshot.chunks,
                     "token_count": snapshot.token_count,
                     "message_count": snapshot.message_count,
+                    "is_manual_title": snapshot.is_manual_title,
                     "shell_open": snapshot.shell_open,
                     "shell_pid": snapshot.shell_pid
                 }, f, ensure_ascii=False, indent=2)
@@ -210,6 +236,7 @@ class SessionManager:
                 chunks=data["chunks"],
                 token_count=data.get("token_count", 0),
                 message_count=data.get("message_count", 0),
+                is_manual_title=data.get("is_manual_title", False),
                 shell_open=data.get("shell_open", False),
                 shell_pid=data.get("shell_pid")
             )

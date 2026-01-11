@@ -40,6 +40,7 @@ const electronAPI = {
     openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
     showItemInFolder: (path: string): Promise<void> => ipcRenderer.invoke('show-item-in-folder', path),
     openLogFolder: (): Promise<RestartResult> => ipcRenderer.invoke('open-log-folder'),
+    selectFolder: (): Promise<string | null> => ipcRenderer.invoke('select-folder'),
 
     // 启动状态监听
     onStartupStatus: (callback: (status: string) => void): UnsubscribeFunction => {

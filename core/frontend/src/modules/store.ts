@@ -75,7 +75,7 @@ export const StatusBar: StatusBarManager = {
     _el: null,
     _data: {},
     _formatters: {},
-    _order: ['model', 'tokens'],  // 字段显示顺序
+    _order: ['workspace', 'model', 'tokens'],  // 字段显示顺序
 
     /**
      * 初始化状态栏
@@ -85,6 +85,7 @@ export const StatusBar: StatusBarManager = {
         this._el = el;
         // 默认格式化器
         this._formatters = {
+            workspace: (v: string | number): string => `${v}`,
             model: (v: string | number): string => `model: ${v}`,
             tokens: (v: string | number): string => {
                 const num = typeof v === 'number' ? v : parseInt(v as string, 10);
@@ -94,6 +95,8 @@ export const StatusBar: StatusBarManager = {
                 return `token: ${num}`;
             }
         };
+        // 默认顺序：workspace -> model -> tokens
+        this._order = ['workspace', 'model', 'tokens'];
     },
 
     /**

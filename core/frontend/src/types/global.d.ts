@@ -63,6 +63,7 @@ interface ElectronAPI {
     openExternal(url: string): Promise<void>;
     showItemInFolder(path: string): Promise<void>;
     openLogFolder(): Promise<ElectronRestartResult>;
+    selectFolder(): Promise<string | null>;
     onStartupStatus(callback: (status: string) => void): ElectronUnsubscribeFunction;
     onStartupError(callback: (error: string) => void): ElectronUnsubscribeFunction;
     onPythonLog(callback: (data: ElectronPythonLogData) => void): ElectronUnsubscribeFunction;

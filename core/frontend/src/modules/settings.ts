@@ -30,6 +30,7 @@ export interface WebConfig {
 }
 
 export interface SystemConfig {
+    home_dir?: string;
     chunk_size?: number;
 }
 
@@ -179,6 +180,19 @@ export const Settings: SettingsManager = {
 
         // 记忆系统配置
         this.setupMemoryConfig();
+        
+        // Home 目录浏览按钮
+        $<HTMLElement>('#cfg-home-dir-browse-btn')?.addEventListener('click', async () => {
+            if (window.electronAPI) {
+                const path = await window.electronAPI.selectFolder();
+                if (path) {
+                    const input = $<HTMLInputElement>('#cfg-home-dir');
+                    if (input) input.value = path;
+                }
+            } else {
+                this.showToast('Web模式下请手动输入路径', 'error');
+            }
+        });
         
         // 初始加载配置并应用主题
         this.loadConfig();
@@ -615,7 +629,9 @@ export const Settings: SettingsManager = {
 
         // 系统配置
         const system = config.system || {};
+        const cfgHomeDir = $<HTMLInputElement>('#cfg-home-dir');
         const cfgChunkSize = $<HTMLInputElement>('#cfg-chunk-size');
+        if (cfgHomeDir) cfgHomeDir.value = system.home_dir || '';
         if (cfgChunkSize) cfgChunkSize.value = String(system.chunk_size || 64000);
 
         // 记忆系统配置
@@ -700,6 +716,7 @@ export const Settings: SettingsManager = {
         const cfgSearchEngine = $<HTMLSelectElement>('#cfg-search-engine');
         const cfgMaxResults = $<HTMLInputElement>('#cfg-max-results');
         const cfgUseJina = $<HTMLInputElement>('#cfg-use-jina');
+        const cfgHomeDir = $<HTMLInputElement>('#cfg-home-dir');
         const cfgChunkSize = $<HTMLInputElement>('#cfg-chunk-size');
         const cfgMemoryEnabled = $<HTMLInputElement>('#cfg-memory-enabled');
         const cfgEmbeddingUrl = $<HTMLInputElement>('#cfg-embedding-url');
@@ -731,6 +748,7 @@ export const Settings: SettingsManager = {
                 use_jina_reader: cfgUseJina?.checked ?? true
             },
             system: {
+                home_dir: cfgHomeDir?.value?.trim() || '',
                 chunk_size: parseInt(cfgChunkSize?.value || '64000', 10) || 64000
             },
             memory: {

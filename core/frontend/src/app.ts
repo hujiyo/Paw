@@ -5,6 +5,7 @@ import { createMsgEl, addSysMsg, updateToolElement, renderModalContent, getToolD
 import { ChatHistory, DomRefs, SessionChunk } from './modules/chat.js';
 import { Memory, Conversation, MemoryResult, MemoryDomRefs } from './modules/memory.js';
 import { Settings } from './modules/settings.js';
+import { NewChatDialog } from './modules/new-chat.js';
 import { AppState, StatusBar, SessionInfo } from './modules/store.js';
 
 // ============ 类型定义 ============
@@ -169,6 +170,7 @@ function send(msg: string): void {
 // ============ 初始化模块 ============
 initMarkdown();
 Settings.init(send);
+NewChatDialog.init(send);
 Memory.init(dom as unknown as MemoryDomRefs, send);
 ChatHistory.init(dom as unknown as DomRefs);
 StatusBar.init(dom.statusBar);
@@ -537,22 +539,8 @@ dom.newChatBtn.addEventListener('click', () => {
         return;
     }
     
-    const currentSession = AppState.cachedSessions.find(s => s.session_id === ChatHistory.currentSessionId);
-    if (currentSession && currentSession.message_count === 0) {
-        updateSidebarHighlight(ChatHistory.currentSessionId || '');
-        ChatHistory.clear();
-        dom.messages.innerHTML = '';
-        dom.chainList.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem">发送消息开始对话</div>';
-        return;
-    }
-    
-    const existingEmptySession = AppState.cachedSessions.find(s => s.message_count === 0);
-    if (existingEmptySession) {
-        requestLoadSession(existingEmptySession.session_id);
-        return;
-    }
-    
-    ws.send('/new');
+    // 打开新建对话弹窗
+    NewChatDialog.open();
 });
 
 // ============ UI 状态 ============

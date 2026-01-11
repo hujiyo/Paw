@@ -601,6 +601,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 完整上下文 token = 消息 token + 工具 schema token
             total_tokens = self.chunk_manager.current_tokens + self.chunk_manager.tools_tokens
             self.ui.show_status_bar(
+                workspace=str(self.workspace_dir),
                 model=self.model,
                 tokens=total_tokens
             )
@@ -958,6 +959,20 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 max_tokens=64000,
                 tools_schema=TOOLS_SCHEMA
             )
+            
+            # 恢复工作目录（每个会话有独立的工作区）
+            if snapshot.workspace_dir:
+                self.workspace_dir = Path(snapshot.workspace_dir)
+                self.workspace_name = self.workspace_dir.name
+                self.tools.sandbox_dir = self.workspace_dir
+                # 更新终端的工作目录
+                if hasattr(self.tools.async_shell, 'working_directory'):
+                    self.tools.async_shell.working_directory = self.workspace_dir
+            
+            # 恢复模型（如果会话保存了模型信息）
+            if snapshot.model and snapshot.model != 'unknown':
+                self.model = snapshot.model
+                self.llm.config.model = snapshot.model
 
             # 如果存在 shell_chunk，添加终端已关闭的提示
             # 防止多次恢复会话时重复添加提示
@@ -1616,6 +1631,90 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 # 获取用户输入
                 user_input = await self.ui.get_user_input()
                 
+                # 尝试解析为 JSON 消息（用于处理前端配置化命令）
+                try:
+                    msg_data = json.loads(user_input)
+                    if isinstance(msg_data, dict) and msg_data.get('type') == 'create_new_chat':
+                        # 处理新建对话配置
+                        workspace_dir = msg_data.get('workspace_dir', str(Path.home()))
+                        title = msg_data.get('title', '').strip()
+                        model = msg_data.get('model', '').strip()
+                        
+                        # 解析工作目录（支持 ~ 符号）
+                        if workspace_dir == '~':
+                            workspace_dir = str(Path.home())
+                        else:
+                            workspace_dir = str(Path(workspace_dir).expanduser().resolve())
+                        
+                        # 如果指定了模型且不为空，切换模型
+                        if model:
+                            self.model = model
+                            self.llm.config.model = model
+                        
+                        # 更新工作目录
+                        self.workspace_dir = Path(workspace_dir)
+                        self.workspace_name = self.workspace_dir.name
+                        self.tools.sandbox_dir = self.workspace_dir
+                        # 更新终端的工作目录
+                        if hasattr(self.tools.async_shell, 'working_directory'):
+                            self.tools.async_shell.working_directory = self.workspace_dir
+                        
+                        # 创建新的 ChunkManager
+                        from chunk_system import ChunkManager
+                        self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+                        
+                        # 重新生成系统提示词（包含新的工作目录信息）
+                        self.system_prompt = self._create_system_prompt()
+                        
+                        # 保存新会话
+                        new_session = self.session_manager.save_session(
+                            chunk_manager=self.chunk_manager,
+                            workspace_dir=workspace_dir,
+                            model=self.model,
+                            shell_open=False,
+                            shell_pid=None,
+                            session_id=None
+                        )
+                        self.current_session_id = new_session.session_id
+                        
+                        # 如果用户指定了标题，更新会话标题
+                        if title:
+                            # 直接修改会话文件中的标题
+                            session_file = self.session_manager.storage_path / f"{new_session.session_id}.json"
+                            if session_file.exists():
+                                try:
+                                    with open(session_file, 'r', encoding='utf-8') as f:
+                                        session_data = json.load(f)
+                                    session_data['title'] = title
+                                    with open(session_file, 'w', encoding='utf-8') as f:
+                                        json.dump(session_data, f, ensure_ascii=False, indent=2)
+                                    # 更新索引
+                                    if new_session.session_id in self.session_manager._index:
+                                        self.session_manager._index[new_session.session_id]['title'] = title
+                                        self.session_manager._save_index()
+                                except Exception as e:
+                                    self.ui.print_dim(f"[Session] 更新标题失败: {e}")
+                        
+                        # 同步到 Web UI
+                        if hasattr(self.ui, 'send_message'):
+                            sessions = self.session_manager.list_sessions(limit=50)
+                            await self.ui.send_message("session_list", {
+                                "sessions": sessions,
+                                "current_id": self.current_session_id
+                            })
+                            await self.ui.send_message('new_chat', {
+                                'session_id': new_session.session_id
+                            })
+                        
+                        # 更新状态栏
+                        self._update_status_bar()
+                        
+                        self.ui.print_success(f'新对话已创建 (工作区: {self.workspace_name})')
+                        continue
+                except (json.JSONDecodeError, ValueError):
+                    # 不是 JSON，继续作为普通消息处理
+                    pass
+                
                 if user_input.lower() in ['exit', 'quit', 'bye']:
                     self.ui.print_goodbye()
                     break
@@ -1824,6 +1923,125 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 if should_send_turn_end and hasattr(self.ui, 'turn_end'):
                     self.ui.turn_end()
 
+    async def _create_chat_with_config(self, workspace_dir: str = None, title: str = None, model: str = None):
+        """创建带配置的新对话"""
+        from chunk_system import ChunkManager
+        
+        # 1. 更新环境配置
+        if workspace_dir:
+            try:
+                new_workspace = Path(workspace_dir).resolve()
+                if not new_workspace.exists():
+                    self.ui.print_error(f"工作区不存在，已创建: {new_workspace}")
+                    new_workspace.mkdir(parents=True, exist_ok=True)
+                
+                self.workspace_dir = new_workspace
+                self.workspace_name = self.workspace_dir.name
+                
+                # 更新工具集的工作目录
+                # 注意：重新初始化 BaseTools 会重置终端状态，这在新对话中是预期的
+                config = self._load_config()
+                self.tools = BaseTools(sandbox_dir=str(self.workspace_dir), config=config)
+                register_all_tools(self.tools)
+            except Exception as e:
+                self.ui.print_error(f"切换工作区失败: {e}")
+                return
+
+        if model:
+            self.model = model
+            # 更新 LLM 客户端配置
+            self.llm = LLMClient(LLMConfig(
+                api_url=self.api_url,
+                model=self.model,
+                api_key=self.api_key
+            ))
+
+        # 2. 创建新会话
+        self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+        
+        # 3. 初始化 System Prompt (注入新的工作目录等)
+        self.system_prompt = self._create_system_prompt()
+        
+        # 4. 保存会话
+        new_session = self.session_manager.save_session(
+            chunk_manager=self.chunk_manager,
+            workspace_dir=str(self.workspace_dir),
+            model=self.model,
+            shell_open=False,
+            shell_pid=None,
+            session_id=None,
+            title=title # 传入手动设置的标题
+        )
+        self.current_session_id = new_session.session_id
+        
+        # 5. 同步 UI
+        if hasattr(self.ui, 'send_message'):
+            self._sync_session_list()
+            await self.ui.send_message('new_chat', {
+                'session_id': new_session.session_id
+            })
+            
+        self.ui.print_success(f'新对话已创建 (工作区: {self.workspace_dir})')
+
+    async def _create_chat_with_config(self, workspace_dir: str = None, title: str = None, model: str = None):
+        """创建带配置的新对话"""
+        from chunk_system import ChunkManager
+        
+        # 1. 更新环境配置
+        if workspace_dir:
+            try:
+                new_workspace = Path(workspace_dir).resolve()
+                if not new_workspace.exists():
+                    self.ui.print_error(f"工作区不存在，已创建: {new_workspace}")
+                    new_workspace.mkdir(parents=True, exist_ok=True)
+                
+                self.workspace_dir = new_workspace
+                self.workspace_name = self.workspace_dir.name
+                
+                # 更新工具集的工作目录
+                # 注意：重新初始化 BaseTools 会重置终端状态，这在新对话中是预期的
+                config = self._load_config()
+                self.tools = BaseTools(sandbox_dir=str(self.workspace_dir), config=config)
+                register_all_tools(self.tools)
+            except Exception as e:
+                self.ui.print_error(f"切换工作区失败: {e}")
+                return
+
+        if model:
+            self.model = model
+            # 更新 LLM 客户端配置
+            self.llm = LLMClient(LLMConfig(
+                api_url=self.api_url,
+                model=self.model,
+                api_key=self.api_key
+            ))
+
+        # 2. 创建新会话
+        self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+        
+        # 3. 初始化 System Prompt (注入新的工作目录等)
+        self.system_prompt = self._create_system_prompt()
+        
+        # 4. 保存会话
+        new_session = self.session_manager.save_session(
+            chunk_manager=self.chunk_manager,
+            workspace_dir=str(self.workspace_dir),
+            model=self.model,
+            shell_open=False,
+            shell_pid=None,
+            session_id=None,
+            title=title # 传入手动设置的标题
+        )
+        self.current_session_id = new_session.session_id
+        
+        # 5. 同步 UI
+        if hasattr(self.ui, 'send_message'):
+            self._sync_session_list()
+            await self.ui.send_message('new_chat', {
+                'session_id': new_session.session_id
+            })
+            
+        self.ui.print_success(f'新对话已创建 (工作区: {self.workspace_dir})')
 
 async def main():
     """主入口 - 唯一标准启动方式"""

@@ -135,6 +135,60 @@
         </div>
     </div>
 
+    <!-- 新建对话配置弹窗 -->
+    <div id="new-chat-modal-overlay" class="modal-overlay">
+        <div class="modal new-chat-modal">
+            <div class="modal__header">创建新对话</div>
+            <div class="modal__body">
+                <div class="settings__field">
+                    <label class="settings__label">工作区目录</label>
+                    <div class="settings__input-with-btn">
+                        <input type="text" class="settings__input" id="new-chat-workspace" placeholder="输入或选择目录">
+                        <button type="button" class="settings__btn settings__btn--secondary" id="new-chat-browse-btn">浏览...</button>
+                    </div>
+                    <div class="settings__hint">当前对话的工作目录，默认为用户主目录</div>
+                    
+                    <!-- 最近工作区列表 -->
+                    <div class="recent-workspaces" id="recent-workspaces" style="display:none;">
+                        <div class="recent-workspaces__title">最近使用:</div>
+                        <div class="recent-workspaces__list" id="recent-workspaces-list"></div>
+                    </div>
+                </div>
+
+                <div class="settings__field">
+                    <label class="settings__label">对话名称 (可选)</label>
+                    <input type="text" class="settings__input" id="new-chat-title" placeholder="留空则自动生成">
+                    <div class="settings__hint">为本次对话起个名字，方便后续查找</div>
+                </div>
+
+                <div class="settings__field">
+                    <label class="settings__label">选择模型</label>
+                    <div class="model-select" id="new-chat-model-select">
+                        <div class="model-select__trigger" id="new-chat-model-trigger">
+                            <span class="model-select__value" id="new-chat-model-value">使用全局默认</span>
+                            <span class="model-select__arrow">▼</span>
+                        </div>
+                        <div class="model-select__dropdown" id="new-chat-model-dropdown">
+                            <div class="model-select__option" data-value="">使用全局默认</div>
+                            <div class="model-select__loading" id="new-chat-model-loading" style="display:none">加载中...</div>
+                            <div class="model-select__error" id="new-chat-model-error" style="display:none"></div>
+                            <div class="model-select__manual" id="new-chat-model-manual">
+                                <input type="text" class="model-select__input" id="new-chat-model-input" placeholder="或输入自定义模型">
+                                <button class="model-select__add" id="new-chat-model-add">确定</button>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="new-chat-model" value="">
+                    <div class="settings__hint">点击获取可用模型，或输入自定义模型名</div>
+                </div>
+            </div>
+            <div class="modal__actions">
+                <button class="settings__btn settings__btn--secondary" id="new-chat-cancel-btn">取消</button>
+                <button class="settings__btn settings__btn--primary" id="new-chat-create-btn">创建</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 配置面板 -->
     <div id="settings-overlay" class="settings-overlay"></div>
     <div id="settings-panel" class="settings-panel">
@@ -241,6 +295,14 @@
             <!-- 系统配置 -->
             <div class="settings__section">
                 <div class="settings__section-title">系统</div>
+                <div class="settings__field">
+                    <label class="settings__label">Home 工作目录</label>
+                    <div class="settings__input-with-btn">
+                        <input type="text" class="settings__input" id="cfg-home-dir" placeholder="留空则使用系统主目录 (~)">
+                        <button type="button" class="settings__btn settings__btn--secondary" id="cfg-home-dir-browse-btn">浏览...</button>
+                    </div>
+                    <div class="settings__hint">默认工作目录，新建对话时的默认值，留空则使用系统主目录</div>
+                </div>
                 <div class="settings__field">
                     <label class="settings__label">上下文窗口大小 (token)</label>
                     <input type="number" class="settings__input" id="cfg-chunk-size" min="1000" max="200000" step="1000" value="64000">

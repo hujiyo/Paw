@@ -329,6 +329,24 @@ function setupIpcHandlers(): void {
         shell.openPath(app.getPath('userData'));
         return { success: true };
     });
+    
+    // 文件夹选择对话框
+    ipcMain.handle('select-folder', async (): Promise<string | null> => {
+        if (!mainWindow) return null;
+        
+        const result = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openDirectory', 'createDirectory'],
+            title: '选择工作目录',
+            buttonLabel: '选择',
+            defaultPath: app.getPath('home')
+        });
+        
+        if (result.canceled || result.filePaths.length === 0) {
+            return null;
+        }
+        
+        return result.filePaths[0];
+    });
 }
 
 // ============ 应用生命周期 ============
