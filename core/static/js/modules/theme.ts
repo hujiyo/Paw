@@ -1,7 +1,53 @@
 // 颜色主题管理
 
-// 主题预设配置
-export const THEME_PRESETS = {
+// ============ 类型定义 ============
+
+export interface ThemePreset {
+    name: string;
+    titlebar: string;
+    loading: string;
+    main: string;
+    accent: string;
+}
+
+export interface ThemePresets {
+    [key: string]: ThemePreset;
+}
+
+interface ThemeColorSet {
+    bg: string;
+    bgSecondary: string;
+    textPrimary: string;
+    textSecondary: string;
+    borderColor: string;
+    accentUser: string;
+    accentAssistant: string;
+    accentActive: string;
+    toolColor: string;
+    errorColor: string;
+    successColor: string;
+    codeBg: string;
+    scrollbarTrack: string;
+    scrollbarThumb: string;
+    scrollbarThumbHover: string;
+    inputBg: string;
+    headerUserText: string;
+    headerAssistantText: string;
+    modalBg: string;
+    cardBg: string;
+    buttonText: string;
+    buttonSecondaryText: string;
+    chainItemHover: string;
+    historyItemHover: string;
+    progressBar: string;
+    toolBg: string;
+}
+
+type ThemeType = 'dark' | 'light';
+
+// ============ 主题预设配置 ============
+
+export const THEME_PRESETS: ThemePresets = {
     yaoye: {
         name: '耀夜',
         titlebar: '#000000',
@@ -32,7 +78,21 @@ export const THEME_PRESETS = {
     }
 };
 
-export const ThemeColors = {
+// ============ 主题颜色管理器 ============
+
+interface ThemeColorsManager {
+    dark: ThemeColorSet;
+    light: ThemeColorSet;
+    current: ThemeType;
+    userBgColor: string | null;
+    userAccentColor: string | null;
+    init(bgColor: string, accentColor?: string | null): void;
+    getBrightness(color: string | null): number;
+    get(key: keyof ThemeColorSet): string;
+    applyColors(): void;
+}
+
+export const ThemeColors: ThemeColorsManager = {
     // 深色主题颜色
     dark: {
         bg: '#000000',
@@ -102,16 +162,16 @@ export const ThemeColors = {
     userAccentColor: null,
 
     // 初始化主题
-    init(bgColor, accentColor) {
+    init(bgColor: string, accentColor?: string | null): void {
         this.userBgColor = bgColor;
-        this.userAccentColor = accentColor;
+        this.userAccentColor = accentColor || null;
         const brightness = this.getBrightness(bgColor);
         this.current = brightness > 128 ? 'light' : 'dark';
         this.applyColors();
     },
 
     // 计算颜色亮度
-    getBrightness(color) {
+    getBrightness(color: string | null): number {
         if (!color) return 0;
         const r = parseInt(color.slice(1, 3), 16);
         const g = parseInt(color.slice(3, 5), 16);
@@ -120,12 +180,12 @@ export const ThemeColors = {
     },
 
     // 获取当前主题的颜色
-    get(key) {
+    get(key: keyof ThemeColorSet): string {
         return this[this.current][key] || this.dark[key];
     },
 
     // 应用颜色到CSS变量
-    applyColors() {
+    applyColors(): void {
         const colors = this[this.current];
         const root = document.documentElement;
 

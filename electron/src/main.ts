@@ -1,35 +1,63 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
-const path = require('path');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const yaml = require('js-yaml');
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electron';
+import * as path from 'path';
+import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import * as yaml from 'js-yaml';
+import * as net from 'net';
 
-let pythonProcess = null;
-let mainWindow = null;
-let isServerReady = false;
+// ============ 类型定义 ============
+
+interface ThemeColors {
+    titlebar: string;
+    loading: string;
+    main: string;
+}
+
+interface ThemeConfig {
+    titlebar?: string;
+    loading?: string;
+    main?: string;
+}
+
+interface Config {
+    theme?: ThemeConfig;
+}
+
+interface AppInfo {
+    version: string;
+    platform: NodeJS.Platform;
+    isDev: boolean;
+    coreDir: string;
+}
+
+// ============ 全局状态 ============
+
+let pythonProcess: ChildProcess | null = null;
+let mainWindow: BrowserWindow | null = null;
+let isServerReady: boolean = false;
 
 // ============ 路径管理（核心逻辑，非常简单） ============
 
-function getCoreDir() {
+function getCoreDir(): string {
     // 开发环境: electron/../core
     // 生产环境: resources/core
     if (app.isPackaged) {
         return path.join(process.resourcesPath, 'core');
     }
-    return path.join(__dirname, '..', 'core');
+    return path.join(__dirname, '..', '..', 'core');
 }
 
-function getPythonPath() {
+function getPythonPath(): string {
     const isWin = process.platform === 'win32';
     const pythonExe = isWin ? 'Scripts/python.exe' : 'bin/python3';
     
     // 开发环境: electron/../paw_env
     // 生产环境: resources/paw_env
-    let venvDir;
+    let venvDir: string;
     if (app.isPackaged) {
         venvDir = path.join(process.resourcesPath, 'paw_env');
     } else {
-        venvDir = path.join(__dirname, '..', 'paw_env');
+        venvDir = path.join(__dirname, '..', '..', 'paw_env');
     }
     
     const pythonPath = path.join(venvDir, pythonExe);
@@ -42,27 +70,27 @@ function getPythonPath() {
     return isWin ? 'python.exe' : 'python3';
 }
 
-function getConfigPath() {
+function getConfigPath(): string {
     return path.join(getCoreDir(), 'config.yaml');
 }
 
-function getLoadingPagePath() {
+function getLoadingPagePath(): string {
     return path.join(getCoreDir(), 'templates', 'loading.html');
 }
 
-function getIconPath() {
+function getIconPath(): string {
     const iconFile = process.platform === 'win32' ? 'icon.ico' :
                      process.platform === 'darwin' ? 'icon.icns' : 'icon.png';
-    return path.join(__dirname, 'resources', iconFile);
+    return path.join(__dirname, '..', 'resources', iconFile);
 }
 
 // ============ 配置读取 ============
 
-function getThemeColors() {
+function getThemeColors(): ThemeColors {
     try {
         const configPath = getConfigPath();
         if (fs.existsSync(configPath)) {
-            const config = yaml.load(fs.readFileSync(configPath, 'utf8'));
+            const config = yaml.load(fs.readFileSync(configPath, 'utf8')) as Config;
             const theme = config.theme || {};
             return {
                 titlebar: theme.titlebar || '#000000',
@@ -71,26 +99,27 @@ function getThemeColors() {
             };
         }
     } catch (e) {
-        console.warn('[Paw] 读取主题配置失败:', e.message);
+        const error = e as Error;
+        console.warn('[Paw] 读取主题配置失败:', error.message);
     }
     return { titlebar: '#000000', loading: '#000000', main: '#000000' };
 }
 
 // ============ Python 后端管理 ============
 
-function sendStatus(status) {
+function sendStatus(status: string): void {
     if (mainWindow?.webContents) {
         mainWindow.webContents.send('startup-status', status);
     }
 }
 
-function sendError(error) {
+function sendError(error: string): void {
     if (mainWindow?.webContents) {
         mainWindow.webContents.send('startup-error', error);
     }
 }
 
-async function startPythonBackend() {
+async function startPythonBackend(): Promise<void> {
     const coreDir = getCoreDir();
     const pythonPath = getPythonPath();
     const pawEntry = path.join(coreDir, 'paw.py');
@@ -145,7 +174,7 @@ paw.py存在: ${fs.existsSync(pawEntry)}
         fs.writeFileSync(runtimeLogPath, `=== 运行日志 ${new Date().toISOString()} ===\n`);
     }
 
-    pythonProcess.stdout.on('data', (data) => {
+    pythonProcess.stdout?.on('data', (data: Buffer) => {
         const msg = data.toString().trim();
         console.log('[Python]', msg);
         if (runtimeLogPath) fs.appendFileSync(runtimeLogPath, `[stdout] ${msg}\n`);
@@ -155,7 +184,7 @@ paw.py存在: ${fs.existsSync(pawEntry)}
         }
     });
 
-    pythonProcess.stderr.on('data', (data) => {
+    pythonProcess.stderr?.on('data', (data: Buffer) => {
         const msg = data.toString().trim();
         console.error('[Python Error]', msg);
         if (runtimeLogPath) fs.appendFileSync(runtimeLogPath, `[stderr] ${msg}\n`);
@@ -166,12 +195,12 @@ paw.py存在: ${fs.existsSync(pawEntry)}
         }
     });
 
-    pythonProcess.on('error', (error) => {
+    pythonProcess.on('error', (error: Error) => {
         console.error('[Paw] 进程错误:', error);
         sendError(`Python 启动失败: ${error.message}`);
     });
 
-    pythonProcess.on('exit', (code) => {
+    pythonProcess.on('exit', (code: number | null) => {
         console.log('[Paw] Python 退出, code:', code);
         pythonProcess = null;
         isServerReady = false;
@@ -180,7 +209,7 @@ paw.py存在: ${fs.existsSync(pawEntry)}
     await waitForServer();
 }
 
-function onServerReady() {
+function onServerReady(): void {
     if (isServerReady) return;
     isServerReady = true;
     console.log('[Paw] 服务器就绪');
@@ -193,12 +222,11 @@ function onServerReady() {
     }, 300);
 }
 
-function waitForServer() {
+function waitForServer(): Promise<void> {
     return new Promise((resolve) => {
-        const check = () => {
+        const check = (): void => {
             if (isServerReady) { resolve(); return; }
             
-            const net = require('net');
             const socket = new net.Socket();
             socket.setTimeout(1000);
             
@@ -215,7 +243,7 @@ function waitForServer() {
     });
 }
 
-function stopPythonBackend() {
+function stopPythonBackend(): void {
     if (pythonProcess) {
         pythonProcess.kill('SIGTERM');
         setTimeout(() => {
@@ -230,11 +258,10 @@ function stopPythonBackend() {
 
 // ============ 窗口创建 ============
 
-function createWindow() {
+function createWindow(): void {
     const themeColors = getThemeColors();
     
     // 根据标题栏颜色亮度设置系统主题（影响 Windows 标题栏颜色）
-    const { nativeTheme } = require('electron');
     const titlebarColor = themeColors.titlebar;
     const r = parseInt(titlebarColor.slice(1, 3), 16);
     const g = parseInt(titlebarColor.slice(3, 5), 16);
@@ -276,17 +303,17 @@ function createWindow() {
 
 // ============ IPC 处理 ============
 
-function setupIpcHandlers() {
-    ipcMain.handle('get-app-info', () => ({
+function setupIpcHandlers(): void {
+    ipcMain.handle('get-app-info', (): AppInfo => ({
         version: app.getVersion(),
         platform: process.platform,
         isDev: !app.isPackaged,
         coreDir: getCoreDir()
     }));
 
-    ipcMain.handle('get-theme-colors', () => getThemeColors());
+    ipcMain.handle('get-theme-colors', (): ThemeColors => getThemeColors());
 
-    ipcMain.handle('restart-backend', async () => {
+    ipcMain.handle('restart-backend', async (): Promise<{ success: boolean }> => {
         stopPythonBackend();
         const loadingPage = getLoadingPagePath();
         if (mainWindow && fs.existsSync(loadingPage)) {
@@ -296,9 +323,9 @@ function setupIpcHandlers() {
         return { success: true };
     });
 
-    ipcMain.handle('open-external', (_, url) => shell.openExternal(url));
-    ipcMain.handle('show-item-in-folder', (_, p) => shell.showItemInFolder(p));
-    ipcMain.handle('open-log-folder', () => {
+    ipcMain.handle('open-external', (_, url: string): Promise<void> => shell.openExternal(url));
+    ipcMain.handle('show-item-in-folder', (_, p: string): void => shell.showItemInFolder(p));
+    ipcMain.handle('open-log-folder', (): { success: boolean } => {
         shell.openPath(app.getPath('userData'));
         return { success: true };
     });
@@ -311,7 +338,7 @@ app.whenReady().then(async () => {
     createWindow();
     startPythonBackend().catch(e => {
         console.error('启动失败:', e);
-        sendError(e.message);
+        sendError((e as Error).message);
     });
 });
 

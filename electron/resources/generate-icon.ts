@@ -3,11 +3,11 @@
  * 需要先安装: npm install sharp png-to-ico
  */
 
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // 简单的 SVG 图标（爪印形状）
-const pawSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+const pawSVG: string = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" fill="#1a1a2e"/>
   <g fill="#ff9e80">
     <!-- 掌心 -->
@@ -26,7 +26,7 @@ const pawSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 </svg>`;
 
 // 如果用户提供了 PNG 文件，使用它；否则生成默认图标
-const inputIcon = process.argv[2];
+const inputIcon: string | undefined = process.argv[2];
 
 if (inputIcon) {
     console.log(`使用输入图标: ${inputIcon}`);
