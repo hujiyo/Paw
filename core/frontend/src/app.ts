@@ -102,9 +102,16 @@ interface DomElements {
     memorySearchBtn: HTMLElement;
     memoryCleanBtn: HTMLElement;
     sidebar: HTMLElement;
+    sidebarRight: HTMLElement;
     main: HTMLElement;
     toggleSidebarBtn: HTMLElement;
+    toggleRightSidebarBtn: HTMLElement;
     newChatToolbarBtn: HTMLElement;
+    toolbarDivider: HTMLElement;
+    // 工作区终端输出
+    terminalStatus: HTMLElement;
+    terminalContent: HTMLElement;
+    terminalOutput: HTMLElement;
 }
 
 const dom: DomElements = {
@@ -136,9 +143,16 @@ const dom: DomElements = {
     memoryCleanBtn: $<HTMLElement>('#memory-clean-btn')!,
     // Layout
     sidebar: $<HTMLElement>('.sidebar')!,
+    sidebarRight: $<HTMLElement>('#sidebar-right')!,
     main: $<HTMLElement>('.main')!,
     toggleSidebarBtn: $<HTMLElement>('#toggle-sidebar')!,
-    newChatToolbarBtn: $<HTMLElement>('#new-chat-toolbar')!
+    toggleRightSidebarBtn: $<HTMLElement>('#toggle-right-sidebar')!,
+    newChatToolbarBtn: $<HTMLElement>('#new-chat-toolbar')!,
+    toolbarDivider: $<HTMLElement>('#toolbar-divider')!,
+    // 工作区终端输出
+    terminalStatus: $<HTMLElement>('#terminal-status')!,
+    terminalContent: $<HTMLElement>('#terminal-content')!,
+    terminalOutput: $<HTMLElement>('#terminal-output')!
 };
 
 // ============ WebSocket ============
@@ -160,28 +174,69 @@ ChatHistory.init(dom as unknown as DomRefs);
 StatusBar.init(dom.statusBar);
 
 // ============ 工具栏功能 ============
+
+// 更新工具栏按钮可见性（左右侧边栏互斥）
+function updateToolbarVisibility(): void {
+    // 左侧边栏打开时，隐藏右侧边栏按钮
+    dom.toggleRightSidebarBtn.style.display = AppState.sidebarVisible ? 'none' : '';
+    // 右侧边栏打开时，隐藏左侧边栏按钮和新建会话按钮
+    dom.toggleSidebarBtn.style.display = AppState.rightSidebarVisible ? 'none' : '';
+    dom.newChatToolbarBtn.style.display = AppState.rightSidebarVisible ? 'none' : '';
+    dom.toolbarDivider.style.display = AppState.rightSidebarVisible ? 'none' : '';
+}
+
 function toggleSidebar(): void {
     AppState.sidebarVisible = !AppState.sidebarVisible;
     dom.sidebar.classList.toggle('sidebar--hidden', !AppState.sidebarVisible);
     dom.main.classList.toggle('main--full-width', !AppState.sidebarVisible);
     dom.toggleSidebarBtn.classList.toggle('toolbar__btn--active', AppState.sidebarVisible);
+    updateToolbarVisibility();
     localStorage.setItem('paw-sidebar-visible', String(AppState.sidebarVisible));
+}
+
+function toggleRightSidebar(): void {
+    AppState.rightSidebarVisible = !AppState.rightSidebarVisible;
+    dom.sidebarRight.classList.toggle('sidebar-right--visible', AppState.rightSidebarVisible);
+    dom.main.classList.toggle('main--with-right-sidebar', AppState.rightSidebarVisible);
+    dom.toggleRightSidebarBtn.classList.toggle('toolbar__btn--active', AppState.rightSidebarVisible);
+    updateToolbarVisibility();
+    localStorage.setItem('paw-right-sidebar-visible', String(AppState.rightSidebarVisible));
 }
 
 function initSidebarState(): void {
     AppState.init();
+    // 右侧边栏状态
+    const savedRightSidebar = localStorage.getItem('paw-right-sidebar-visible');
+    AppState.rightSidebarVisible = savedRightSidebar === 'true';
+    
+    // 左右侧边栏互斥：如果右侧边栏打开，则左侧必须关闭
+    if (AppState.rightSidebarVisible) {
+        AppState.sidebarVisible = false;
+    }
+    
     dom.sidebar.classList.toggle('sidebar--hidden', !AppState.sidebarVisible);
     dom.main.classList.toggle('main--full-width', !AppState.sidebarVisible);
     dom.toggleSidebarBtn.classList.toggle('toolbar__btn--active', AppState.sidebarVisible);
+    
+    dom.sidebarRight.classList.toggle('sidebar-right--visible', AppState.rightSidebarVisible);
+    dom.main.classList.toggle('main--with-right-sidebar', AppState.rightSidebarVisible);
+    dom.toggleRightSidebarBtn.classList.toggle('toolbar__btn--active', AppState.rightSidebarVisible);
+    
+    updateToolbarVisibility();
 }
 
 dom.toggleSidebarBtn.addEventListener('click', toggleSidebar);
+dom.toggleRightSidebarBtn.addEventListener('click', toggleRightSidebar);
 dom.newChatToolbarBtn.addEventListener('click', () => dom.newChatBtn.click());
 
 document.addEventListener('keydown', (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
         e.preventDefault();
         toggleSidebar();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+        e.preventDefault();
+        toggleRightSidebar();
     }
 });
 
@@ -246,9 +301,23 @@ function handleEvent({ event, data }: WebSocketEvent): void {
             }
             requestSessionList();
         },
-        'models_fetched': () => Settings.handleModelResponse(data as ModelsFetchedData)
+        'models_fetched': () => Settings.handleModelResponse(data as ModelsFetchedData),
+        'terminal_output': () => updateTerminalOutput(data as { content: string; is_open: boolean })
     };
     handlers[event]?.();
+}
+
+// ============ 终端输出处理 ============
+function updateTerminalOutput({ content, is_open }: { content: string; is_open: boolean }): void {
+    // 更新状态标签
+    dom.terminalStatus.textContent = is_open ? '运行中' : '未打开';
+    dom.terminalStatus.classList.toggle('workspace-header__status--active', is_open);
+    
+    // 更新终端内容
+    dom.terminalContent.textContent = content;
+    
+    // 自动滚动到底部
+    dom.terminalOutput.scrollTop = dom.terminalOutput.scrollHeight;
 }
 
 // ============ 流式处理逻辑 ============

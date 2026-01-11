@@ -84,6 +84,81 @@ body {
 .sidebar--hidden {
     left: -360px;
 }
+.sidebar-right {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: calc(100vw - 832px);
+    min-width: 320px;
+    max-width: 50vw;
+    height: 100vh;
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+    transition: transform 0.15s ease;
+    box-shadow: var(--shadow-sm);
+    transform: translateX(100%);
+}
+.sidebar-right--visible {
+    transform: translateX(0);
+}
+
+/* 工作区头部 */
+.workspace-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(0, 0, 0, 0.2);
+}
+.workspace-header__title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.workspace-header__title svg {
+    color: var(--accent-assistant);
+}
+.workspace-header__status {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    padding: 0.2rem 0.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-sm);
+}
+.workspace-header__status--active {
+    color: var(--success-color);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+/* 终端输出区域 */
+.terminal-output {
+    flex: 1;
+    overflow-y: auto;
+    background: #0d0d0d;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+.terminal-output__content {
+    margin: 0;
+    padding: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: #c0c0c0;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.terminal-output__empty {
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 2rem;
+    font-family: var(--font-family);
+}
 
 /* 视图切换标签 */
 .sidebar__tabs {
@@ -954,10 +1029,15 @@ body {
     flex-direction: column;
     min-width: 0;
     margin-left: 360px;
-    transition: margin-left 0.15s ease;
+    margin-right: 0;
+    transition: margin-left 0.15s ease, margin-right 0.15s ease;
 }
 .main--full-width {
     margin-left: 0;
+}
+.main--with-right-sidebar {
+    margin-left: 0;
+    margin-right: clamp(320px, calc(100vw - 832px), 50vw);
 }
 
 /* 顶部工具栏 */
@@ -971,6 +1051,12 @@ body {
     flex-wrap: nowrap; /* Prevent wrapping */
     height: 48px; /* Fixed height to prevent collapse/expand jitter */
     min-height: 48px;
+    justify-content: space-between;
+}
+.toolbar__left-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 .toolbar__btn {
     background: none;

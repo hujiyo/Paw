@@ -735,15 +735,11 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 调用工具的 handler（支持同步和异步）
             handler = tool_config.handler
             result = handler(**args)
-            
+
             # 如果是协程（异步函数），需要 await
             if asyncio.iscoroutine(result):
                 result = await result
-            
-            # Shell 工具特殊处理：刷新终端 chunk
-            if tool_config.category == "shell":
-                self._refresh_shell_chunk(move_to_end=False)
-            
+
             # 统一返回格式
             if isinstance(result, str):
                 # 判断是成功还是失败 - 只检查错误前缀，避免误判文件内容
@@ -963,6 +959,22 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 tools_schema=TOOLS_SCHEMA
             )
 
+            # 如果存在 shell_chunk，添加终端已关闭的提示
+            # 防止多次恢复会话时重复添加提示
+            if self.chunk_manager.has_shell_chunk():
+                for chunk in reversed(self.chunk_manager.chunks):
+                    if chunk.chunk_type == ChunkType.SHELL:
+                        lines = chunk.content.splitlines()
+                        shell_closed_hint = "[Terminal closed. Reopen available]"
+                        if lines and not lines[-1].startswith("[Terminal closed. Reopen available]"):
+                            chunk.content = chunk.content.rstrip() + "\n" + shell_closed_hint + "\n"
+                            # 更新 token 计数
+                            old_tokens = chunk.tokens
+                            chunk.tokens = 0
+                            chunk.estimate_tokens()
+                            self.chunk_manager.current_tokens += chunk.tokens - old_tokens
+                        break
+
             # 更新当前会话ID
             self.current_session_id = snapshot.session_id
 
@@ -973,8 +985,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
             # 同步到 Web UI
             if sync_ui and hasattr(self.ui, 'send_session_load'):
-                # 发送完整 chunks 给前端渲染
-                self.ui.send_session_load(snapshot.chunks)
+                # 发送完整 chunks 给前端渲染（使用更新后的 chunks）
+                self.ui.send_session_load(self.chunk_manager.to_json())
                 self.ui.send_session_loaded(snapshot.session_id, snapshot.title)
 
             self.ui.print_success(f"已恢复会话: {snapshot.title}")
@@ -1093,9 +1105,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         while True:
             step_count += 1
 
-            # 刷新Shell输出到chunk（如果终端已打开）
-            self._refresh_shell_chunk()
-            
             # 从chunk_manager获取上下文消息
             messages = self.chunk_manager.get_context_for_llm()
             
@@ -1244,6 +1253,47 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         self._update_status_bar()
 
         return final_response
+    
+    async def _terminal_output_loop(self):
+        """定期推送终端输出到前端工作区
+        
+        显示逻辑：只要有 shell_chunk 就显示内容，否则显示“未打开”
+        """
+        last_output = ""
+        while True:
+            try:
+                await asyncio.sleep(0.5)  # 每 0.5 秒检查一次
+                
+                # 检查是否有 send_terminal_output 方法
+                if not hasattr(self.ui, 'send_terminal_output'):
+                    continue
+                
+                # 检查是否有 shell_chunk
+                has_shell = self.chunk_manager.has_shell_chunk()
+                
+                if has_shell:
+                    # 有 shell_chunk，获取其内容
+                    output = self._get_shell_chunk_content()
+                    # 只有内容变化时才发送
+                    if output != last_output:
+                        last_output = output
+                        self.ui.send_terminal_output(output or "", is_open=True)
+                else:
+                    # 没有 shell_chunk
+                    if last_output != "__no_shell__":
+                        last_output = "__no_shell__"
+                        self.ui.send_terminal_output("Paw 未打开终端", is_open=False)
+                        
+            except Exception:
+                # 静默失败，不影响主流程
+                pass
+    
+    def _get_shell_chunk_content(self) -> str:
+        """获取 shell_chunk 的内容"""
+        for chunk in self.chunk_manager.chunks:
+            if chunk.chunk_type == ChunkType.SHELL:
+                return chunk.content
+        return ""
     
     async def _fetch_available_models(self) -> List[str]:
         """获取API可用的模型列表"""
@@ -1546,6 +1596,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         if self.memory_manager is None:
             asyncio.create_task(self._init_memory_system_async())
         
+        # 启动终端输出定时推送任务（工作区显示）
+        asyncio.create_task(self._terminal_output_loop())
+        
         # 标记对话区域起始位置（用于编辑后重渲染）
         self.ui.mark_conversation_start()
 
@@ -1799,8 +1852,8 @@ async def main():
     parser.add_argument(
         '--port', '-p',
         type=int,
-        default=8080,
-        help='Web服务器端口 (默认: 8080)'
+        default=8081,
+        help='Web服务器端口 (默认: 8081)'
     )
     args = parser.parse_args()
 

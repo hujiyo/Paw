@@ -241,7 +241,7 @@
         }
 
         function checkReady() {
-            fetch('http://127.0.0.1:8080')
+            fetch('http://127.0.0.1:8081')
                 .then(() => {
                     // 不再主动跳转，由Electron主进程的onServerReady()处理
                     // 避免重复加载导致页面闪烁

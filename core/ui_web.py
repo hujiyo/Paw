@@ -23,7 +23,7 @@ class WebUI:
     Web UI, 替代终端UI, 通过WebSocket与前端交互。
     此版本实现了与ui.py的接口对齐，并使用ID追踪工具调用状态。
     """
-    def __init__(self, host="127.0.0.1", port=8080):
+    def __init__(self, host="*********", port=8081):
         self.host = host
         self.port = port
         self.app = FastAPI()
@@ -513,4 +513,16 @@ class WebUI:
                 "result": result,
                 "duration": duration
             }
+        }))
+
+    def send_terminal_output(self, content: str, is_open: bool = True):
+        """发送终端输出到工作区
+        
+        Args:
+            content: 终端输出内容
+            is_open: 终端是否已打开
+        """
+        asyncio.create_task(self.send_message("terminal_output", {
+            "content": content,
+            "is_open": is_open
         }))

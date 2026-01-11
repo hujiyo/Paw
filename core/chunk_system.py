@@ -273,18 +273,29 @@ class ChunkManager:
     
     def update_shell_output(self, output: str, move_to_end: bool = False) -> Chunk:
         """更新Shell输出语块
-        
+
         Args:
             output: 终端屏幕内容
             move_to_end: 是否移动到末尾（仅在终端操作后设为True）
-        
+
         - move_to_end=False: 原地更新内容，位置不变（用于定时刷新）
-        - move_to_end=True: 删除旧的 + 追加到末尾（用于终端操作后）
+        - move_to_end=True: 保留历史内容，追加新输出到末尾（用于终端操作后）
         """
         if move_to_end:
-            # 删除旧的，追加到末尾
-            self.remove_shell_chunk()
-            return self.add_shell_output(output)
+            # 检查是否已存在 shell_chunk
+            existing_content = None
+            for chunk in self.chunks:
+                if chunk.chunk_type == ChunkType.SHELL:
+                    existing_content = chunk.content
+                    self.remove_shell_chunk()
+                    break
+
+            # 如果有旧内容，追加新输出（用分隔线分开）
+            if existing_content:
+                combined = existing_content.rstrip() + "\n\n=== 新终端 ===\n" + output
+                return self.add_shell_output(combined)
+            else:
+                return self.add_shell_output(output)
         else:
             # 原地更新内容
             for chunk in self.chunks:

@@ -11,6 +11,7 @@ export interface SessionInfo {
 
 interface AppStateType {
     sidebarVisible: boolean;
+    rightSidebarVisible: boolean;
     isGenerating: boolean;
     streamId: string | null;
     streamBuf: string;
@@ -37,8 +38,11 @@ interface StatusBarManager {
 // ============ 应用状态 ============
 
 export const AppState: AppStateType = {
-    // 侧边栏状态
+    // 左侧边栏状态
     sidebarVisible: true,
+    
+    // 右侧边栏状态
+    rightSidebarVisible: false,
     
     // 生成状态
     isGenerating: false,

@@ -217,7 +217,7 @@ function onServerReady(): void {
     
     setTimeout(() => {
         if (mainWindow) {
-            mainWindow.loadURL('http://127.0.0.1:8080');
+            mainWindow.loadURL('http://127.0.0.1:8081');
         }
     }, 300);
 }
@@ -230,7 +230,7 @@ function waitForServer(): Promise<void> {
             const socket = new net.Socket();
             socket.setTimeout(1000);
             
-            socket.connect(8080, '127.0.0.1', () => {
+            socket.connect(8081, '127.0.0.1', () => {
                 socket.destroy();
                 onServerReady();
                 resolve();
@@ -290,7 +290,7 @@ function createWindow(): void {
     if (fs.existsSync(loadingPage)) {
         mainWindow.loadFile(loadingPage);
     } else {
-        mainWindow.loadURL('http://127.0.0.1:8080');
+        mainWindow.loadURL('http://127.0.0.1:8081');
     }
 
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
