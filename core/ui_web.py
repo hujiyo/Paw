@@ -22,6 +22,8 @@ class WebUI:
     """
     Web UI, 替代终端UI, 通过WebSocket与前端交互。
     此版本实现了与ui.py的接口对齐，并使用ID追踪工具调用状态。
+    
+    重要：所有消息发送通过有序队列处理，确保前端按正确顺序接收消息。
     """
     def __init__(self, host="*********", port=8081):
         self.host = host
@@ -35,6 +37,13 @@ class WebUI:
         self._pending: List[Dict[str, Any]] = []
         self.is_webui = True  # 标识为 WebUI 模式
         self._stop_callback = None  # 停止回调函数
+        
+        # === 有序消息队列系统 ===
+        # 解决 asyncio.create_task() fire-and-forget 导致的消息乱序问题
+        self._msg_queue: asyncio.Queue = None  # 延迟初始化（需要在事件循环中创建）
+        self._msg_sender_task: asyncio.Task = None  # 消息发送协程
+        self._loop: asyncio.AbstractEventLoop = None  # 事件循环引用
+        
         self._setup_routes()
 
     def set_stop_callback(self, callback):
@@ -119,7 +128,12 @@ class WebUI:
             await websocket.accept()
             self.websocket = websocket
             self.ws_ready.set()
+            
+            # 初始化消息队列（必须在事件循环中）
+            self._ensure_msg_queue()
+            
             # 连接建立后，立刻把积压消息发送给前端
+            # 这些是在队列初始化前缓存的消息，需要按顺序发送
             if self._pending:
                 for payload in self._pending:
                     try:
@@ -256,7 +270,76 @@ class WebUI:
             print(f"获取模型列表失败 ({models_url if 'models_url' in locals() else api_url}): {e}")
             raise Exception(f"获取模型失败: {str(e)}")
 
+    # === 消息队列核心方法 ===
+    
+    def _ensure_msg_queue(self):
+        """确保消息队列已初始化（必须在事件循环中调用）"""
+        if self._msg_queue is None:
+            try:
+                self._loop = asyncio.get_running_loop()
+                self._msg_queue = asyncio.Queue()
+                # 启动消息发送协程
+                self._msg_sender_task = asyncio.create_task(self._msg_sender_loop())
+            except RuntimeError:
+                # 没有运行中的事件循环，稍后再初始化
+                pass
+    
+    async def _msg_sender_loop(self):
+        """消息发送协程：按顺序从队列取出消息并发送
+        
+        这是解决消息乱序问题的核心：
+        - 所有消息都进入同一个队列
+        - 单一协程按 FIFO 顺序发送
+        - 确保 stream_start 一定在 stream_chunk 之前到达前端
+        """
+        while True:
+            try:
+                payload = await self._msg_queue.get()
+                
+                # 等待 WebSocket 就绪
+                if not self.websocket:
+                    # WebSocket 未连接，缓存消息
+                    self._pending.append(payload)
+                    self._msg_queue.task_done()
+                    continue
+                
+                try:
+                    await self.websocket.send_json(payload)
+                except Exception as e:
+                    print(f"ERROR:    Failed to send WebSocket message: {e}")
+                finally:
+                    self._msg_queue.task_done()
+                    
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"ERROR:    Message sender loop error: {e}")
+    
+    def queue_message(self, event: str, data: Any):
+        """将消息放入有序队列（同步方法，可从任何地方调用）
+        
+        这是所有 UI 方法应该使用的发送方式，替代原来的 asyncio.create_task()。
+        消息会按调用顺序被发送到前端。
+        """
+        payload = {"event": event, "data": data}
+        
+        # 确保队列已初始化
+        self._ensure_msg_queue()
+        
+        if self._msg_queue is None:
+            # 事件循环未启动，先缓存
+            self._pending.append(payload)
+            return
+        
+        try:
+            # 使用 put_nowait 避免阻塞（队列无大小限制）
+            self._msg_queue.put_nowait(payload)
+        except Exception:
+            # 降级：直接缓存
+            self._pending.append(payload)
+    
     async def send_message(self, event: str, data: Any):
+        """异步发送消息（直接发送，用于需要立即确认的场景）"""
         payload = {"event": event, "data": data}
         # 若 WebSocket 尚未就绪，先缓存，等连接后统一发送
         if not self.websocket:
@@ -276,44 +359,54 @@ class WebUI:
         return server.serve()
 
     # --- UI 兼容方法 --- (与 ui.py 对齐)
+    # 重构说明：所有方法改用 queue_message() 替代 asyncio.create_task(send_message())
+    # 确保消息按调用顺序发送到前端，解决流式输出乱序问题
 
     def print_welcome(self):
-        asyncio.create_task(self.send_message("welcome", {}))
+        self.queue_message("welcome", {})
 
     def print_goodbye(self):
-        asyncio.create_task(self.send_message("goodbye", {}))
+        self.queue_message("goodbye", {})
 
     def print_assistant(self, text: str, end: str = '', flush: bool = False):
-        # 统一的流式输出：仅首次发送 start，之后持续发送 chunk
+        """流式输出助手消息
+        
+        消息发送顺序保证：
+        1. assistant_stream_start (首次调用时)
+        2. assistant_stream_chunk (每次调用时)
+        通过有序队列确保前端按正确顺序接收
+        """
         if not hasattr(self, '_current_stream_id'):
             self._current_stream_id = str(uuid.uuid4())
-            asyncio.create_task(self.send_message("assistant_stream_start", {"id": self._current_stream_id}))
-        asyncio.create_task(self.send_message("assistant_stream_chunk", {"id": self._current_stream_id, "text": text}))
-        # 不在这里结束，等待外部显式结束（_call_llm_with_tools 会调用 assistant_stream_end）
+            self.queue_message("assistant_stream_start", {"id": self._current_stream_id})
+        self.queue_message("assistant_stream_chunk", {"id": self._current_stream_id, "text": text})
 
     def assistant_stream_end(self):
+        """结束流式输出"""
         if hasattr(self, '_current_stream_id'):
-            asyncio.create_task(self.send_message("assistant_stream_end", {"id": self._current_stream_id}))
+            self.queue_message("assistant_stream_end", {"id": self._current_stream_id})
             del self._current_stream_id
 
     def turn_end(self):
         """整个对话轮次结束，可以接受新的用户输入"""
-        asyncio.create_task(self.send_message("turn_end", {}))
+        self.queue_message("turn_end", {})
 
     def show_tool_start(self, tool_call_id: str, tool_name: str, args_str: str):
-        asyncio.create_task(self.send_message("tool_start", {
+        """显示工具调用开始"""
+        self.queue_message("tool_start", {
             "id": tool_call_id,
             "name": tool_name,
             "args": args_str
-        }))
+        })
 
     def show_tool_result(self, tool_call_id: str, tool_name: str, display: dict, success: bool = True):
-        asyncio.create_task(self.send_message("tool_result", {
+        """显示工具调用结果"""
+        self.queue_message("tool_result", {
             "id": tool_call_id,
             "name": tool_name,
             "display": display,
             "success": success
-        }))
+        })
 
     async def get_user_input(self, prompt: str = None) -> str:
         if prompt:
@@ -322,19 +415,19 @@ class WebUI:
         return await self.chat_queue.get()
 
     def print_dim(self, text: str, **kwargs):
-        asyncio.create_task(self.send_message("system_message", {"text": text, "type": "dim"}))
+        self.queue_message("system_message", {"text": text, "type": "dim"})
 
     def print_system(self, text: str, **kwargs):
-        asyncio.create_task(self.send_message("system_message", {"text": text, "type": "system"}))
+        self.queue_message("system_message", {"text": text, "type": "system"})
 
     def print_error(self, text: str):
-        asyncio.create_task(self.send_message("system_message", {"text": text, "type": "error"}))
+        self.queue_message("system_message", {"text": text, "type": "error"})
 
     def print_success(self, text: str):
-        asyncio.create_task(self.send_message("system_message", {"text": text, "type": "success"}))
+        self.queue_message("system_message", {"text": text, "type": "success"})
 
     def show_model_list(self, models: List[str]):
-        asyncio.create_task(self.send_message("show_model_selection", {"models": models}))
+        self.queue_message("show_model_selection", {"models": models})
 
     async def get_model_choice_async(self, prompt: str) -> str:
         # 标记下一条输入为模型选择，路由到 control_queue
@@ -343,7 +436,7 @@ class WebUI:
         return await self.control_queue.get()
 
     def show_model_input_prompt(self):
-        asyncio.create_task(self.send_message("request_input", {"prompt": "无法自动获取模型列表，请输入模型名称:", "type": "model_input"}))
+        self.queue_message("request_input", {"prompt": "无法自动获取模型列表，请输入模型名称:", "type": "model_input"})
 
     def show_model_selected(self, model: str):
         # 不再显示消息，状态栏已经显示模型信息
@@ -363,7 +456,7 @@ class WebUI:
         """
         # 过滤掉空值
         status_data = {k: v for k, v in kwargs.items() if v is not None and v != ''}
-        asyncio.create_task(self.send_message("status_update", status_data))
+        self.queue_message("status_update", status_data)
     def mark_conversation_start(self): pass
     def refresh_conversation_history(self, *args, **kwargs): pass
     def enter_alternate_screen(self): pass
@@ -390,15 +483,15 @@ class WebUI:
                 'tokens': chunk.tokens
             })
 
-        asyncio.create_task(self.send_message("show_editor", {"chunks": chunks_data}))
+        self.queue_message("show_editor", {"chunks": chunks_data})
 
     def show_editor_result(self, success: bool, message: str = "", error: str = ""):
         """发送编辑器操作结果"""
-        asyncio.create_task(self.send_message("editor_result", {
+        self.queue_message("editor_result", {
             "success": success,
             "message": message,
             "error": error
-        }))
+        })
 
     # --- 记忆管理方法 ---
     def show_memory(self, conversations: list):
@@ -407,7 +500,7 @@ class WebUI:
         Args:
             conversations: 记忆列表
         """
-        asyncio.create_task(self.send_message("show_memory", {"conversations": conversations}))
+        self.queue_message("show_memory", {"conversations": conversations})
 
     def show_memory_result(self, success: bool, conversations: list = None, message: str = "", error: str = ""):
         """发送记忆操作结果"""
@@ -418,7 +511,7 @@ class WebUI:
             data["message"] = message
         if error:
             data["error"] = error
-        asyncio.create_task(self.send_message("memory_result", data))
+        self.queue_message("memory_result", data)
 
     # --- 兼容Shell UI的接口 ---
     async def show_chunk_editor(self, chunks: list, current_index: int = 0):
@@ -486,34 +579,34 @@ class WebUI:
     # --- 会话管理方法 ---
     def send_session_list(self, sessions: list, current_id: str = None):
         """发送会话列表"""
-        asyncio.create_task(self.send_message("session_list", {
+        self.queue_message("session_list", {
             "sessions": sessions,
             "current_id": current_id
-        }))
+        })
 
     def send_session_load(self, chunks: list):
         """发送加载会话的完整内容"""
-        asyncio.create_task(self.send_message("session_load", {
+        self.queue_message("session_load", {
             "chunks": chunks
-        }))
+        })
 
     def send_session_loaded(self, session_id: str, title: str):
         """发送会话加载成功通知"""
-        asyncio.create_task(self.send_message("session_loaded", {
+        self.queue_message("session_loaded", {
             "session_id": session_id,
             "title": title
-        }))
+        })
 
     def send_tool_details(self, tool_id: str, args: dict, result: str, duration: str = None):
         """发送工具详情"""
-        asyncio.create_task(self.send_message("tool_details", {
+        self.queue_message("tool_details", {
             "tool_id": tool_id,
             "details": {
                 "args": args,
                 "result": result,
                 "duration": duration
             }
-        }))
+        })
 
     def send_terminal_output(self, content: str, is_open: bool = True):
         """发送终端输出到工作区
@@ -522,7 +615,7 @@ class WebUI:
             content: 终端输出内容
             is_open: 终端是否已打开
         """
-        asyncio.create_task(self.send_message("terminal_output", {
+        self.queue_message("terminal_output", {
             "content": content,
             "is_open": is_open
-        }))
+        })

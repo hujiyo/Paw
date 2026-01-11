@@ -337,15 +337,21 @@ function startStream(id: string): void {
             newContent.id = id;
             existingMsg.appendChild(newContent);
         } else {
-            // 没有工具调用，直接使用现有内容区域
+            // 没有工具调用，检查现有内容区域
             const existingContent = existingMsg.querySelector('.msg__content');
             if (existingContent && existingContent.innerHTML.trim()) {
+                // 已有内容，添加新内容块
                 const newContent = document.createElement('div');
                 newContent.className = 'msg__content msg__content--continued';
                 newContent.id = id;
                 existingMsg.appendChild(newContent);
+            } else if (existingContent) {
+                // 内容为空，直接设置 id 到现有内容区域
+                existingContent.id = id;
             }
         }
+        // 复用消息时也需要通知 ChatHistory（确保对话链正确更新）
+        ChatHistory.onStreamStart(id);
     } else {
         // 新轮次，创建新消息
         dom.messages.appendChild(createMsgEl('assistant', 'PAW', '', id));

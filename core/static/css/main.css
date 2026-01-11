@@ -1147,6 +1147,13 @@ body {
     max-width: 100%;
     font-size: 0.95rem;
 }
+.msg__content p {
+    font-size: inherit;
+    margin: 0 0 0.5em 0;
+}
+.msg__content p:last-child {
+    margin-bottom: 0;
+}
 
 .msg--user .msg__content {
     text-align: left;

@@ -27,10 +27,10 @@ export interface ToolArgs {
 export function createMsgEl(type: string, author: string, text: string, id: string | null = null): HTMLDivElement {
     const el = document.createElement('div');
     el.className = `msg msg--${type}`;
-    if (id) el.id = id;
     // 添加工具容器（用于附加该消息的工具调用）
     // marked 是全局变量，由 index.html 引入
-    el.innerHTML = `<div class="msg__header">${author}</div><div class="msg__content">${marked.parse(text)}</div><div class="msg__tools"></div>`;
+    // 注意：id 设置在 msg__content 上，方便 appendStream 直接定位
+    el.innerHTML = `<div class="msg__header">${author}</div><div class="msg__content"${id ? ` id="${id}"` : ''}>${marked.parse(text)}</div><div class="msg__tools"></div>`;
     return el;
 }
 
