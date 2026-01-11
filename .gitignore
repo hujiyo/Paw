@@ -44,5 +44,6 @@ Thumbs.db
 *.AppImage
 
 MYSKILL.md
-*.js
-*.map
+
+# Frontend build output (compiled from TypeScript)
+core/static/js/

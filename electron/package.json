@@ -8,7 +8,9 @@
   "scripts": {
     "start": "npm run compile && electron .",
     "dev": "npm run compile && electron . --dev",
-    "compile": "tsc",
+    "compile": "tsc && tsc --project ../core/frontend/tsconfig.json",
+    "compile:electron": "tsc",
+    "compile:frontend": "tsc --project ../core/frontend/tsconfig.json",
     "watch": "tsc -w",
     "build": "npm run compile && electron-builder",
     "build:win": "npm run compile && electron-builder --win",
