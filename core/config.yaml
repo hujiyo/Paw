@@ -27,8 +27,8 @@ system:
   home_dir: D:\桌面\Paw
   chunk_size: 96000
 theme:
-  id: shuangbai
+  id: taoxi
   titlebar: '#FFFFFF'
-  loading: '#FFFFFF'
-  main: '#FFFFFF'
+  loading: '#FFD6E0'
+  main: '#FFF0F5'
   accent: '#ff6b35'

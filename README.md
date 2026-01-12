@@ -2,7 +2,7 @@
 
 # Paw - 桌面 AI Agent
 
-Paw 是一个基于 Electron 的桌面 AI Agent 应用，支持文件操作、终端控制、Web 搜索等丰富的工具链，并具备会话管理、记忆系统和 Skill 扩展能力。
+Paw 是一个基于 Electron 的使用TypeScript+Python打造的桌面级桌面 AI Agent 应用平台，支持文件操作、终端控制、Web 搜索等丰富的工具链，并具备会话管理、记忆系统和 Skill 扩展能力。。
 
 ## 特性
 

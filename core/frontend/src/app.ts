@@ -7,6 +7,11 @@ import { Memory, Conversation, MemoryResult, MemoryDomRefs } from './modules/mem
 import { Settings } from './modules/settings.js';
 import { NewChatDialog } from './modules/new-chat.js';
 import { AppState, StatusBar, SessionInfo } from './modules/store.js';
+import { RightSidebar } from './modules/right-sidebar.js';
+import { FileExplorer } from './modules/file-explorer.js';
+import { Planner } from './modules/planner.js';
+import { Browser } from './modules/browser.js';
+import { WorkspaceFilesSidebar } from './modules/workspace-files-sidebar.js';
 
 // ============ 类型定义 ============
 
@@ -109,6 +114,7 @@ interface DomElements {
     main: HTMLElement;
     toggleSidebarBtn: HTMLElement;
     toggleRightSidebarBtn: HTMLElement;
+    toggleWorkspaceFilesSidebarBtn: HTMLElement;
     newChatToolbarBtn: HTMLElement;
     toolbarDivider: HTMLElement;
     // 工作区终端输出
@@ -156,6 +162,7 @@ const dom: DomElements = {
     main: $<HTMLElement>('.main')!,
     toggleSidebarBtn: $<HTMLElement>('#toggle-sidebar')!,
     toggleRightSidebarBtn: $<HTMLElement>('#toggle-right-sidebar')!,
+    toggleWorkspaceFilesSidebarBtn: $<HTMLElement>('#toggle-workspace-files-sidebar')!,
     newChatToolbarBtn: $<HTMLElement>('#new-chat-toolbar')!,
     toolbarDivider: $<HTMLElement>('#toolbar-divider')!,
     // 工作区终端输出
@@ -188,6 +195,16 @@ NewChatDialog.init(send);
 Memory.init(dom as unknown as MemoryDomRefs, send);
 ChatHistory.init(dom as unknown as DomRefs);
 StatusBar.init(dom.statusBar);
+RightSidebar.init();
+FileExplorer.init();
+Planner.init();
+Browser.init();
+WorkspaceFilesSidebar.init();
+
+// 连接工作区文件侧边栏和右侧边栏：点击文件时在右侧边栏打开标签页
+WorkspaceFilesSidebar.onFileOpen((path, name, content) => {
+    RightSidebar.openFileTab(path, name, content);
+});
 
 // ============ 工具栏功能 ============
 
@@ -195,10 +212,12 @@ StatusBar.init(dom.statusBar);
 function updateToolbarVisibility(): void {
     // 左侧边栏打开时，隐藏右侧边栏按钮
     dom.toggleRightSidebarBtn.style.display = AppState.sidebarVisible ? 'none' : '';
-    // 右侧边栏打开时，隐藏左侧边栏按钮和新建会话按钮
+    // 右侧边栏打开时，隐藏左侧边栏按钮和新建会话按钮，显示工作区文件目录侧边栏按钮
     dom.toggleSidebarBtn.style.display = AppState.rightSidebarVisible ? 'none' : '';
     dom.newChatToolbarBtn.style.display = AppState.rightSidebarVisible ? 'none' : '';
     dom.toolbarDivider.style.display = AppState.rightSidebarVisible ? 'none' : '';
+    // 工作区文件目录侧边栏按钮：只在右侧边栏打开时显示
+    dom.toggleWorkspaceFilesSidebarBtn.style.display = AppState.rightSidebarVisible ? '' : 'none';
 }
 
 function toggleSidebar(): void {
@@ -416,6 +435,46 @@ function endStream(id: string): void {
 
 // ============ 工具渲染逻辑 ============
 function createTool({ id, name, args, raw_request }: ToolStartData): void {
+    // Context-Aware Focus Switching
+    if (['read_files', 'edit_files', 'create_file', 'file_glob'].includes(name)) {
+        RightSidebar.switchView('files');
+    } else if (['run_shell_command'].includes(name)) {
+        RightSidebar.switchView('terminal');
+    } else if (['create_plan', 'edit_plans', 'create_todo_list'].includes(name)) {
+        RightSidebar.switchView('plan');
+    }
+
+    // Try to update Planner if it's a todo list
+    if (name === 'create_todo_list') {
+        try {
+             // args is often a JSON string, but sometimes it might be partial if streaming?
+             // Actually tool_start args might be empty or partial.
+             // It is better to rely on raw_request if available, or just wait for the result?
+             // But we want to see it immediately.
+             
+             // For simplicity, let's try to parse raw_request if available
+             if (raw_request && raw_request.todos) {
+                 const todos = raw_request.todos as any[];
+                 Planner.setItems(todos.map((t, i) => ({
+                     id: String(i),
+                     text: t.title,
+                     done: false
+                 })));
+             } else if (args) {
+                 const parsed = JSON.parse(args);
+                 if (parsed.todos) {
+                    Planner.setItems(parsed.todos.map((t: any, i: number) => ({
+                         id: String(i),
+                         text: t.title,
+                         done: false
+                     })));
+                 }
+             }
+        } catch (e) {
+            console.warn('Failed to parse todo list for planner', e);
+        }
+    }
+    
     if (name === 'stay_silent') {
         const msgEl = dom.messages.querySelector('.msg--assistant:last-child');
         if (msgEl) msgEl.remove();

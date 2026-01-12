@@ -130,6 +130,74 @@ class WebUI:
             # 或者可以返回主目录作为默认值
             return JSONResponse(content={"success": True, "path": str(Path.home())})
 
+        @self.app.post("/api/fs/list")
+        async def list_files(request: Request):
+            """列出指定目录下的文件"""
+            try:
+                data = await request.json()
+                path_str = data.get("path") or "."
+                
+                # 安全检查：防止访问系统敏感目录（简单示例，实际需更严谨）
+                # 这里假设用户有权访问任何目录，因为是本地工具
+                
+                p = Path(path_str).resolve()
+                if not p.exists():
+                    return JSONResponse(content={"success": False, "error": "Path does not exist"})
+                
+                items = []
+                try:
+                    for item in p.iterdir():
+                        try:
+                            stats = item.stat()
+                            items.append({
+                                "name": item.name,
+                                "path": str(item),
+                                "is_dir": item.is_dir(),
+                                "size": stats.st_size if not item.is_dir() else 0,
+                                "mtime": stats.st_mtime
+                            })
+                        except Exception:
+                            continue
+                except PermissionError:
+                     return JSONResponse(content={"success": False, "error": "Permission denied"})
+
+                # 排序：目录在前，然后按文件名
+                items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+                
+                return JSONResponse(content={
+                    "success": True, 
+                    "items": items,
+                    "current_path": str(p),
+                    "parent_path": str(p.parent)
+                })
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
+        @self.app.post("/api/fs/content")
+        async def get_file_content(request: Request):
+            """获取文件内容"""
+            try:
+                data = await request.json()
+                path_str = data.get("path")
+                if not path_str:
+                     return JSONResponse(content={"success": False, "error": "No path provided"})
+                
+                p = Path(path_str).resolve()
+                if not p.exists() or not p.is_file():
+                    return JSONResponse(content={"success": False, "error": "File not found"})
+                
+                # 限制文件大小，防止浏览器崩溃
+                if p.stat().st_size > 1024 * 1024: # 1MB
+                    return JSONResponse(content={"success": False, "error": "File too large to preview (>1MB)"})
+                
+                try:
+                    content = p.read_text(encoding="utf-8", errors="replace")
+                    return JSONResponse(content={"success": True, "content": content})
+                except Exception as e:
+                    return JSONResponse(content={"success": False, "error": str(e)})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()

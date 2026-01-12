@@ -7,7 +7,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.css">
-    <link rel="stylesheet" href="/static/css/main.css?v=1.0.2">
+    <link rel="stylesheet" href="/static/css/main.css?v=1.0.3">
 </head>
 <body>
     <div id="app-shell">
@@ -76,6 +76,13 @@
                             <path d="M4 2h10a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1zm0 1v10h3V3H4zm4 0v10h6V3H8z"/>
                         </svg>
                     </button>
+                    <!-- 工作区文件目录侧边栏按钮：当右侧边栏打开时显示 -->
+                    <button class="toolbar__btn" id="toggle-workspace-files-sidebar" title="工作区文件 (Ctrl+Shift+E)" style="display:none;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                            <polyline points="13 2 13 9 20 9"></polyline>
+                        </svg>
+                    </button>
                     <div class="toolbar__divider" id="toolbar-divider"></div>
                     <button class="toolbar__btn" id="new-chat-toolbar" title="新对话 (Ctrl+N)">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -106,21 +113,90 @@
         </main>
 
         <aside class="sidebar-right" id="sidebar-right">
-            <!-- 终端输出视图 -->
-            <div class="sidebar__view sidebar__view--active">
-                <div class="workspace-header">
-                    <div class="workspace-header__title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="4 17 10 11 4 5"></polyline>
-                            <line x1="12" y1="19" x2="20" y2="19"></line>
-                        </svg>
-                        终端
+            <!-- VSCode 风格标签页栏 -->
+            <div class="editor-tabs" id="editor-tabs">
+                <!-- 常驻标签页 -->
+                <div class="editor-tab editor-tab--pinned editor-tab--active" data-tab-id="terminal" data-pinned="true">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="4 17 10 11 4 5"></polyline>
+                        <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    <span class="editor-tab__title">Terminal</span>
+                </div>
+                <div class="editor-tab editor-tab--pinned" data-tab-id="plan" data-pinned="true">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                    <span class="editor-tab__title">Plan</span>
+                </div>
+                <div class="editor-tab editor-tab--pinned" data-tab-id="browser" data-pinned="true">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                    </svg>
+                    <span class="editor-tab__title">Web</span>
+                </div>
+                <!-- 文件标签页将动态添加在这里 -->
+            </div>
+
+            <!-- 标签页内容区 -->
+            <div class="editor-panels" id="editor-panels">
+                <!-- 终端输出视图 -->
+                <div class="editor-panel editor-panel--active" id="panel-terminal">
+                    <div class="workspace-header">
+                        <div class="workspace-header__title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="4 17 10 11 4 5"></polyline>
+                                <line x1="12" y1="19" x2="20" y2="19"></line>
+                            </svg>
+                            终端
+                        </div>
+                        <div class="workspace-header__status" id="terminal-status">未打开</div>
                     </div>
-                    <div class="workspace-header__status" id="terminal-status">未打开</div>
+                    <div class="terminal-output" id="terminal-output">
+                        <pre class="terminal-output__content" id="terminal-content">Paw 未打开终端</pre>
+                    </div>
                 </div>
-                <div class="terminal-output" id="terminal-output">
-                    <pre class="terminal-output__content" id="terminal-content">Paw 未打开终端</pre>
+
+                <!-- 计划/任务视图 -->
+                <div class="editor-panel" id="panel-plan">
+                    <div class="workspace-header">
+                        <div class="workspace-header__title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 20h9"></path>
+                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                            </svg>
+                            任务计划
+                        </div>
+                    </div>
+                    <div class="plan-list" id="plan-list">
+                        <div class="plan-empty">暂无活动任务</div>
+                    </div>
                 </div>
+
+                <!-- 浏览器/预览视图 -->
+                <div class="editor-panel" id="panel-browser">
+                    <div class="workspace-header">
+                        <div class="workspace-header__title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="2" y1="12" x2="22" y2="12"></line>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                            </svg>
+                            Web 预览
+                        </div>
+                        <div class="browser-controls">
+                            <input type="text" id="browser-url" class="browser-url-input" placeholder="http://localhost:...">
+                            <button id="browser-go" class="icon-btn">Go</button>
+                        </div>
+                    </div>
+                    <div class="browser-container">
+                        <iframe id="browser-frame" src="about:blank"></iframe>
+                    </div>
+                </div>
+
+                <!-- 文件预览面板将动态添加在这里 -->
             </div>
         </aside>
     </div>
@@ -484,6 +560,26 @@
         </div>
     </div>
 
-    <script type="module" src="/static/js/app.js?v=1.0.2"></script>
+    <!-- 工作区文件目录侧边栏：覆盖层式，不挤压聊天区 -->
+    <aside id="workspace-files-sidebar" class="workspace-files-sidebar">
+        <div class="workspace-files-sidebar__header">
+            <div class="workspace-files-sidebar__title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                    <polyline points="13 2 13 9 20 9"></polyline>
+                </svg>
+                工作区文件
+            </div>
+            <div class="workspace-files-sidebar__actions">
+                <button id="workspace-files-refresh-btn" class="icon-btn" title="刷新">↻</button>
+                <button id="workspace-files-close-btn" class="workspace-files-sidebar__close">×</button>
+            </div>
+        </div>
+        <div class="workspace-files-sidebar__content">
+            <div class="file-tree" id="workspace-file-tree"></div>
+        </div>
+    </aside>
+
+    <script type="module" src="/static/js/app.js?v=1.0.3"></script>
 </body>
 </html>
