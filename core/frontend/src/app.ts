@@ -429,6 +429,9 @@ function endStream(id: string): void {
     }
 
     ChatHistory.onStreamEnd(AppState.streamBuf);
+
+    // 消息结束后刷新 Browser URL 列表
+    Browser.refresh();
     AppState.streamId = null;
     AppState.streamBuf = '';
 }
@@ -442,6 +445,9 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
         RightSidebar.switchView('terminal');
     } else if (['create_plan', 'edit_plans', 'create_todo_list'].includes(name)) {
         RightSidebar.switchView('plan');
+    } else if (['search_web', 'load_url_content', 'read_page'].includes(name)) {
+        RightSidebar.switchToTab('browser');
+        Browser.refresh();
     }
 
     // Try to update Planner if it's a todo list
@@ -527,7 +533,7 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
 function updateTool({ id, name, display, success, raw_response }: ToolResultData): void {
     const el = document.getElementById(`tool-${id}`);
     if (!el) return;
-    
+
     if (name === 'stay_silent') {
         const msgEl = el.closest('.msg--assistant');
         if (msgEl) msgEl.remove();
@@ -537,7 +543,7 @@ function updateTool({ id, name, display, success, raw_response }: ToolResultData
         }
         return;
     }
-    
+
     // 如果后端没有提供 display 数据（或者数据不完整），则在前端动态计算
     // 这是为了解耦前后端，让前端全权负责渲染逻辑
     let finalDisplay = display;
@@ -570,12 +576,18 @@ function updateTool({ id, name, display, success, raw_response }: ToolResultData
 
         finalDisplay = getToolDisplay(name, resultText, args);
     }
-    
+
     updateToolElement(el, name, finalDisplay, success);
-    
+
     // 存储原始响应数据
     if (raw_response) {
         el.dataset.rawResponse = JSON.stringify(raw_response);
+    }
+
+    // 工具结果收到后，刷新 Browser URL 列表
+    if (['search_web', 'load_url_content', 'read_page'].includes(name) && success) {
+        console.log(`[App] Tool ${name} finished, refreshing Browser...`);
+        Browser.refresh();
     }
 }
 

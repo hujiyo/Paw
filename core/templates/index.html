@@ -175,24 +175,48 @@
                     </div>
                 </div>
 
-                <!-- 浏览器/预览视图 -->
+                <!-- 浏览器/Web工具视图 -->
                 <div class="editor-panel" id="panel-browser">
-                    <div class="workspace-header">
-                        <div class="workspace-header__title">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <line x1="2" y1="12" x2="22" y2="12"></line>
-                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                            </svg>
-                            Web 预览
+                    <!-- 主界面：URL收集列表 -->
+                    <div class="browser-view browser-view--main" id="browser-main-view">
+                        <div class="workspace-header">
+                            <div class="workspace-header__title">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                                </svg>
+                                URL收集
+                                <span class="browser-url-count" id="browser-url-count">0</span>
+                            </div>
                         </div>
-                        <div class="browser-controls">
-                            <input type="text" id="browser-url" class="browser-url-input" placeholder="http://localhost:...">
-                            <button id="browser-go" class="icon-btn">Go</button>
+                        <div class="browser-results" id="browser-results">
+                            <div class="browser-empty">
+                                <div class="browser-empty__icon">🌐</div>
+                                <div class="browser-empty__text">暂无URL</div>
+                                <div class="browser-empty__hint">对话中出现的URL会自动收集到这里</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="browser-container">
-                        <iframe id="browser-frame" src="about:blank"></iframe>
+                    
+                    <!-- 次级界面：网页预览 -->
+                    <div class="browser-view browser-view--detail" id="browser-detail-view" style="display:none;">
+                        <div class="workspace-header">
+                            <div class="workspace-header__title">
+                                <button id="browser-back-btn" class="icon-btn" title="返回搜索结果">←</button>
+                                <span class="browser-detail-title" id="browser-detail-title">网页预览</span>
+                            </div>
+                            <div class="browser-actions">
+                                <button id="browser-external-btn" class="icon-btn" title="在系统浏览器打开">🔗</button>
+                            </div>
+                        </div>
+                        <div class="browser-controls browser-controls--detail">
+                            <input type="text" id="browser-url" class="browser-url-input" placeholder="https://...">
+                            <button id="browser-go" class="icon-btn">Go</button>
+                        </div>
+                        <div class="browser-container">
+                            <iframe id="browser-frame" src="about:blank"></iframe>
+                        </div>
                     </div>
                 </div>
 

@@ -2,6 +2,7 @@
 import { $, $$ } from './utils.js';
 import { AppState } from './store.js';
 import { escapeHtml } from './utils.js';
+import { Browser } from './browser.js';
 
 interface FileTab {
     id: string;      // 唯一标识（使用文件路径的 hash）
@@ -62,6 +63,11 @@ export class RightSidebar {
             const el = panel as HTMLElement;
             el.classList.toggle('editor-panel--active', el.id === `panel-${tabId}`);
         });
+
+        // 切换到 Web 标签页时，主动刷新内容
+        if (tabId === 'browser') {
+            Browser.refresh();
+        }
         
         // 保存状态（只保存常驻标签页）
         if (['terminal', 'plan', 'browser'].includes(tabId)) {

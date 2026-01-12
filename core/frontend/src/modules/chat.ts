@@ -1,6 +1,7 @@
 // 对话历史管理
 import { escapeHtml, scrollToBottom } from './utils.js';
 import { createMsgEl, getToolDisplay, updateToolElement, ToolArgs } from './render.js';
+import { Browser } from './browser.js';
 
 // ============ 类型定义 ============
 
@@ -396,5 +397,8 @@ export const ChatHistory: ChatHistoryManager = {
 
         scrollToBottom(this.dom!.msgWrap);
         this.renderChain();
+        
+        // 刷新 Browser URL 列表
+        Browser.refresh();
     }
 };
