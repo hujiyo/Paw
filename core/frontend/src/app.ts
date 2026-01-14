@@ -366,11 +366,22 @@ function startStream(id: string): void {
         // 同一轮次中，复用现有消息
         const toolsContainer = existingMsg.querySelector('.msg__tools');
         if (toolsContainer && toolsContainer.children.length > 0) {
-            // 有工具调用，在消息末尾添加新内容块
-            const newContent = document.createElement('div');
-            newContent.className = 'msg__content msg__content--continued';
-            newContent.id = id;
-            existingMsg.appendChild(newContent);
+            // 存在工具调用：
+            // 如果首个内容区域仍为空（通常是先收到 tool_start，后收到文本流），
+            // 应该把本次流式内容写入首个内容区域，确保文本出现在工具"之前"。
+            const firstContent = existingMsg.querySelector('.msg__content');
+            if (firstContent && !firstContent.innerHTML.trim()) {
+                // 如果已有占位 id（可能由 tool_start 提前创建），保持不变以与对话链绑定一致；
+                if (!firstContent.id) {
+                    firstContent.id = id;
+                }
+            } else {
+                // 已经有文本了，此时新增的文本应当位于工具之后（继续追加）
+                const newContent = document.createElement('div');
+                newContent.className = 'msg__content msg__content--continued';
+                newContent.id = id;
+                existingMsg.appendChild(newContent);
+            }
         } else {
             // 没有工具调用，检查现有内容区域
             const existingContent = existingMsg.querySelector('.msg__content');

@@ -169,15 +169,43 @@ export class Browser {
         el.dataset.url = entry.url;
 
         el.innerHTML = `
-            <div class="browser-result__header">
+            <div class="browser-result__content">
                 <span class="browser-result__index">${index}</span>
                 <span class="browser-result__separator">-</span>
-                <div class="browser-result__title">${escapeHtml(entry.title)}</div>
+                <div class="browser-result__text">
+                    <div class="browser-result__title">${escapeHtml(entry.title)}</div>
+                    <div class="browser-result__url">${escapeHtml(entry.url)}</div>
+                </div>
+                <button class="browser-result__copy-btn" title="复制链接">CP</button>
             </div>
-            <div class="browser-result__url">${escapeHtml(entry.url)}</div>
         `;
 
-        el.addEventListener('click', () => this.openUrl(entry));
+        // 点击整个区域打开URL
+        el.addEventListener('click', (e) => {
+            // 如果点击的是复制按钮，不触发打开URL
+            if ((e.target as HTMLElement).classList.contains('browser-result__copy-btn')) {
+                return;
+            }
+            this.openUrl(entry);
+        });
+
+        // 复制按钮点击事件
+        const copyBtn = el.querySelector('.browser-result__copy-btn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // 阻止事件冒泡，不触发打开URL
+                navigator.clipboard.writeText(entry.url).then(() => {
+                    const originalText = copyBtn.textContent;
+                    copyBtn.textContent = 'OK';
+                    setTimeout(() => {
+                        copyBtn.textContent = originalText;
+                    }, 1500);
+                }).catch(err => {
+                    console.error('复制失败:', err);
+                });
+            });
+        }
+
         return el;
     }
 
