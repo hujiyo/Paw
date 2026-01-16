@@ -2253,3 +2253,66 @@ body {
     position: relative;
 }
 
+
+/* ========== 消息操作按钮 ========== */
+.msg__actions {
+    display: flex;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+    padding-left: 0.4rem;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+.msg:hover .msg__actions {
+    opacity: 1;
+}
+.msg--user .msg__actions {
+    padding-left: 0;
+    padding-right: 0.4rem;
+    justify-content: flex-end;
+}
+
+.msg__action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.msg__action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+.msg__action-btn--copy:hover {
+    color: var(--accent-assistant);
+    border-color: var(--accent-assistant);
+}
+.msg__action-btn--delete:hover {
+    color: var(--error-color);
+    border-color: var(--error-color);
+}
+.msg__action-btn--retry:hover {
+    color: var(--tool-color);
+    border-color: var(--tool-color);
+}
+.msg__action-btn--continue:hover {
+    color: var(--success-color);
+    border-color: var(--success-color);
+}
+.msg__action-btn--success {
+    color: var(--success-color) !important;
+    border-color: var(--success-color) !important;
+    background: rgba(16, 185, 129, 0.1) !important;
+}
+.msg__action-btn svg {
+    width: 14px;
+    height: 14px;
+}

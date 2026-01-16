@@ -173,6 +173,36 @@ class WebUI:
             except Exception as e:
                 return JSONResponse(content={"success": False, "error": str(e)})
 
+        # 轮次数据获取接口（供前端对话链视图使用）
+        # 注意：需要 paw 实例注入 chunk_manager，通过 set_chunk_manager 方法
+        self._chunk_manager_ref = None
+
+        @self.app.get("/api/turns")
+        async def get_turns():
+            """获取对话轮次列表（供前端渲染对话链）"""
+            if self._chunk_manager_ref is None:
+                return JSONResponse(content={"success": False, "error": "ChunkManager not initialized"})
+            
+            try:
+                turns = self._chunk_manager_ref.get_turns()
+                # 转换为前端需要的格式
+                result = []
+                for idx, turn in enumerate(turns):
+                    turn_data = {
+                        'index': idx,
+                        'role': turn['role'],
+                        'start_idx': turn['start_idx'],
+                        'end_idx': turn['end_idx'],
+                        'preview': self._get_turn_preview(turn),
+                        'tool_count': sum(1 for c in turn['chunks'] 
+                                         if hasattr(c, 'metadata') and c.metadata.get('tool_calls')),
+                        'parts': self._get_turn_parts(turn)
+                    }
+                    result.append(turn_data)
+                return JSONResponse(content={"success": True, "turns": result})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
         @self.app.post("/api/fs/content")
         async def get_file_content(request: Request):
             """获取文件内容"""
@@ -717,3 +747,75 @@ class WebUI:
             "content": content,
             "is_open": is_open
         })
+
+    # --- 轮次管理方法 ---
+    def set_chunk_manager(self, chunk_manager):
+        """注入 ChunkManager 引用（由 Paw 调用）
+        
+        Args:
+            chunk_manager: ChunkManager 实例
+        """
+        self._chunk_manager_ref = chunk_manager
+
+    def _get_turn_preview(self, turn: dict) -> str:
+        """获取轮次预览文本
+        
+        Args:
+            turn: 轮次数据 (from ChunkManager.get_turns())
+            
+        Returns:
+            预览文本（最多50字符）
+        """
+        from chunk_system import ChunkType
+        
+        for chunk in turn['chunks']:
+            if chunk.chunk_type in (ChunkType.USER, ChunkType.ASSISTANT):
+                content = chunk.content or ''
+                # 移除换行，截断
+                preview = content.replace('\n', ' ').strip()
+                if len(preview) > 50:
+                    preview = preview[:47] + '...'
+                return preview
+        
+        # 如果只有工具调用，显示工具数量
+        tool_count = sum(1 for c in turn['chunks'] 
+                        if hasattr(c, 'metadata') and c.metadata.get('tool_calls'))
+        if tool_count > 0:
+            return f'{tool_count} 个工具调用'
+        return ''
+
+    def _get_turn_parts(self, turn: dict) -> list:
+        """获取轮次的详细部分（用于展开视图）
+        
+        Args:
+            turn: 轮次数据
+            
+        Returns:
+            parts 列表，每个元素 {type: 'text'|'tool', ...}
+        """
+        from chunk_system import ChunkType
+        
+        parts = []
+        for chunk in turn['chunks']:
+            if chunk.chunk_type in (ChunkType.USER, ChunkType.ASSISTANT):
+                if chunk.content:
+                    parts.append({
+                        'type': 'text',
+                        'text': chunk.content[:100] + ('...' if len(chunk.content) > 100 else '')
+                    })
+            
+            # 提取工具调用
+            if hasattr(chunk, 'metadata') and chunk.metadata.get('tool_calls'):
+                for tc in chunk.metadata['tool_calls']:
+                    func = tc.get('function', {})
+                    parts.append({
+                        'type': 'tool',
+                        'id': tc.get('id', ''),
+                        'name': func.get('name', 'unknown')
+                    })
+        
+        return parts
+
+    def notify_turns_updated(self):
+        """通知前端轮次已更新（触发对话链刷新）"""
+        self.queue_message("turns_updated", {})

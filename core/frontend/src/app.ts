@@ -1,7 +1,7 @@
 // 主入口文件
 import { $, $$, initMarkdown, scrollToBottom, escapeHtml } from './modules/utils.js';
 import { ThemeColors } from './modules/theme.js';
-import { createMsgEl, addSysMsg, updateToolElement, renderModalContent, getToolDisplay } from './modules/render.js';
+import { createMsgEl, addSysMsg, updateToolElement, renderModalContent, getToolDisplay, setMessageActions } from './modules/render.js';
 import { ChatHistory, DomRefs, SessionChunk } from './modules/chat.js';
 import { Memory, Conversation, MemoryResult, MemoryDomRefs } from './modules/memory.js';
 import { Settings } from './modules/settings.js';
@@ -206,6 +206,72 @@ WorkspaceFilesSidebar.onFileOpen((path, name, content) => {
     RightSidebar.openFileTab(path, name, content);
 });
 
+// ============ 消息操作回调 ============
+// 注意：轮次数据现在由后端统一管理，前端不再维护 turns 列表
+setMessageActions({
+    onCopy: (text, role) => {
+        console.log(`[App] Copied ${role} message`);
+    },
+    onDelete: (msgId, role) => {
+        if (AppState.isGenerating) {
+            showInfoDialog('正在生成中，无法删除消息');
+            return;
+        }
+        
+        // 从前端 messages 中删除（仅用于 UI 显示）
+        const msgIdx = ChatHistory.messages.findIndex(m => m.id === msgId);
+        if (msgIdx >= 0) {
+            ChatHistory.messages.splice(msgIdx, 1);
+        }
+        
+        // 清空并重新渲染整个消息区域
+        dom.messages.innerHTML = '';
+        ChatHistory.messages.forEach(msg => {
+            const el = createMsgEl(msg.role, msg.role === 'user' ? 'USER' : 'PAW', msg.text, msg.id);
+            dom.messages.appendChild(el);
+        });
+        
+        // 通知后端删除消息，后端处理完成后会通过 turns_updated 事件刷新对话链
+        send(`/delete-message ${msgId} ${role}`);
+        // 立即刷新对话链（后端数据）
+        ChatHistory.renderChain();
+    },
+    onRetry: (msgId) => {
+        if (AppState.isGenerating) {
+            showInfoDialog('正在生成中，请先停止当前回复');
+            return;
+        }
+        
+        // 从前端 messages 中删除（仅用于 UI 显示）
+        const msgIdx = ChatHistory.messages.findIndex(m => m.id === msgId);
+        if (msgIdx >= 0) {
+            ChatHistory.messages.splice(msgIdx, 1);
+        }
+        
+        // 清空并重新渲染整个消息区域
+        dom.messages.innerHTML = '';
+        ChatHistory.messages.forEach(msg => {
+            const el = createMsgEl(msg.role, msg.role === 'user' ? 'USER' : 'PAW', msg.text, msg.id);
+            dom.messages.appendChild(el);
+        });
+        
+        // 发送重试命令，后端会重新生成
+        send(`/retry ${msgId}`);
+        setGeneratingState(true);
+        // 立即刷新对话链（后端数据）
+        ChatHistory.renderChain();
+    },
+    onContinue: (msgId) => {
+        if (AppState.isGenerating) {
+            showInfoDialog('正在生成中，请等待完成');
+            return;
+        }
+        // 发送继续命令
+        send(`/continue ${msgId}`);
+        setGeneratingState(true);
+    }
+});
+
 // ============ 工具栏功能 ============
 
 // 更新工具栏按钮可见性（左右侧边栏互斥）
@@ -337,7 +403,8 @@ function handleEvent({ event, data }: WebSocketEvent): void {
             requestSessionList();
         },
         'models_fetched': () => Settings.handleModelResponse(data as ModelsFetchedData),
-        'terminal_output': () => updateTerminalOutput(data as { content: string; is_open: boolean })
+        'terminal_output': () => updateTerminalOutput(data as { content: string; is_open: boolean }),
+        'turns_updated': () => ChatHistory.renderChain()
     };
     handlers[event]?.();
 }
@@ -449,16 +516,18 @@ function endStream(id: string): void {
 
 // ============ 工具渲染逻辑 ============
 function createTool({ id, name, args, raw_request }: ToolStartData): void {
-    // Context-Aware Focus Switching
-    if (['read_files', 'edit_files', 'create_file', 'file_glob'].includes(name)) {
-        RightSidebar.switchView('files');
-    } else if (['run_shell_command'].includes(name)) {
-        RightSidebar.switchView('terminal');
-    } else if (['create_plan', 'edit_plans', 'create_todo_list'].includes(name)) {
-        RightSidebar.switchView('plan');
-    } else if (['search_web', 'load_url_content', 'read_page'].includes(name)) {
-        RightSidebar.switchToTab('browser');
-        Browser.refresh();
+    // Context-Aware Focus Switching - 只在右侧边栏已经打开时切换标签，不强制打开
+    if (AppState.rightSidebarVisible) {
+        if (['read_files', 'edit_files', 'create_file', 'file_glob'].includes(name)) {
+            RightSidebar.switchView('files');
+        } else if (['run_shell_command'].includes(name)) {
+            RightSidebar.switchView('terminal');
+        } else if (['create_plan', 'edit_plans', 'create_todo_list'].includes(name)) {
+            RightSidebar.switchView('plan');
+        } else if (['search_web', 'load_url_content', 'read_page'].includes(name)) {
+            RightSidebar.switchToTab('browser');
+            Browser.refresh();
+        }
     }
 
     // Try to update Planner if it's a todo list
@@ -496,10 +565,7 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
         const msgEl = dom.messages.querySelector('.msg--assistant:last-child');
         if (msgEl) msgEl.remove();
         
-        if (ChatHistory.currentTurn) {
-            ChatHistory.currentTurn = null;
-            ChatHistory.isInAssistantTurn = false;
-        }
+        ChatHistory.isInAssistantTurn = false;
         setGeneratingState(false);
         return;
     }
@@ -548,10 +614,7 @@ function updateTool({ id, name, display, success, raw_response }: ToolResultData
     if (name === 'stay_silent') {
         const msgEl = el.closest('.msg--assistant');
         if (msgEl) msgEl.remove();
-        if (ChatHistory.currentTurn) {
-            ChatHistory.currentTurn = null;
-            ChatHistory.isInAssistantTurn = false;
-        }
+        ChatHistory.isInAssistantTurn = false;
         return;
     }
 

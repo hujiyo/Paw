@@ -711,6 +711,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 tools_schema=TOOLS_SCHEMA
             )
             
+            # 更新 WebUI 的 chunk_manager 引用
+            if hasattr(self.ui, 'set_chunk_manager'):
+                self.ui.set_chunk_manager(self.chunk_manager)
+            
             # 恢复工作目录（每个会话有独立的工作区）
             if snapshot.workspace_dir:
                 self.workspace_dir = Path(snapshot.workspace_dir)
@@ -792,6 +796,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 没有历史会话，创建新会话
             from chunk_system import ChunkManager
             self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+            
+            # 更新 WebUI 的 chunk_manager 引用
+            if hasattr(self.ui, 'set_chunk_manager'):
+                self.ui.set_chunk_manager(self.chunk_manager)
             
             new_session = self.session_manager.save_session(
                 chunk_manager=self.chunk_manager,
@@ -1359,6 +1367,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 启动横幅
         self.ui.print_welcome()
 
+        # 注入 chunk_manager 引用到 WebUI（用于 /api/turns 接口）
+        if hasattr(self.ui, 'set_chunk_manager'):
+            self.ui.set_chunk_manager(self.chunk_manager)
+
         # 记忆系统异步初始化：不阻塞首屏加载
         # 在后台线程中初始化，用户可以立即开始对话
         if self.memory_manager is None:
@@ -1415,6 +1427,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         # 创建新的 ChunkManager
                         from chunk_system import ChunkManager
                         self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+                        
+                        # 更新 WebUI 的 chunk_manager 引用
+                        if hasattr(self.ui, 'set_chunk_manager'):
+                            self.ui.set_chunk_manager(self.chunk_manager)
                         
                         # 重新生成系统提示词（包含新的工作目录信息）
                         self.system_prompt = self._create_system_prompt()
@@ -1557,6 +1573,59 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                             self.ui.print_error(f"删除会话失败: {session_id}")
                     continue
 
+                if user_input.startswith('/delete-message '):
+                    # 删除单条消息（前端操作）
+                    parts = user_input.split(' ')
+                    msg_id = parts[1].strip() if len(parts) > 1 else ''
+                    role = parts[2].strip() if len(parts) > 2 else ''
+                    
+                    if msg_id:
+                        # 根据角色删除对应的轮次
+                        if role == 'user':
+                            deleted = self.chunk_manager.delete_last_turn('user')
+                        elif role == 'assistant':
+                            deleted = self.chunk_manager.delete_last_turn('assistant')
+                        else:
+                            # 默认删除最后一个轮次
+                            deleted = self.chunk_manager.delete_last_turn()
+                        
+                        if deleted:
+                            self._save_session()
+                            self.ui.print_dim(f"[已删除消息]")
+                        else:
+                            self.ui.print_dim(f"[没有可删除的消息]")
+                    continue
+
+                if user_input.startswith('/retry '):
+                    # 重试：删除最后一条 PAW 回复（整个轮次），重新生成
+                    msg_id = user_input.split(' ', 1)[1].strip()
+                    if msg_id:
+                        # 获取最后一个用户轮次的内容
+                        last_user_turn = self.chunk_manager.get_last_turn('user')
+                        if last_user_turn:
+                            user_msg = self.chunk_manager.get_turn_content(last_user_turn)
+                            # 删除最后一个助手轮次
+                            self.chunk_manager.delete_last_turn('assistant')
+                            self._save_session()
+                            # 重新处理用户输入
+                            should_send_turn_end = True
+                            await self.process_input(user_msg)
+                        else:
+                            self.ui.print_error("找不到对应的用户消息")
+                    continue
+
+                if user_input.startswith('/continue '):
+                    # 继续生成：让 PAW 继续之前的回复
+                    msg_id = user_input.split(' ', 1)[1].strip()
+                    if msg_id:
+                        # 添加一个继续生成的提示
+                        continue_prompt = "[系统提示: 请继续你之前的回复，不要重复已说过的内容]"
+                        self.chunk_manager.add_user_input(continue_prompt)
+                        should_send_turn_end = True
+                        # 调用 LLM 继续生成
+                        await self._continue_generation()
+                    continue
+
                 if user_input == '/new':
                     # 新对话：立即创建空会话记录并显示在侧边栏
                     from chunk_system import ChunkManager, ChunkType
@@ -1609,6 +1678,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         else:
                             # 创建新的空会话
                             self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+                            
+                            # 更新 WebUI 的 chunk_manager 引用
+                            if hasattr(self.ui, 'set_chunk_manager'):
+                                self.ui.set_chunk_manager(self.chunk_manager)
 
                             new_session = self.session_manager.save_session(
                                 chunk_manager=self.chunk_manager,
@@ -1712,6 +1785,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 2. 创建新会话
         self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
         
+        # 更新 WebUI 的 chunk_manager 引用
+        if hasattr(self.ui, 'set_chunk_manager'):
+            self.ui.set_chunk_manager(self.chunk_manager)
+        
         # 3. 初始化 System Prompt (注入新的工作目录等)
         self.system_prompt = self._create_system_prompt()
         
@@ -1736,65 +1813,48 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             
         self.ui.print_success(f'新对话已创建 (工作区: {self.workspace_dir})')
 
-    async def _create_chat_with_config(self, workspace_dir: str = None, title: str = None, model: str = None):
-        """创建带配置的新对话"""
-        from chunk_system import ChunkManager
+    async def _continue_generation(self):
+        """继续生成回复"""
+        # 获取当前上下文
+        messages = self.chunk_manager.get_context_for_llm()
         
-        # 1. 更新环境配置
-        if workspace_dir:
+        # 调用 LLM
+        response = await self._call_llm_with_tools(messages)
+        
+        # 处理响应
+        if response.get("content"):
+            self.chunk_manager.add_assistant_response(response["content"])
+        
+        # 处理工具调用
+        tool_calls = response.get("tool_calls", [])
+        if tool_calls:
+            await self._handle_tool_calls(tool_calls)
+        
+        # 保存会话
+        self._save_session()
+
+    async def _handle_tool_calls(self, tool_calls: list):
+        """处理工具调用（从 process_input 中提取的逻辑）"""
+        for tc in tool_calls:
+            tool_id = tc.get("id", "")
+            func = tc.get("function", {})
+            tool_name = func.get("name", "")
+            args_str = func.get("arguments", "{}")
+            
             try:
-                new_workspace = Path(workspace_dir).resolve()
-                if not new_workspace.exists():
-                    self.ui.print_error(f"工作区不存在，已创建: {new_workspace}")
-                    new_workspace.mkdir(parents=True, exist_ok=True)
-                
-                self.workspace_dir = new_workspace
-                self.workspace_name = self.workspace_dir.name
-                
-                # 更新工具集的工作目录
-                # 注意：重新初始化 BaseTools 会重置终端状态，这在新对话中是预期的
-                config = self._load_config()
-                self.tools = BaseTools(sandbox_dir=str(self.workspace_dir), config=config)
-                register_all_tools(self.tools)
-            except Exception as e:
-                self.ui.print_error(f"切换工作区失败: {e}")
-                return
-
-        if model:
-            self.model = model
-            # 更新 LLM 客户端配置
-            self.llm = LLMClient(LLMConfig(
-                api_url=self.api_url,
-                model=self.model,
-                api_key=self.api_key
-            ))
-
-        # 2. 创建新会话
-        self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
-        
-        # 3. 初始化 System Prompt (注入新的工作目录等)
-        self.system_prompt = self._create_system_prompt()
-        
-        # 4. 保存会话
-        new_session = self.session_manager.save_session(
-            chunk_manager=self.chunk_manager,
-            workspace_dir=str(self.workspace_dir),
-            model=self.model,
-            shell_open=False,
-            shell_pid=None,
-            session_id=None,
-            title=title # 传入手动设置的标题
-        )
-        self.current_session_id = new_session.session_id
-        
-        # 5. 同步 UI
-        if hasattr(self.ui, 'send_message'):
-            self._sync_session_list()
-            await self.ui.send_message('new_chat', {
-                'session_id': new_session.session_id
-            })
+                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+            except json.JSONDecodeError:
+                args = {}
             
-        self.ui.print_success(f'新对话已创建 (工作区: {self.workspace_dir})')
+            # 执行工具
+            result = await self._execute_tool({"tool": tool_name, "args": args})
+            
+            # 添加工具结果到上下文
+            self.chunk_manager.add_tool_result(
+                tool_call_id=tool_id,
+                tool_name=tool_name,
+                result=result.get("result") or result.get("error", "")
+            )
 
 async def main():
     """主入口 - 唯一标准启动方式"""

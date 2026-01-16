@@ -21,17 +21,188 @@ export interface ToolArgs {
     [key: string]: unknown;
 }
 
+// ============ 消息操作回调 ============
+
+export interface MessageActions {
+    onCopy?: (text: string, role: 'user' | 'assistant') => void;
+    onDelete?: (msgId: string, role: 'user' | 'assistant') => void;
+    onRetry?: (msgId: string) => void;
+    onContinue?: (msgId: string) => void;
+}
+
+let messageActionsCallbacks: MessageActions = {};
+
+// 设置消息操作回调
+export function setMessageActions(actions: MessageActions): void {
+    messageActionsCallbacks = actions;
+}
+
 // ============ 消息渲染 ============
+
+// 创建消息操作按钮HTML
+function buildActionsHtml(role: 'user' | 'assistant'): string {
+    let actionsHtml = `
+        <div class="msg__actions">
+            <button class="msg__action-btn msg__action-btn--copy" title="复制">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+            </button>
+            <button class="msg__action-btn msg__action-btn--delete" title="删除">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+            </button>`;
+    
+    // PAW 消息额外添加重试和继续按钮
+    if (role === 'assistant') {
+        actionsHtml += `
+            <button class="msg__action-btn msg__action-btn--retry" title="重试">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="1 4 1 10 7 10"></polyline>
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                </svg>
+            </button>
+            <button class="msg__action-btn msg__action-btn--continue" title="继续">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+            </button>`;
+    }
+    actionsHtml += '</div>';
+    return actionsHtml;
+}
+
+// 创建消息操作按钮元素（用于动态添加）
+export function createMessageActions(role: 'user' | 'assistant', msgId: string | null): HTMLDivElement {
+    const container = document.createElement('div');
+    container.innerHTML = buildActionsHtml(role);
+    const actionsEl = container.firstElementChild as HTMLDivElement;
+    
+    // 绑定事件
+    const parentEl = actionsEl;
+    const copyBtn = parentEl.querySelector('.msg__action-btn--copy');
+    const deleteBtn = parentEl.querySelector('.msg__action-btn--delete');
+    const retryBtn = parentEl.querySelector('.msg__action-btn--retry');
+    const continueBtn = parentEl.querySelector('.msg__action-btn--continue');
+    
+    // 复制按钮 - 复制整个消息的所有内容
+    copyBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msgEl = (e.target as HTMLElement).closest('.msg');
+        // 获取所有内容块的文本
+        const contentEls = msgEl?.querySelectorAll('.msg__content');
+        const textParts: string[] = [];
+        contentEls?.forEach(contentEl => {
+            const text = contentEl.textContent?.trim();
+            if (text) textParts.push(text);
+        });
+        const textToCopy = textParts.join('\n\n') || '';
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            const btn = copyBtn as HTMLElement;
+            btn.classList.add('msg__action-btn--success');
+            setTimeout(() => btn.classList.remove('msg__action-btn--success'), 1500);
+        });
+        messageActionsCallbacks.onCopy?.(textToCopy, role);
+    });
+    
+    deleteBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (msgId) messageActionsCallbacks.onDelete?.(msgId, role);
+    });
+    
+    retryBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (msgId) messageActionsCallbacks.onRetry?.(msgId);
+    });
+    
+    continueBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (msgId) messageActionsCallbacks.onContinue?.(msgId);
+    });
+    
+    return actionsEl;
+}
 
 // 创建消息元素
 export function createMsgEl(type: string, author: string, text: string, id: string | null = null): HTMLDivElement {
     const el = document.createElement('div');
     el.className = `msg msg--${type}`;
+    const role = type === 'user' ? 'user' : 'assistant';
+    
+    // 构建操作按钮
+    const actionsHtml = buildActionsHtml(role);
+    
     // 添加工具容器（用于附加该消息的工具调用）
     // marked 是全局变量，由 index.html 引入
     // 注意：id 设置在 msg__content 上，方便 appendStream 直接定位
-    el.innerHTML = `<div class="msg__header">${author}</div><div class="msg__content"${id ? ` id="${id}"` : ''}>${marked.parse(text)}</div><div class="msg__tools"></div>`;
+    // 操作按钮放在消息最末尾（工具容器之后）
+    el.innerHTML = `<div class="msg__header">${author}</div><div class="msg__content"${id ? ` id="${id}"` : ''}>${marked.parse(text)}</div><div class="msg__tools"></div>${actionsHtml}`;
+    
+    // 存储消息ID和角色
+    if (id) el.dataset.msgId = id;
+    el.dataset.role = role;
+    
+    // 绑定按钮事件
+    bindMessageActions(el, id, role, text);
+    
     return el;
+}
+
+// 绑定消息操作按钮事件
+function bindMessageActions(el: HTMLElement, msgId: string | null, role: 'user' | 'assistant', originalText: string): void {
+    const copyBtn = el.querySelector('.msg__action-btn--copy');
+    const deleteBtn = el.querySelector('.msg__action-btn--delete');
+    const retryBtn = el.querySelector('.msg__action-btn--retry');
+    const continueBtn = el.querySelector('.msg__action-btn--continue');
+    
+    // 复制按钮 - 复制整个消息的所有内容
+    copyBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // 获取所有内容块的文本（一个消息可能有多个 .msg__content）
+        const contentEls = el.querySelectorAll('.msg__content');
+        const textParts: string[] = [];
+        contentEls.forEach(contentEl => {
+            const text = contentEl.textContent?.trim();
+            if (text) textParts.push(text);
+        });
+        const textToCopy = textParts.join('\n\n') || originalText;
+        
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            // 显示复制成功反馈
+            const btn = copyBtn as HTMLElement;
+            btn.classList.add('msg__action-btn--success');
+            setTimeout(() => btn.classList.remove('msg__action-btn--success'), 1500);
+        });
+        
+        messageActionsCallbacks.onCopy?.(textToCopy, role);
+    });
+    
+    // 删除按钮
+    deleteBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (msgId) {
+            messageActionsCallbacks.onDelete?.(msgId, role);
+        }
+    });
+    
+    // 重试按钮（仅PAW消息）
+    retryBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (msgId) {
+            messageActionsCallbacks.onRetry?.(msgId);
+        }
+    });
+    
+    // 继续按钮（仅PAW消息）
+    continueBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (msgId) {
+            messageActionsCallbacks.onContinue?.(msgId);
+        }
+    });
 }
 
 // 系统消息

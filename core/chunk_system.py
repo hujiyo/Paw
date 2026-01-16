@@ -762,3 +762,193 @@ class ChunkManager:
             manager.current_tokens += chunk.tokens
 
         return manager    
+
+    # ==================== 轮次管理功能 ====================
+    
+    def get_turns(self) -> List[Dict[str, Any]]:
+        """获取对话轮次列表
+        
+        将 chunks 按轮次组织，每个轮次包含：
+        - USER 轮次：单个用户消息
+        - ASSISTANT 轮次：可能包含多个文本块、工具调用和工具结果
+        
+        Returns:
+            轮次列表，每个轮次包含 role, start_idx, end_idx, chunks
+        """
+        turns = []
+        i = 0
+        
+        while i < len(self.chunks):
+            chunk = self.chunks[i]
+            
+            # 跳过系统提示词、记忆、Shell输出
+            if chunk.chunk_type in (ChunkType.SYSTEM, ChunkType.MEMORY, ChunkType.SHELL):
+                i += 1
+                continue
+            
+            if chunk.chunk_type == ChunkType.USER:
+                # 用户轮次：单个 chunk
+                turns.append({
+                    'role': 'user',
+                    'start_idx': i,
+                    'end_idx': i,
+                    'chunks': [chunk]
+                })
+                i += 1
+                
+            elif chunk.chunk_type == ChunkType.ASSISTANT:
+                # 助手轮次：收集所有相关的 chunks 直到下一个 USER
+                start_idx = i
+                turn_chunks = [chunk]
+                i += 1
+                
+                # 继续收集工具结果和后续的助手消息
+                while i < len(self.chunks):
+                    next_chunk = self.chunks[i]
+                    
+                    # 遇到用户消息，结束当前轮次
+                    if next_chunk.chunk_type == ChunkType.USER:
+                        break
+                    
+                    # 跳过系统类型
+                    if next_chunk.chunk_type in (ChunkType.SYSTEM, ChunkType.MEMORY, ChunkType.SHELL):
+                        i += 1
+                        continue
+                    
+                    # 收集助手消息、工具调用、工具结果
+                    if next_chunk.chunk_type in (ChunkType.ASSISTANT, ChunkType.TOOL_CALL, ChunkType.TOOL_RESULT):
+                        turn_chunks.append(next_chunk)
+                        i += 1
+                    else:
+                        break
+                
+                turns.append({
+                    'role': 'assistant',
+                    'start_idx': start_idx,
+                    'end_idx': i - 1,
+                    'chunks': turn_chunks
+                })
+            else:
+                # 其他类型（如孤立的工具结果），跳过
+                i += 1
+        
+        return turns
+
+    def get_last_turn(self, role: str = None) -> Optional[Dict[str, Any]]:
+        """获取最后一个轮次
+        
+        Args:
+            role: 可选，指定角色 'user' 或 'assistant'
+            
+        Returns:
+            轮次信息，如果没有则返回 None
+        """
+        turns = self.get_turns()
+        if not turns:
+            return None
+        
+        if role:
+            for turn in reversed(turns):
+                if turn['role'] == role:
+                    return turn
+            return None
+        
+        return turns[-1]
+
+    def delete_turn(self, turn_idx: int) -> bool:
+        """删除指定索引的轮次（及其所有 chunks）
+        
+        Args:
+            turn_idx: 轮次索引（从 get_turns() 返回的列表中的索引）
+            
+        Returns:
+            是否成功删除
+        """
+        turns = self.get_turns()
+        if turn_idx < 0 or turn_idx >= len(turns):
+            return False
+        
+        turn = turns[turn_idx]
+        start_idx = turn['start_idx']
+        end_idx = turn['end_idx']
+        
+        # 从后向前删除，避免索引偏移问题
+        deleted_tokens = 0
+        for i in range(end_idx, start_idx - 1, -1):
+            if i < len(self.chunks):
+                deleted_tokens += self.chunks[i].tokens
+                self.chunks.pop(i)
+        
+        self.current_tokens -= deleted_tokens
+        return True
+
+    def delete_last_turn(self, role: str = None) -> bool:
+        """删除最后一个轮次
+        
+        Args:
+            role: 可选，指定角色 'user' 或 'assistant'
+            
+        Returns:
+            是否成功删除
+        """
+        turns = self.get_turns()
+        if not turns:
+            return False
+        
+        if role:
+            # 找到最后一个指定角色的轮次
+            for i in range(len(turns) - 1, -1, -1):
+                if turns[i]['role'] == role:
+                    return self.delete_turn(i)
+            return False
+        
+        # 删除最后一个轮次
+        return self.delete_turn(len(turns) - 1)
+
+    def delete_turns_from(self, turn_idx: int) -> int:
+        """删除从指定索引开始的所有轮次
+        
+        Args:
+            turn_idx: 起始轮次索引
+            
+        Returns:
+            删除的轮次数量
+        """
+        turns = self.get_turns()
+        if turn_idx < 0 or turn_idx >= len(turns):
+            return 0
+        
+        # 获取起始 chunk 索引
+        start_chunk_idx = turns[turn_idx]['start_idx']
+        
+        # 删除从该索引开始的所有 chunks
+        deleted_count = 0
+        deleted_tokens = 0
+        
+        while len(self.chunks) > start_chunk_idx:
+            chunk = self.chunks[-1]
+            # 跳过系统类型
+            if chunk.chunk_type in (ChunkType.SYSTEM, ChunkType.MEMORY):
+                break
+            deleted_tokens += chunk.tokens
+            self.chunks.pop()
+            deleted_count += 1
+        
+        self.current_tokens -= deleted_tokens
+        return len(turns) - turn_idx
+
+    def get_turn_content(self, turn: Dict[str, Any]) -> str:
+        """获取轮次的完整文本内容
+        
+        Args:
+            turn: 轮次信息（从 get_turns() 返回）
+            
+        Returns:
+            轮次的完整文本内容
+        """
+        contents = []
+        for chunk in turn['chunks']:
+            if chunk.chunk_type in (ChunkType.USER, ChunkType.ASSISTANT):
+                if chunk.content:
+                    contents.append(chunk.content)
+        return '\n'.join(contents)

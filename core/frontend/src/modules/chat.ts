@@ -1,6 +1,6 @@
 // 对话历史管理
 import { escapeHtml, scrollToBottom } from './utils.js';
-import { createMsgEl, getToolDisplay, updateToolElement, ToolArgs } from './render.js';
+import { createMsgEl, getToolDisplay, updateToolElement, ToolArgs, createMessageActions } from './render.js';
 import { Browser } from './browser.js';
 
 // ============ 类型定义 ============
@@ -53,13 +53,21 @@ export interface DomRefs {
 }
 
 // ============ ChatHistory 管理器 ============
+// 重构说明：轮次数据现在由后端 ChunkManager 统一管理
+// 前端仅保留必要的 UI 状态，通过 /api/turns 或 turns_updated 事件获取数据
+
+interface BackendTurn {
+    index: number;
+    role: 'user' | 'assistant';
+    preview: string;
+    tool_count: number;
+    parts: TurnPart[];
+}
 
 interface ChatHistoryManager {
     dom: DomRefs | null;
     messages: Message[];
-    turns: Turn[];
     currentSessionId: string | null;
-    currentTurn: Turn | null;
     isInAssistantTurn: boolean;
     init(dom: DomRefs): void;
     addUserMessage(text: string): string;
@@ -68,6 +76,8 @@ interface ChatHistoryManager {
     addTool(toolId: string, toolName: string): void;
     endAssistantTurn(): void;
     renderChain(): void;
+    renderChainFromData(turns: BackendTurn[]): void;
+    fetchAndRenderChain(): Promise<void>;
     highlightAndScrollTo(elementId: string, isTool?: boolean): void;
     clear(): void;
     loadSessionChunks(chunks: SessionChunk[]): void;
@@ -75,11 +85,9 @@ interface ChatHistoryManager {
 
 export const ChatHistory: ChatHistoryManager = {
     dom: null,
-    messages: [],      // 当前对话的消息列表（仅用于显示，不持久化）
-    turns: [],         // 对话轮次列表
+    messages: [],      // 当前对话的消息列表（仅用于显示）
     currentSessionId: null,  // 当前会话ID
-    currentTurn: null, // 当前正在进行的助手轮次
-    isInAssistantTurn: false, // 是否在助手轮次中
+    isInAssistantTurn: false, // 是否在助手轮次中（用于 UI 状态）
     
     // 初始化 DOM 引用
     init(dom: DomRefs): void {
@@ -91,111 +99,82 @@ export const ChatHistory: ChatHistoryManager = {
         const msgId = `msg-${Date.now()}`;
         this.messages.push({ id: msgId, role: 'user', text });
         
-        this.turns.push({
-            role: 'user',
-            msgId: msgId,
-            text: text,
-            parts: []
-        });
-        
         if (this.dom) {
             this.dom.messages.appendChild(createMsgEl('user', 'USER', text, msgId));
             scrollToBottom(this.dom.msgWrap);
         }
-        this.renderChain();
         
         // 标记进入助手轮次
         this.isInAssistantTurn = true;
-        this.currentTurn = {
-            role: 'assistant',
-            msgId: null,  // 第一次 onStreamStart 时设置
-            text: '',
-            parts: []
-        };
         
         return msgId;
     },
 
-    // 记录流式文本开始
+    // 记录流式文本开始（UI 状态管理）
     onStreamStart(msgId: string): void {
-        if (this.currentTurn && this.isInAssistantTurn) {
-            if (!this.currentTurn.msgId) {
-                this.currentTurn.msgId = msgId;
-            }
-        }
+        // 保留用于 UI 状态跟踪
     },
 
     // 记录流式文本结束
     onStreamEnd(text: string): void {
-        if (this.currentTurn && this.isInAssistantTurn && text) {
-            this.currentTurn.parts.push({ type: 'text', text: text });
-            if (!this.currentTurn.text) {
-                this.currentTurn.text = text;
-            }
-        }
+        // 保留用于 UI 状态跟踪
     },
 
-    // 添加工具调用到当前轮次
+    // 添加工具调用（UI 状态管理）
     addTool(toolId: string, toolName: string): void {
-        if (this.currentTurn && this.isInAssistantTurn) {
-            this.currentTurn.parts.push({ type: 'tool', id: toolId, name: toolName });
-        }
+        // 保留用于 UI 状态跟踪
     },
 
-    // 结束助手轮次
+    // 结束助手轮次 - 从后端获取最新轮次数据并渲染
     endAssistantTurn(): void {
-        if (this.currentTurn && this.isInAssistantTurn) {
-            if (this.currentTurn.parts.length > 0 || this.currentTurn.text) {
-                this.turns.push(this.currentTurn);
-                this.messages.push({ 
-                    id: this.currentTurn.msgId || `msg-${Date.now()}`, 
-                    role: 'assistant', 
-                    text: this.currentTurn.text 
-                });
+        this.isInAssistantTurn = false;
+        // 从后端获取最新轮次数据
+        this.fetchAndRenderChain();
+    },
+
+    // 从后端获取轮次数据并渲染
+    async fetchAndRenderChain(): Promise<void> {
+        try {
+            const response = await fetch('/api/turns');
+            const data = await response.json();
+            if (data.success && data.turns) {
+                this.renderChainFromData(data.turns);
             }
-            this.currentTurn = null;
-            this.isInAssistantTurn = false;
-            this.renderChain();
+        } catch (e) {
+            console.warn('Failed to fetch turns:', e);
         }
     },
 
-    // 渲染对话链视图
-    renderChain(): void {
+    // 渲染对话链视图（从后端数据）
+    renderChainFromData(turns: BackendTurn[]): void {
         if (!this.dom) return;
         
-        if (!this.turns.length) {
+        if (!turns.length) {
             this.dom.chainList.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem">发送消息开始对话</div>';
             return;
         }
         this.dom.chainList.innerHTML = '';
 
-        this.turns.forEach((turn, idx) => {
+        turns.forEach((turn) => {
             const el = document.createElement('div');
             el.className = 'chain-item';
-            el.dataset.msgId = turn.msgId || '';
-            el.dataset.turnIdx = String(idx);
+            el.dataset.turnIdx = String(turn.index);
 
             const isAssistant = turn.role === 'assistant';
-            const hasParts = isAssistant && turn.parts.length > 0;
-            const toolCount = turn.parts.filter(p => p.type === 'tool').length;
+            const hasParts = isAssistant && turn.parts && turn.parts.length > 0;
+            const toolCount = turn.tool_count || 0;
             
-            let preview = '';
-            if (turn.role === 'user') {
-                preview = turn.text || '';
-            } else {
-                const firstText = turn.parts.find(p => p.type === 'text');
-                preview = firstText?.text ? firstText.text.slice(0, 40) : (toolCount > 0 ? `${toolCount} 个工具调用` : '');
-            }
+            const preview = turn.preview || '';
 
             let detailsHtml = '';
-            if (hasParts) {
+            if (hasParts && turn.parts) {
                 detailsHtml = '<div class="chain-item__details">';
-                turn.parts.forEach((part, partIdx) => {
+                turn.parts.forEach((part) => {
                     if (part.type === 'tool') {
                         detailsHtml += `<div class="chain-item__detail chain-item__detail--tool" data-tool-id="${part.id}">⎿ ⚙ ${part.name}</div>`;
                     } else if (part.type === 'text' && part.text) {
                         const textPreview = part.text.slice(0, 50) + (part.text.length > 50 ? '…' : '');
-                        detailsHtml += `<div class="chain-item__detail chain-item__detail--text" data-part-idx="${partIdx}">⎿ 💬 ${escapeHtml(textPreview)}</div>`;
+                        detailsHtml += `<div class="chain-item__detail chain-item__detail--text">⎿ 💬 ${escapeHtml(textPreview)}</div>`;
                     }
                 });
                 detailsHtml += '</div>';
@@ -217,9 +196,6 @@ export const ChatHistory: ChatHistoryManager = {
                     if (hasParts) {
                         el.classList.toggle('chain-item--expanded');
                     }
-                    if (turn.msgId) {
-                        this.highlightAndScrollTo(turn.msgId);
-                    }
                 });
             }
 
@@ -229,14 +205,17 @@ export const ChatHistory: ChatHistoryManager = {
                     const toolId = (detail as HTMLElement).dataset.toolId;
                     if (toolId) {
                         this.highlightAndScrollTo(`tool-${toolId}`, true);
-                    } else if (turn.msgId) {
-                        this.highlightAndScrollTo(turn.msgId);
                     }
                 });
             });
 
             this.dom!.chainList.appendChild(el);
         });
+    },
+
+    // 兼容方法：立即调用后端获取并渲染
+    renderChain(): void {
+        this.fetchAndRenderChain();
     },
 
     highlightAndScrollTo(elementId: string, isTool: boolean = false): void {
@@ -257,15 +236,15 @@ export const ChatHistory: ChatHistoryManager = {
 
     clear(): void {
         this.messages = [];
-        this.turns = [];
-        this.currentTurn = null;
         this.isInAssistantTurn = false;
         this.renderChain();
     },
 
     // 加载历史会话 (包含 chunks 解析逻辑)
+    // 注意：轮次数据不再在前端维护，而是通过 renderChain() 从后端获取
     loadSessionChunks(chunks: SessionChunk[]): void {
-        this.clear();
+        this.messages = [];
+        this.isInAssistantTurn = false;
         if (!this.dom) return;
         
         this.dom.messages.innerHTML = '';
@@ -277,7 +256,6 @@ export const ChatHistory: ChatHistoryManager = {
         }> = [];
         const toolArgsMap = new Map<string, ToolArgs>();
         
-        let currentAssistantParts: TurnPart[] = [];
         let currentAssistantMsgId: string | null = null;
         let currentAssistantMsgEl: HTMLElement | null = null;
 
@@ -285,36 +263,28 @@ export const ChatHistory: ChatHistoryManager = {
             const type = chunk.type;
 
             if (type === 'user') {
-                if (currentAssistantParts.length > 0) {
-                    this.turns.push({
-                        role: 'assistant',
-                        msgId: currentAssistantMsgId,
-                        text: currentAssistantParts.find(p => p.type === 'text')?.text || '',
-                        parts: currentAssistantParts
-                    });
-                    currentAssistantParts = [];
-                    currentAssistantMsgId = null;
-                    currentAssistantMsgEl = null;
-                }
+                // 重置 assistant 状态
+                currentAssistantMsgId = null;
+                currentAssistantMsgEl = null;
                 
                 const msgId = `msg-${Date.now()}-${Math.random()}`;
                 this.messages.push({ id: msgId, role: 'user', text: chunk.content || '' });
-                this.turns.push({
-                    role: 'user',
-                    msgId: msgId,
-                    text: chunk.content || '',
-                    parts: []
-                });
                 this.dom!.messages.appendChild(createMsgEl('user', 'USER', chunk.content || '', msgId));
 
             } else if (type === 'assistant') {
                 if (currentAssistantMsgEl) {
                     if (chunk.content) {
+                        // 在添加新内容前，先移除操作按钮
+                        const actionsEl = currentAssistantMsgEl.querySelector('.msg__actions');
+                        if (actionsEl) actionsEl.remove();
+                        
                         const newContent = document.createElement('div');
                         newContent.className = 'msg__content msg__content--continued';
                         newContent.innerHTML = marked.parse(chunk.content);
                         currentAssistantMsgEl.appendChild(newContent);
-                        currentAssistantParts.push({ type: 'text', text: chunk.content });
+                        
+                        // 重新添加操作按钮到末尾
+                        currentAssistantMsgEl.appendChild(createMessageActions('assistant', currentAssistantMsgId));
                     }
                 } else {
                     const msgId = `msg-${Date.now()}-${Math.random()}`;
@@ -323,10 +293,6 @@ export const ChatHistory: ChatHistoryManager = {
                     
                     currentAssistantMsgEl = createMsgEl('assistant', 'PAW', chunk.content || '', msgId);
                     this.dom!.messages.appendChild(currentAssistantMsgEl);
-                    
-                    if (chunk.content) {
-                        currentAssistantParts.push({ type: 'text', text: chunk.content });
-                    }
                 }
 
                 if (chunk.metadata?.tool_calls) {
@@ -357,8 +323,6 @@ export const ChatHistory: ChatHistoryManager = {
                         if (toolsContainer) {
                             toolsContainer.appendChild(toolEl);
                         }
-                        
-                        currentAssistantParts.push({ type: 'tool', id: tc.id, name: func.name });
                     });
                 }
 
@@ -370,15 +334,6 @@ export const ChatHistory: ChatHistoryManager = {
                 });
             }
         });
-        
-        if (currentAssistantParts.length > 0) {
-            this.turns.push({
-                role: 'assistant',
-                msgId: currentAssistantMsgId,
-                text: currentAssistantParts.find(p => p.type === 'text')?.text || '',
-                parts: currentAssistantParts
-            });
-        }
 
         toolResults.forEach(result => {
             const args = toolArgsMap.get(result.toolCallId || '') || {};
@@ -396,6 +351,8 @@ export const ChatHistory: ChatHistoryManager = {
         });
 
         scrollToBottom(this.dom!.msgWrap);
+        
+        // 从后端获取轮次数据并渲染对话链
         this.renderChain();
         
         // 刷新 Browser URL 列表
