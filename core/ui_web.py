@@ -819,3 +819,13 @@ class WebUI:
     def notify_turns_updated(self):
         """通知前端轮次已更新（触发对话链刷新）"""
         self.queue_message("turns_updated", {})
+
+    def send_todos_updated(self, todos: list):
+        """推送 Todo 列表更新到前端
+        
+        Args:
+            todos: 完整的 todo 列表，每项包含 id, title, details, status
+        """
+        self.queue_message("todos_updated", {
+            "todos": todos
+        })

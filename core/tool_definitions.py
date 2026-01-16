@@ -320,39 +320,100 @@ SCHEMA_WAIT = {
 # TODO-list 工具 Schema
 # ============================================================
 
-SCHEMA_UPDATE_PLAN = {
+SCHEMA_CREATE_TODO_LIST = {
     "type": "function",
     "function": {
-        "name": "update_plan",
-        "description": "Updates the task plan. Provide an optional explanation and a list of plan items, each with a non-empty step description and status. At most one step can be in_progress at a time.",
+        "name": "create_todo_list",
+        "description": "Create a new todo list to track tasks. This will replace any existing list. Use this when starting a complex task that requires multiple steps.",
         "parameters": {
             "type": "object",
             "properties": {
-                "plan": {
+                "todos": {
                     "type": "array",
-                    "description": "List of plan items",
+                    "description": "List of todo items",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "step": {
+                            "title": {
                                 "type": "string",
-                                "description": "Description of the step"
+                                "description": "Short summary of the task"
                             },
-                            "status": {
+                            "details": {
                                 "type": "string",
-                                "enum": ["pending", "in_progress", "completed"],
-                                "description": "Status of the step"
+                                "description": "Additional context or details"
                             }
                         },
-                        "required": ["step", "status"]
+                        "required": ["title", "details"]
                     }
-                },
-                "explanation": {
-                    "type": "string",
-                    "description": "Optional explanation for the plan update"
                 }
             },
-            "required": ["plan"]
+            "required": ["todos"]
+        }
+    }
+}
+
+SCHEMA_ADD_TODOS = {
+    "type": "function",
+    "function": {
+        "name": "add_todos",
+        "description": "Add one or more items to the current todo list.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "todos": {
+                    "type": "array",
+                    "description": "List of todo items to add",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "Short summary of the task"
+                            },
+                            "details": {
+                                "type": "string",
+                                "description": "Additional context or details"
+                            }
+                        },
+                        "required": ["title", "details"]
+                    }
+                }
+            },
+            "required": ["todos"]
+        }
+    }
+}
+
+SCHEMA_MARK_TODO_AS_DONE = {
+    "type": "function",
+    "function": {
+        "name": "mark_todo_as_done",
+        "description": "Marks one or more todo items as completed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "todo_ids": {
+                    "type": "array",
+                    "description": "List of todo IDs to mark as done (e.g. ['0', '1'])",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            },
+            "required": ["todo_ids"]
+        }
+    }
+}
+
+SCHEMA_READ_TODOS = {
+    "type": "function",
+    "function": {
+        "name": "read_todos",
+        "description": "Read the current todo list to check status.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
         }
     }
 }
@@ -758,22 +819,41 @@ def register_all_tools(tools_instance):
         max_call_pairs=3,  # 只保留最近3次调用（tool_call + tool_result 配对）
         category="utility"
     )
-    # === TODO-list 工具 ===
+    # === TODO-list 工具 (重构: Atom Tools) ===
     
     register_tool(
-        name="update_plan",
-        schema=SCHEMA_UPDATE_PLAN,
-        handler=tools_instance.update_plan,
-        singleton_key=key_constant("plan"),  # 只保留最新的计划
-        category="utility"
+        name="create_todo_list",
+        schema=SCHEMA_CREATE_TODO_LIST,
+        handler=tools_instance.create_todo_list,
+        singleton_key=key_constant("todo_list"), # 始终保留最新的 TODO 列表
+        category="planning"
     )
     
     register_tool(
-        name="get_plan",
-        schema=SCHEMA_GET_PLAN,
-        handler=tools_instance.get_plan,
-        max_call_pairs=1,  # 只保留最近一次查询
-        category="utility"
+        name="add_todos",
+        schema=SCHEMA_ADD_TODOS,
+        handler=tools_instance.add_todos,
+        # add操作保留上下文有助于 LLM 知道它刚才加了什么
+        max_call_pairs=5,
+        category="planning"
+    )
+    
+    register_tool(
+        name="mark_todo_as_done",
+        schema=SCHEMA_MARK_TODO_AS_DONE,
+        handler=tools_instance.mark_todo_as_done,
+        max_call_pairs=5,
+        category="planning"
+    )
+    
+    register_tool(
+        name="read_todos",
+        schema=SCHEMA_READ_TODOS,
+        handler=tools_instance.read_todos,
+        # 读取操作结果可能很大，且create_todo_list/add/mark已经隐式包含了状态
+        # 所以这里可以设置为 transform_to_summary，或者保留少量
+        max_call_pairs=1,
+        category="planning"
     )
     
     register_tool(
@@ -936,8 +1016,10 @@ MAIN_TOOL_NAMES = [
     "load_url_content",
     "read_page",
     # TODO-list 工具
-    "update_plan",
-    "get_plan",
+    "create_todo_list",
+    "add_todos",
+    "mark_todo_as_done",
+    "read_todos",
     # 保持沉默（极少使用）
     "stay_silent",
 ]
@@ -987,8 +1069,10 @@ TOOLS_SCHEMA = [
     SCHEMA_LOAD_URL_CONTENT,
     SCHEMA_READ_PAGE,
     # TODO-list 工具
-    SCHEMA_UPDATE_PLAN,
-    SCHEMA_GET_PLAN,
+    SCHEMA_CREATE_TODO_LIST,
+    SCHEMA_ADD_TODOS,
+    SCHEMA_MARK_TODO_AS_DONE,
+    SCHEMA_READ_TODOS,
     # 保持沉默工具
     SCHEMA_STAY_SILENT,
     # Skill 工具

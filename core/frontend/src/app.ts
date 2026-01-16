@@ -235,6 +235,11 @@ setMessageActions({
         send(`/delete-message ${msgId} ${role}`);
         // 立即刷新对话链（后端数据）
         ChatHistory.renderChain();
+        
+        // 刷新 Browser URL 列表 (移除已删除消息中的 URL)
+        Browser.refresh();
+        // 刷新 Planner 状态
+        Planner.refresh();
     },
     onRetry: (msgId) => {
         if (AppState.isGenerating) {
@@ -260,6 +265,11 @@ setMessageActions({
         setGeneratingState(true);
         // 立即刷新对话链（后端数据）
         ChatHistory.renderChain();
+        
+        // 刷新 Browser URL 列表
+        Browser.refresh();
+        // 刷新 Planner 状态
+        Planner.refresh();
     },
     onContinue: (msgId) => {
         if (AppState.isGenerating) {
@@ -404,7 +414,8 @@ function handleEvent({ event, data }: WebSocketEvent): void {
         },
         'models_fetched': () => Settings.handleModelResponse(data as ModelsFetchedData),
         'terminal_output': () => updateTerminalOutput(data as { content: string; is_open: boolean }),
-        'turns_updated': () => ChatHistory.renderChain()
+        'turns_updated': () => ChatHistory.renderChain(),
+        'todos_updated': () => handleTodosUpdated(data as { todos: Array<{id: string; title: string; details?: string; status: string}> })
     };
     handlers[event]?.();
 }
@@ -420,6 +431,20 @@ function updateTerminalOutput({ content, is_open }: { content: string; is_open: 
     
     // 自动滚动到底部
     dom.terminalOutput.scrollTop = dom.terminalOutput.scrollHeight;
+}
+
+// ============ Todo 列表更新处理 ============
+function handleTodosUpdated({ todos }: { todos: Array<{id: string; title: string; details?: string; status: string}> }): void {
+    // 将后端推送的 todo 列表转换为 Planner 需要的格式
+    const items = todos.map(t => ({
+        id: t.id,
+        text: t.title,
+        details: t.details,
+        done: t.status === 'completed'
+    }));
+    
+    // 直接设置 Planner 状态（不需要从 DOM 解析）
+    Planner.setItems(items);
 }
 
 // ============ 流式处理逻辑 ============
@@ -522,7 +547,7 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
             RightSidebar.switchView('files');
         } else if (['run_shell_command'].includes(name)) {
             RightSidebar.switchView('terminal');
-        } else if (['create_plan', 'edit_plans', 'create_todo_list'].includes(name)) {
+        } else if (['create_plan', 'edit_plans', 'create_todo_list', 'add_todos', 'mark_todo_as_done', 'read_todos'].includes(name)) {
             RightSidebar.switchView('plan');
         } else if (['search_web', 'load_url_content', 'read_page'].includes(name)) {
             RightSidebar.switchToTab('browser');
@@ -530,37 +555,6 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
         }
     }
 
-    // Try to update Planner if it's a todo list
-    if (name === 'create_todo_list') {
-        try {
-             // args is often a JSON string, but sometimes it might be partial if streaming?
-             // Actually tool_start args might be empty or partial.
-             // It is better to rely on raw_request if available, or just wait for the result?
-             // But we want to see it immediately.
-             
-             // For simplicity, let's try to parse raw_request if available
-             if (raw_request && raw_request.todos) {
-                 const todos = raw_request.todos as any[];
-                 Planner.setItems(todos.map((t, i) => ({
-                     id: String(i),
-                     text: t.title,
-                     done: false
-                 })));
-             } else if (args) {
-                 const parsed = JSON.parse(args);
-                 if (parsed.todos) {
-                    Planner.setItems(parsed.todos.map((t: any, i: number) => ({
-                         id: String(i),
-                         text: t.title,
-                         done: false
-                     })));
-                 }
-             }
-        } catch (e) {
-            console.warn('Failed to parse todo list for planner', e);
-        }
-    }
-    
     if (name === 'stay_silent') {
         const msgEl = dom.messages.querySelector('.msg--assistant:last-child');
         if (msgEl) msgEl.remove();
@@ -605,6 +599,11 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
     
     ChatHistory.addTool(id, name);
     scrollToBottom(dom.msgWrap);
+    
+    // 如果是 Todo 工具，尝试刷新 Planner (从 request 解析)
+    if (['create_todo_list', 'add_todos', 'mark_todo_as_done'].includes(name)) {
+        Planner.refresh();
+    }
 }
 
 function updateTool({ id, name, display, success, raw_response }: ToolResultData): void {
@@ -656,6 +655,11 @@ function updateTool({ id, name, display, success, raw_response }: ToolResultData
     // 存储原始响应数据
     if (raw_response) {
         el.dataset.rawResponse = JSON.stringify(raw_response);
+    }
+    
+    // 如果是 Todo 工具，刷新 Planner 视图
+    if (['create_todo_list', 'add_todos', 'read_todos', 'mark_todo_as_done'].includes(name)) {
+        Planner.refresh();
     }
 
     // 工具结果收到后，刷新 Browser URL 列表

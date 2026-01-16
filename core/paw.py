@@ -764,11 +764,69 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 更新状态栏
             self._update_status_bar()
             
+            # 从历史 chunks 中恢复 Todo 状态并推送到前端
+            self._restore_todo_state()
+            
             return True
 
         except Exception as e:
             self.ui.print_error(f"恢复会话失败: {e}")
             return False
+
+    def _restore_todo_state(self):
+        """从历史 chunks 中恢复 Todo 状态
+        
+        遍历所有 TOOL_RESULT chunks，找到 todo 相关工具的结果，
+        重放操作以恢复最终状态，然后推送到前端。
+        这和 Shell 终端从 SHELL chunk 恢复状态的机制类似。
+        
+        注意：工具结果保存时，_execute_tool 会把 {"success": True, "todos": [...]} 
+        转换为 {"todos": [...]} (去掉 success 字段)，所以解析时不检查 success。
+        """
+        try:
+            # 重置 todo 状态
+            self.tools._todo_plan = []
+            
+            # 正向遍历 chunks，重放 todo 操作
+            for chunk in self.chunk_manager.chunks:
+                if chunk.chunk_type != ChunkType.TOOL_RESULT:
+                    continue
+                
+                tool_name = chunk.metadata.get('name', '')
+                if tool_name not in ('create_todo_list', 'add_todos', 'mark_todo_as_done', 'read_todos'):
+                    continue
+                
+                # 尝试解析工具结果
+                try:
+                    result = json.loads(chunk.content)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                
+                # 根据工具类型恢复状态
+                # 注意：保存的格式是 {"todos": [...]} 而不是 {"success": True, "todos": [...]}
+                if tool_name == 'create_todo_list' and 'todos' in result:
+                    # create_todo_list 返回全量数据，直接覆盖
+                    self.tools._todo_plan = result['todos']
+                
+                elif tool_name == 'add_todos' and 'todos' in result:
+                    # add_todos 也返回全量数据
+                    self.tools._todo_plan = result['todos']
+                
+                elif tool_name == 'mark_todo_as_done' and 'updated' in result:
+                    # mark_todo_as_done 只返回更新项，需要增量更新
+                    for updated_item in result['updated']:
+                        for item in self.tools._todo_plan:
+                            if item['id'] == updated_item['id']:
+                                item['status'] = 'completed'
+                                break
+            
+            # 推送到前端
+            if hasattr(self.ui, 'send_todos_updated') and self.tools._todo_plan:
+                self.ui.send_todos_updated(self.tools._todo_plan)
+                
+        except Exception as e:
+            # 静默失败，不影响主流程
+            self.ui.print_dim(f"[Todo] 恢复状态失败: {e}")
 
     def _sync_session_list(self):
         """同步会话列表到 Web UI"""
@@ -994,6 +1052,11 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         tool_name=function_name,
                         max_call_pairs=max_call_pairs
                     )
+                    
+                    # 如果是 Todo 工具，推送更新到前端（类似 Shell 终端输出的实时推送机制）
+                    if function_name in ('create_todo_list', 'add_todos', 'mark_todo_as_done', 'read_todos'):
+                        if hasattr(self.ui, 'send_todos_updated') and hasattr(self.tools, '_todo_plan'):
+                            self.ui.send_todos_updated(self.tools._todo_plan)
                     
                     # 如果是 Shell 相关工具，移动 Shell chunk 到末尾
                     # 确保 Shell Output 出现在 Tool Result 之后（作为下一轮对话的开始）
@@ -1804,7 +1867,12 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         )
         self.current_session_id = new_session.session_id
         
-        # 5. 同步 UI
+        # 5. 清空 Todo 状态
+        self.tools._todo_plan = []
+        if hasattr(self.ui, 'send_todos_updated'):
+            self.ui.send_todos_updated([])
+        
+        # 6. 同步 UI
         if hasattr(self.ui, 'send_message'):
             self._sync_session_list()
             await self.ui.send_message('new_chat', {

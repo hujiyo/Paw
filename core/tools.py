@@ -556,89 +556,118 @@ class BaseTools:
             return f"Failed to multi-edit: {e}"
     
     # ============================================================
-    # TODO-list 工具
+    # TODO-list 工具 (Agent 专用)
     # ============================================================
     
-    def update_plan(self, plan: list, explanation: str = None) -> dict:
-        """Updates the task plan with a list of steps and their statuses.
+    def create_todo_list(self, todos: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Create a new todo list.
         
         Args:
-            plan: List of plan items, each with 'step' (description) and 'status' (pending/in_progress/completed)
-            explanation: Optional explanation for the plan update
+            todos: List of todo items, each with 'title' and 'details'
             
         Returns:
-            Dict with success status and plan data
+            Success status and the created list
         """
-        # 初始化 plan 存储（如果不存在）
+        # 重置 plan
+        self._todo_plan = []
+        
+        if not todos:
+            return {"success": True, "todos": []}
+            
+        for i, item in enumerate(todos):
+            self._todo_plan.append({
+                "id": str(i),
+                "title": item.get("title", ""),
+                "details": item.get("details", ""),
+                "status": "pending"
+            })
+            
+        return {
+            "success": True, 
+            "todos": self._todo_plan
+        }
+
+    def add_todos(self, todos: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Add items to the existing todo list.
+        
+        Args:
+            todos: List of todo items to add
+            
+        Returns:
+            Success status and the updated list
+        """
         if not hasattr(self, '_todo_plan'):
             self._todo_plan = []
+            
+        start_id = len(self._todo_plan)
         
-        # 验证 plan 格式
-        if not isinstance(plan, list):
-            return {"success": False, "error": "plan must be a list of items"}
-        
-        # 验证每个 item
-        valid_statuses = {"pending", "in_progress", "completed"}
-        in_progress_count = 0
-        validated_plan = []
-        
-        for i, item in enumerate(plan):
-            if not isinstance(item, dict):
-                return {"success": False, "error": f"plan item {i} must be an object with 'step' and 'status'"}
-            
-            step = item.get("step", "").strip()
-            status = item.get("status", "pending")
-            
-            if not step:
-                return {"success": False, "error": f"plan item {i} has empty step description"}
-            
-            if status not in valid_statuses:
-                return {"success": False, "error": f"plan item {i} has invalid status '{status}'"}
-            
-            if status == "in_progress":
-                in_progress_count += 1
-            
-            validated_plan.append({
-                "step": step,
-                "status": status
+        for i, item in enumerate(todos):
+            self._todo_plan.append({
+                "id": str(start_id + i),
+                "title": item.get("title", ""),
+                "details": item.get("details", ""),
+                "status": "pending"
             })
-        
-        # 检查是否有多个 in_progress
-        if in_progress_count > 1:
-            return {"success": False, "error": f"At most one step can be in_progress (found {in_progress_count})"}
-        
-        # 更新计划
-        self._todo_plan = validated_plan
-        
-        # 统计
-        completed = sum(1 for item in validated_plan if item["status"] == "completed")
-        total = len(validated_plan)
-        
+            
         return {
             "success": True,
-            "explanation": explanation,
-            "plan": validated_plan,
-            "completed": completed,
-            "total": total
+            "todos": self._todo_plan,
+            "added_count": len(todos)
         }
-    
-    def get_plan(self) -> dict:
-        """Get the current task plan.
+
+    def mark_todo_as_done(self, todo_ids: List[str]) -> Dict[str, Any]:
+        """Mark todo items as completed.
         
+        Args:
+            todo_ids: List of todo IDs to mark as done
+            
         Returns:
-            Dict with plan data or error if no plan exists
+            Success status and updated items
         """
         if not hasattr(self, '_todo_plan') or not self._todo_plan:
-            return {"success": True, "plan": [], "completed": 0, "total": 0}
+            return {"success": False, "error": "No todo list exists"}
+            
+        updated = []
+        not_found = []
         
+        for tid in todo_ids:
+            found = False
+            for item in self._todo_plan:
+                if item["id"] == tid:
+                    item["status"] = "completed"
+                    updated.append(item)
+                    found = True
+                    break
+            if not found:
+                not_found.append(tid)
+                
+        if not_found:
+            return {
+                "success": True, # Partial success is still success
+                "updated": updated,
+                "warning": f"IDs not found: {', '.join(not_found)}"
+            }
+            
+        return {"success": True, "updated": updated}
+
+    def read_todos(self) -> Dict[str, Any]:
+        """Read the current todo list.
+        
+        Returns:
+            Current todo list and stats
+        """
+        if not hasattr(self, '_todo_plan'):
+            self._todo_plan = []
+            
         completed = sum(1 for item in self._todo_plan if item["status"] == "completed")
         total = len(self._todo_plan)
         
         return {
             "success": True,
-            "plan": self._todo_plan,
+            "todos": self._todo_plan,
             "completed": completed,
-            "total": total
+            "total": total,
+            "pending_count": total - completed
         }
     
     def _resolve_path(self, path: str) -> Path:

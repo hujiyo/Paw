@@ -2,6 +2,7 @@
 import { escapeHtml, scrollToBottom } from './utils.js';
 import { createMsgEl, getToolDisplay, updateToolElement, ToolArgs, createMessageActions } from './render.js';
 import { Browser } from './browser.js';
+import { Planner } from './planner.js';
 
 // ============ 类型定义 ============
 
@@ -357,5 +358,7 @@ export const ChatHistory: ChatHistoryManager = {
         
         // 刷新 Browser URL 列表
         Browser.refresh();
+        // 刷新 Planner 状态
+        Planner.refresh();
     }
 };
