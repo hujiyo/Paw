@@ -785,33 +785,45 @@ class WebUI:
         return ''
 
     def _get_turn_parts(self, turn: dict) -> list:
-        """获取轮次的详细部分（用于展开视图）
+        """获取轮次的详细部分(用于展开视图)
         
         Args:
             turn: 轮次数据
             
         Returns:
-            parts 列表，每个元素 {type: 'text'|'tool', ...}
+            parts 列表,每个元素 {type: 'text'|'tool', ...}
+            按照 chunks 在对话中的实际顺序返回，保留"文本-工具-文本-工具"的交错关系
         """
         from chunk_system import ChunkType
         
         parts = []
+        # 按 chunks 顺序遍历，保留时间顺序
         for chunk in turn['chunks']:
-            if chunk.chunk_type in (ChunkType.USER, ChunkType.ASSISTANT):
+            # 处理 ASSISTANT chunk
+            if chunk.chunk_type == ChunkType.ASSISTANT:
+                # 1. 先添加文本（如果有）
                 if chunk.content:
                     parts.append({
                         'type': 'text',
                         'text': chunk.content[:100] + ('...' if len(chunk.content) > 100 else '')
                     })
+                
+                # 2. 再添加工具调用（如果有）
+                if hasattr(chunk, 'metadata') and chunk.metadata.get('tool_calls'):
+                    for tc in chunk.metadata['tool_calls']:
+                        func = tc.get('function', {})
+                        parts.append({
+                            'type': 'tool',
+                            'id': tc.get('id', ''),
+                            'name': func.get('name', 'unknown')
+                        })
             
-            # 提取工具调用
-            if hasattr(chunk, 'metadata') and chunk.metadata.get('tool_calls'):
-                for tc in chunk.metadata['tool_calls']:
-                    func = tc.get('function', {})
+            # 处理 USER chunk（虽然通常不会出现在 assistant 轮次，但保留兼容性）
+            elif chunk.chunk_type == ChunkType.USER:
+                if chunk.content:
                     parts.append({
-                        'type': 'tool',
-                        'id': tc.get('id', ''),
-                        'name': func.get('name', 'unknown')
+                        'type': 'text',
+                        'text': chunk.content[:100] + ('...' if len(chunk.content) > 100 else '')
                     })
         
         return parts

@@ -275,17 +275,19 @@ export const ChatHistory: ChatHistoryManager = {
             } else if (type === 'assistant') {
                 if (currentAssistantMsgEl) {
                     if (chunk.content) {
-                        // 在添加新内容前，先移除操作按钮
-                        const actionsEl = currentAssistantMsgEl.querySelector('.msg__actions');
-                        if (actionsEl) actionsEl.remove();
+                        // 追加新的文本块到 msg__body
+                        const body = currentAssistantMsgEl.querySelector('.msg__body');
+                        const actions = currentAssistantMsgEl.querySelector('.msg__actions');
                         
                         const newContent = document.createElement('div');
-                        newContent.className = 'msg__content msg__content--continued';
+                        newContent.className = 'msg__content';
                         newContent.innerHTML = marked.parse(chunk.content);
-                        currentAssistantMsgEl.appendChild(newContent);
                         
-                        // 重新添加操作按钮到末尾
-                        currentAssistantMsgEl.appendChild(createMessageActions('assistant', currentAssistantMsgId));
+                        if (body && actions) {
+                            body.insertBefore(newContent, actions);
+                        } else if (body) {
+                            body.appendChild(newContent);
+                        }
                     }
                 } else {
                     const msgId = `msg-${Date.now()}-${Math.random()}`;
@@ -297,6 +299,9 @@ export const ChatHistory: ChatHistoryManager = {
                 }
 
                 if (chunk.metadata?.tool_calls) {
+                    const body = currentAssistantMsgEl?.querySelector('.msg__body');
+                    const actions = currentAssistantMsgEl?.querySelector('.msg__actions');
+                    
                     chunk.metadata.tool_calls.forEach(tc => {
                         const func = tc.function || {};
                         const args = func.arguments || '{}';
@@ -316,13 +321,13 @@ export const ChatHistory: ChatHistoryManager = {
                         toolEl.id = `tool-${tc.id}`;
                         toolEl.className = 'tool';
                         toolEl.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${func.name || ''}</span> <span class="tool__args">${typeof args === 'string' ? args : JSON.stringify(args)}</span></div>`;
-                        
-                        // 保存原始请求数据
                         toolEl.dataset.rawRequest = JSON.stringify(tc);
                         
-                        const toolsContainer = currentAssistantMsgEl?.querySelector('.msg__tools');
-                        if (toolsContainer) {
-                            toolsContainer.appendChild(toolEl);
+                        // 追加到 body（在 actions 之前）
+                        if (body && actions) {
+                            body.insertBefore(toolEl, actions);
+                        } else if (body) {
+                            body.appendChild(toolEl);
                         }
                     });
                 }

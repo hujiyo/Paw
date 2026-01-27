@@ -1190,6 +1190,22 @@ body {
 .msg--user .msg__header { background: var(--accent-user); color: #000; }
 .msg--assistant .msg__header { background: var(--accent-assistant); color: #000; }
 
+/* 消息体：流式容器，按时间顺序排列所有内容（文本块、工具块） */
+.msg__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+/* 用户消息右对齐 */
+.msg--user .msg__body {
+    align-items: flex-end;
+}
+.msg--user .msg__content {
+    text-align: right;
+}
+
 .msg__content {
     line-height: 1.6;
     padding-left: 0.4rem;
@@ -1202,18 +1218,6 @@ body {
 }
 .msg__content p:last-child {
     margin-bottom: 0;
-}
-
-.msg--user .msg__content {
-    text-align: left;
-    padding-left: 0;
-    padding-right: 0.4rem;
-}
-
-.msg__content--continued { 
-    margin-top: 0.5rem; 
-    padding-top: 0.5rem; 
-    border-top: 1px dashed var(--border-color); 
 }
 
 .msg__content pre {

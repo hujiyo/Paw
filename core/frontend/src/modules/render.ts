@@ -135,11 +135,20 @@ export function createMsgEl(type: string, author: string, text: string, id: stri
     // 构建操作按钮
     const actionsHtml = buildActionsHtml(role);
     
-    // 添加工具容器（用于附加该消息的工具调用）
+    // 新结构：body (包含 header + 流式内容) -> actions
+    // body 包含所有内容（header、文本块、工具块），按时间顺序排列
     // marked 是全局变量，由 index.html 引入
-    // 注意：id 设置在 msg__content 上，方便 appendStream 直接定位
-    // 操作按钮放在消息最末尾（工具容器之后）
-    el.innerHTML = `<div class="msg__header">${author}</div><div class="msg__content"${id ? ` id="${id}"` : ''}>${marked.parse(text)}</div><div class="msg__tools"></div>${actionsHtml}`;
+    el.innerHTML = `<div class="msg__body"><div class="msg__header">${author}</div></div>${actionsHtml}`;
+    
+    // 如果有初始文本，添加首个内容块
+    if (text || id) {
+        const body = el.querySelector('.msg__body');
+        const contentEl = document.createElement('div');
+        contentEl.className = 'msg__content';
+        if (id) contentEl.id = id;
+        contentEl.innerHTML = marked.parse(text);
+        body?.appendChild(contentEl);
+    }
     
     // 存储消息ID和角色
     if (id) el.dataset.msgId = id;

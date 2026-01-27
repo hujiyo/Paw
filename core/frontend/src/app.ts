@@ -456,38 +456,27 @@ function startStream(id: string): void {
     
     if (ChatHistory.isInAssistantTurn && existingMsg) {
         // 同一轮次中，复用现有消息
-        const toolsContainer = existingMsg.querySelector('.msg__tools');
-        if (toolsContainer && toolsContainer.children.length > 0) {
-            // 存在工具调用：
-            // 如果首个内容区域仍为空（通常是先收到 tool_start，后收到文本流），
-            // 应该把本次流式内容写入首个内容区域，确保文本出现在工具"之前"。
-            const firstContent = existingMsg.querySelector('.msg__content');
-            if (firstContent && !firstContent.innerHTML.trim()) {
-                // 如果已有占位 id（可能由 tool_start 提前创建），保持不变以与对话链绑定一致；
-                if (!firstContent.id) {
-                    firstContent.id = id;
-                }
-            } else {
-                // 已经有文本了，此时新增的文本应当位于工具之后（继续追加）
-                const newContent = document.createElement('div');
-                newContent.className = 'msg__content msg__content--continued';
-                newContent.id = id;
-                existingMsg.appendChild(newContent);
-            }
+        const body = existingMsg.querySelector('.msg__body');
+        const actions = existingMsg.querySelector('.msg__actions');
+        
+        // 获取最后一个内容块
+        const lastContent = body?.querySelector('.msg__content:last-of-type') as HTMLElement | null;
+        
+        if (lastContent && !lastContent.innerHTML.trim()) {
+            // 如果最后的内容块为空，复用它
+            if (!lastContent.id) lastContent.id = id;
         } else {
-            // 没有工具调用，检查现有内容区域
-            const existingContent = existingMsg.querySelector('.msg__content');
-            if (existingContent && existingContent.innerHTML.trim()) {
-                // 已有内容，添加新内容块
-                const newContent = document.createElement('div');
-                newContent.className = 'msg__content msg__content--continued';
-                newContent.id = id;
-                existingMsg.appendChild(newContent);
-            } else if (existingContent) {
-                // 内容为空，直接设置 id 到现有内容区域
-                existingContent.id = id;
+            // 创建新的内容块，插入在操作按钮之前
+            const newContent = document.createElement('div');
+            newContent.className = 'msg__content';
+            newContent.id = id;
+            if (body && actions) {
+                body.insertBefore(newContent, actions);
+            } else if (body) {
+                body.appendChild(newContent);
             }
         }
+        
         // 复用消息时也需要通知 ChatHistory（确保对话链正确更新）
         ChatHistory.onStreamStart(id);
     } else {
@@ -577,24 +566,26 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
     let msgEl = dom.messages.querySelector('.msg--assistant:last-child');
     
     if (ChatHistory.isInAssistantTurn && msgEl) {
-        const toolsContainer = msgEl.querySelector('.msg__tools');
-        if (toolsContainer) {
-            toolsContainer.appendChild(el);
+        // 追加到消息体末尾（在操作按钮之前）
+        const body = msgEl.querySelector('.msg__body');
+        const actions = msgEl.querySelector('.msg__actions');
+        if (body && actions) {
+            body.insertBefore(el, actions);
+        } else if (body) {
+            body.appendChild(el);
         } else {
+            // 兼容旧结构（不应该达到这里）
             msgEl.appendChild(el);
         }
     } else {
+        // 新轮次，创建新消息
         const msgId = `msg-${Date.now()}`;
         const newMsgEl = createMsgEl('assistant', 'PAW', '', msgId);
         dom.messages.appendChild(newMsgEl);
         ChatHistory.onStreamStart(msgId);
         
-        const toolsContainer = newMsgEl.querySelector('.msg__tools');
-        if (toolsContainer) {
-            toolsContainer.appendChild(el);
-        } else {
-            newMsgEl.appendChild(el);
-        }
+        const body = newMsgEl.querySelector('.msg__body');
+        body?.appendChild(el);
     }
     
     ChatHistory.addTool(id, name);
@@ -898,7 +889,7 @@ function showToolDetail(toolElement: HTMLElement): void {
     
     // 设置标题
     if (toolDetailTitle) {
-        toolDetailTitle.textContent = `工具调用详情: ${toolName}`;
+        toolDetailTitle.textContent = `工具底层详情: ${toolName}`;
     }
     
     // 获取 pre 元素
@@ -985,12 +976,13 @@ document.querySelectorAll('.tool-detail-copy-btn').forEach(btn => {
     });
 });
 
-// 使用事件委托，监听所有工具元素的点击
-dom.messages.addEventListener('click', (e: MouseEvent) => {
+// 使用事件委托，监听所有工具元素的右键点击
+dom.messages.addEventListener('contextmenu', (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     const toolElement = target.closest('.tool') as HTMLElement;
     
     if (toolElement) {
+        e.preventDefault(); // 阻止默认右键菜单
         showToolDetail(toolElement);
     }
 });
