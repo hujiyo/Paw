@@ -11,13 +11,13 @@ interface NewChatOptions {
     workspace_dir: string;
     title: string;
     model: string;
+    system_prompt: string;
 }
 
 type SendFunction = (msg: string) => void;
 
 interface NewChatManager {
-    overlay: HTMLElement | null;
-    modal: HTMLElement | null;
+    view: HTMLElement | null;
     send: SendFunction | null;
     init(sendFn: SendFunction): void;
     open(): void;
@@ -30,24 +30,20 @@ interface NewChatManager {
 
 
 export const NewChatDialog: NewChatManager = {
-    overlay: null,
-    modal: null,
+    view: null,
     send: null,
 
     init(sendFn: SendFunction) {
         this.send = sendFn;
-        this.overlay = $<HTMLElement>('#new-chat-modal-overlay');
-        this.modal = $<HTMLElement>('.new-chat-modal');
+        this.view = $<HTMLElement>('#new-chat-view');
 
-        if (!this.overlay || !this.modal) {
-            console.warn('[NewChatDialog] 未找到弹窗元素');
+        if (!this.view) {
+            console.warn('[NewChatDialog] 未找到配置界面元素');
             return;
         }
 
         // 绑定关闭事件
-        this.overlay.addEventListener('click', (e) => {
-            if (e.target === this.overlay) this.close();
-        });
+        $<HTMLElement>('#new-chat-close-btn')?.addEventListener('click', () => this.close());
         $<HTMLElement>('#new-chat-cancel-btn')?.addEventListener('click', () => this.close());
 
         // 绑定浏览按钮
@@ -73,6 +69,7 @@ export const NewChatDialog: NewChatManager = {
             const workspace = $<HTMLInputElement>('#new-chat-workspace')?.value.trim();
             const title = $<HTMLInputElement>('#new-chat-title')?.value.trim();
             const model = $<HTMLInputElement>('#new-chat-model')?.value;
+            const systemPrompt = $<HTMLTextAreaElement>('#new-chat-system-prompt')?.value.trim();
 
             if (!workspace) {
                 Settings.showToast('请输入工作区目录', 'error');
@@ -88,7 +85,8 @@ export const NewChatDialog: NewChatManager = {
                     type: 'create_new_chat',
                     workspace_dir: workspace,
                     title: title,
-                    model: model
+                    model: model,
+                    system_prompt: systemPrompt
                 }));
             }
             
@@ -114,7 +112,7 @@ export const NewChatDialog: NewChatManager = {
     },
 
     async open() {
-        if (!this.overlay) return;
+        if (!this.view) return;
         
         // 重置表单
         const workspaceInput = $<HTMLInputElement>('#new-chat-workspace');
@@ -148,16 +146,20 @@ export const NewChatDialog: NewChatManager = {
             modelDisplay.textContent = '使用全局默认';
             modelDisplay.classList.add('model-select__value--placeholder');
         }
+        
+        // 清空系统提示词
+        const systemPromptInput = $<HTMLTextAreaElement>('#new-chat-system-prompt');
+        if (systemPromptInput) systemPromptInput.value = '';
 
         // 渲染最近列表
         this.renderRecents();
 
-        this.overlay.classList.add('visible');
+        this.view.classList.add('new-chat-view--visible');
     },
 
     close() {
-        if (this.overlay) {
-            this.overlay.classList.remove('visible');
+        if (this.view) {
+            this.view.classList.remove('new-chat-view--visible');
         }
     },
 

@@ -1467,6 +1467,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         workspace_dir = msg_data.get('workspace_dir', str(Path.home()))
                         title = msg_data.get('title', '').strip()
                         model = msg_data.get('model', '').strip()
+                        custom_system_prompt = msg_data.get('system_prompt', '').strip()
                         
                         # 解析工作目录（支持 ~ 符号）
                         if workspace_dir == '~':
@@ -1495,8 +1496,14 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         if hasattr(self.ui, 'set_chunk_manager'):
                             self.ui.set_chunk_manager(self.chunk_manager)
                         
-                        # 重新生成系统提示词（包含新的工作目录信息）
-                        self.system_prompt = self._create_system_prompt()
+                        # 生成系统提示词：如果用户提供了自定义提示词，则直接使用；否则使用默认
+                        if custom_system_prompt:
+                            # 使用用户自定义的系统提示词
+                            self.system_prompt = custom_system_prompt
+                            self.chunk_manager.add_system_prompt(custom_system_prompt)
+                        else:
+                            # 使用默认系统提示词
+                            self.system_prompt = self._create_system_prompt()
                         
                         # 保存新会话
                         new_session = self.session_manager.save_session(

@@ -247,11 +247,14 @@
         </div>
     </div>
 
-    <!-- 新建对话配置弹窗 -->
-    <div id="new-chat-modal-overlay" class="modal-overlay">
-        <div class="modal new-chat-modal">
-            <div class="modal__header">创建新对话</div>
-            <div class="modal__body">
+    <!-- 新建对话配置界面 -->
+    <div id="new-chat-view" class="new-chat-view">
+        <div class="new-chat-container">
+            <div class="new-chat-header">
+                <div class="new-chat-header__title">创建新对话</div>
+                <button class="new-chat-header__close" id="new-chat-close-btn">&times;</button>
+            </div>
+            <div class="new-chat-content">
                 <div class="settings__field">
                     <label class="settings__label">工作区目录</label>
                     <div class="settings__input-with-btn">
@@ -293,8 +296,14 @@
                     <input type="hidden" id="new-chat-model" value="">
                     <div class="settings__hint">点击获取可用模型，或输入自定义模型名</div>
                 </div>
+
+                <div class="settings__field">
+                    <label class="settings__label">系统提示词 (可选)</label>
+                    <textarea class="settings__textarea" id="new-chat-system-prompt" placeholder="留空则使用默认系统提示词" rows="6"></textarea>
+                    <div class="settings__hint">自定义系统提示词，留空则使用默认配置</div>
+                </div>
             </div>
-            <div class="modal__actions">
+            <div class="new-chat-footer">
                 <button class="settings__btn settings__btn--secondary" id="new-chat-cancel-btn">取消</button>
                 <button class="settings__btn settings__btn--primary" id="new-chat-create-btn">创建</button>
             </div>
