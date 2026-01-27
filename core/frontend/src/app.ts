@@ -12,6 +12,7 @@ import { FileExplorer } from './modules/file-explorer.js';
 import { Planner } from './modules/planner.js';
 import { Browser } from './modules/browser.js';
 import { WorkspaceFilesSidebar } from './modules/workspace-files-sidebar.js';
+import { Skills } from './modules/skills.js';
 
 // ============ 类型定义 ============
 
@@ -101,9 +102,9 @@ interface DomElements {
     historyEmpty: HTMLElement;
     newChatBtn: HTMLButtonElement;
     viewHistory: HTMLElement;
-    viewChain: HTMLElement;
     viewMemory: HTMLElement;
-    chainList: HTMLElement;
+    viewSkills: HTMLElement;
+    // Memory
     memoryCanvas: HTMLElement;
     memoryEmpty: HTMLElement;
     memoryStats: HTMLElement;
@@ -147,9 +148,8 @@ const dom: DomElements = {
     historyEmpty: $<HTMLElement>('#history-empty')!,
     newChatBtn: $<HTMLButtonElement>('#new-chat-btn')!,
     viewHistory: $<HTMLElement>('#view-history')!,
-    viewChain: $<HTMLElement>('#view-chain')!,
     viewMemory: $<HTMLElement>('#view-memory')!,
-    chainList: $<HTMLElement>('#chain-list')!,
+    viewSkills: $<HTMLElement>('#view-skills')!,
     // Memory
     memoryCanvas: $<HTMLElement>('#memory-canvas')!,
     memoryEmpty: $<HTMLElement>('#memory-empty')!,
@@ -200,6 +200,7 @@ FileExplorer.init();
 Planner.init();
 Browser.init();
 WorkspaceFilesSidebar.init();
+Skills.init();
 
 // 连接工作区文件侧边栏和右侧边栏：点击文件时在右侧边栏打开标签页
 WorkspaceFilesSidebar.onFileOpen((path, name, content) => {
@@ -360,9 +361,8 @@ $$<HTMLElement>('.sidebar__tab').forEach(tab => {
         tab.classList.add('sidebar__tab--active');
         const view = tab.dataset.view;
         dom.viewHistory.classList.toggle('sidebar__view--active', view === 'history');
-        dom.viewChain.classList.toggle('sidebar__view--active', view === 'chain');
         dom.viewMemory.classList.toggle('sidebar__view--active', view === 'memory');
-        if (view === 'chain') ChatHistory.renderChain();
+        dom.viewSkills.classList.toggle('sidebar__view--active', view === 'skills');
     });
 });
 
@@ -404,7 +404,6 @@ function handleEvent({ event, data }: WebSocketEvent): void {
         'new_chat': () => {
             ChatHistory.clear();
             dom.messages.innerHTML = '';
-            dom.chainList.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem">发送消息开始对话</div>';
             const newChatData = data as NewChatData;
             if (newChatData.session_id) {
                 ChatHistory.currentSessionId = newChatData.session_id;
@@ -414,7 +413,6 @@ function handleEvent({ event, data }: WebSocketEvent): void {
         },
         'models_fetched': () => Settings.handleModelResponse(data as ModelsFetchedData),
         'terminal_output': () => updateTerminalOutput(data as { content: string; is_open: boolean }),
-        'turns_updated': () => ChatHistory.renderChain(),
         'todos_updated': () => handleTodosUpdated(data as { todos: Array<{id: string; title: string; details?: string; status: string}> })
     };
     handlers[event]?.();

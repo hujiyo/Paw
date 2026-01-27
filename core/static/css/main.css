@@ -1,4 +1,97 @@
 
+/* ========== Skill商城界面 ========== */
+.skills-market-view {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-color);
+    z-index: 2500;
+    display: none;
+    flex-direction: column;
+}
+.skills-market-view--active {
+    display: flex;
+}
+.skills-market-container {
+    width: 100%;
+    height: 100vh;
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+}
+.skills-market-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(0, 0, 0, 0.2);
+}
+.skills-market-header__title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.skills-market-header__close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 2rem;
+    padding: 0.2rem;
+    line-height: 1;
+    transition: color 0.2s;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+}
+.skills-market-header__close:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+.skills-market-tabs {
+    display: flex;
+    gap: 0.5rem;
+    padding: 1rem 2rem;
+    background: rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid var(--border-color);
+}
+.skills-market-tab {
+    flex: 1;
+    max-width: 200px;
+    padding: 0.75rem 1.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    text-align: center;
+}
+.skills-market-tab--active {
+    background: var(--accent-assistant);
+    border-color: var(--accent-assistant);
+    color: white;
+}
+.skills-market-tab:hover:not(.skills-market-tab--active) {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--text-secondary);
+}
+.skills-market-content {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+.skills-market-content--active {
+    display: flex;
+}
+
 /* ========== 新建对话配置界面 ========== */
 .new-chat-view {
     position: fixed;
@@ -2379,4 +2472,250 @@ body {
 .msg__action-btn svg {
     width: 14px;
     height: 14px;
+}
+
+/* ========== Skills 市场样式 ========== */
+.skills-search-bar {
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    gap: 0.75rem;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.skills-search {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.skills-search:focus {
+    outline: none;
+    border-color: var(--accent-assistant);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.skills-category {
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    min-width: 120px;
+    transition: all 0.2s;
+}
+
+.skills-category:focus {
+    outline: none;
+    border-color: var(--accent-assistant);
+}
+
+.skills-search-btn {
+    padding: 0.5rem 1rem;
+    background: var(--accent-assistant);
+    border: 1px solid var(--accent-assistant);
+    border-radius: 6px;
+    color: white;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+}
+
+.skills-search-btn:hover {
+    background: #9b6fd8;
+    border-color: #9b6fd8;
+    transform: translateY(-1px);
+}
+
+.skills-search-btn:active {
+    transform: translateY(0);
+}
+
+.skills-list, .installed-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem;
+}
+
+.skills-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 2rem 1rem;
+}
+
+.skills-empty__icon {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+    opacity: 0.5;
+}
+
+.skills-empty__text {
+    font-size: 0.9rem;
+}
+
+.skill-card {
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.skill-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--accent-assistant);
+    transform: translateY(-1px);
+}
+
+.skill-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+}
+
+.skill-card__title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.skill-card__author {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.skill-card__stats {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.skill-card__description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+}
+
+.skill-card__footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.skill-card__category {
+    padding: 0.25rem 0.5rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 4px;
+    font-size: 0.7rem;
+    color: #3b82f6;
+}
+
+.skill-card__install-btn {
+    padding: 0.4rem 0.75rem;
+    background: var(--accent-assistant);
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.skill-card__install-btn:hover {
+    background: #0ea472;
+    transform: scale(1.05);
+}
+
+.skill-card__install-btn--installed {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+}
+
+.skill-card__install-btn--installing {
+    background: var(--tool-color);
+    cursor: wait;
+}
+
+/* 已安装 Skill 卡片 */
+.installed-card {
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+}
+
+.installed-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.installed-card__name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.installed-card__description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 0.5rem;
+}
+
+.installed-card__footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.installed-card__path {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+}
+
+.installed-card__uninstall-btn {
+    padding: 0.4rem 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--error-color);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.installed-card__uninstall-btn:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: var(--error-color);
 }

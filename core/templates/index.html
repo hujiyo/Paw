@@ -15,7 +15,6 @@
             <!-- 视图切换标签 -->
             <div class="sidebar__tabs">
                 <button class="sidebar__tab sidebar__tab--active" data-view="history">历史对话</button>
-                <button class="sidebar__tab" data-view="chain">当前对话</button>
                 <button class="sidebar__tab" data-view="memory">记忆</button>
             </div>
 
@@ -29,16 +28,6 @@
                 </div>
             </div>
 
-            <!-- 当前对话链视图 -->
-            <div class="sidebar__view" id="view-chain">
-                <div class="chain-header">
-                    <div class="chain-header__title">当前对话</div>
-                    <div class="chain-header__hint">点击展开详情，点击跳转到对应消息</div>
-                </div>
-                <div class="chain-list" id="chain-list">
-                    <div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem" id="chain-empty">发送消息开始对话</div>
-                </div>
-            </div>
 
             <!-- 记忆管理视图 -->
             <div class="sidebar__view" id="view-memory">
@@ -87,6 +76,13 @@
                     <button class="toolbar__btn" id="new-chat-toolbar" title="新对话 (Ctrl+N)">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                             <path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1a5 5 0 110 10A5 5 0 018 3zm.5 2.5a.5.5 0 00-1 0v2h-2a.5.5 0 000 1h2v2a.5.5 0 001 0v-2h2a.5.5 0 000-1h-2v-2z"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar__btn" id="skills-market-btn" title="Skill商城">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="9" y1="9" x2="15" y2="9"></line>
+                            <line x1="9" y1="15" x2="15" y2="15"></line>
                         </svg>
                     </button>
                 </div>
@@ -243,6 +239,53 @@
             <div class="modal__actions">
                 <button id="confirm-cancel" class="settings__btn settings__btn--secondary">取消</button>
                 <button id="confirm-ok" class="settings__btn settings__btn--primary" style="background:var(--error-color);color:#fff">删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skill商城界面 -->
+    <div id="skills-market-view" class="skills-market-view">
+        <div class="skills-market-container">
+            <div class="skills-market-header">
+                <div class="skills-market-header__title">Skill 商城</div>
+                <button class="skills-market-header__close" id="skills-market-close-btn">&times;</button>
+            </div>
+            
+            <!-- 切换标签 -->
+            <div class="skills-market-tabs">
+                <button class="skills-market-tab skills-market-tab--active" data-skills-view="market">市场</button>
+                <button class="skills-market-tab" data-skills-view="installed">已安装</button>
+            </div>
+            
+            <!-- 市场视图 -->
+            <div class="skills-market-content skills-market-content--active" id="skills-market-content">
+                <div class="skills-search-bar">
+                    <input type="text" class="skills-search" id="skills-search-input" placeholder="搜索 skills..." />
+                    <select class="skills-category" id="skills-category-select">
+                        <option value="">所有分类</option>
+                        <option value="development">开发</option>
+                        <option value="creative">创意</option>
+                        <option value="enterprise">企业</option>
+                        <option value="documentation">文档</option>
+                    </select>
+                    <button class="skills-search-btn" id="skills-search-btn">🔍</button>
+                </div>
+                <div class="skills-list" id="skills-list">
+                    <div class="skills-empty">
+                        <div class="skills-empty__icon">📦</div>
+                        <div class="skills-empty__text">点击搜索按钮浏览 Skills</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 已安装视图 -->
+            <div class="skills-market-content" id="skills-installed-content">
+                <div class="installed-list" id="installed-list">
+                    <div class="skills-empty">
+                        <div class="skills-empty__icon">💭</div>
+                        <div class="skills-empty__text">暂未安装任何 Skill</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

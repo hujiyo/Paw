@@ -173,6 +173,97 @@ class WebUI:
             except Exception as e:
                 return JSONResponse(content={"success": False, "error": str(e)})
 
+        # === Skills Marketplace API ===
+        # Skill 市场管理器（延迟初始化）
+        self._skill_marketplace = None
+        
+        def _get_marketplace():
+            """获取 SkillMarketplace 实例（懒加载）"""
+            if self._skill_marketplace is None:
+                from skill_marketplace import SkillMarketplace
+                self._skill_marketplace = SkillMarketplace()
+            return self._skill_marketplace
+        
+        @self.app.get("/api/skills/search")
+        async def search_skills(q: str = "", category: str = "", page: int = 1):
+            """搜索 Skills"""
+            try:
+                marketplace = _get_marketplace()
+                result = await asyncio.to_thread(
+                    marketplace.search_skills,
+                    query=q,
+                    category=category,
+                    page=page
+                )
+                return JSONResponse(content=result)
+            except Exception as e:
+                return JSONResponse(content={
+                    "success": False,
+                    "skills": [],
+                    "total": 0,
+                    "page": page,
+                    "error": str(e)
+                })
+        
+        @self.app.post("/api/skills/install")
+        async def install_skill(request: Request):
+            """安装 Skill"""
+            try:
+                data = await request.json()
+                skill_id = data.get("skill_id")
+                skill_name = data.get("skill_name")
+                repo_url = data.get("repo_url")
+                
+                if not skill_id or not skill_name or not repo_url:
+                    return JSONResponse(content={
+                        "success": False,
+                        "message": "Missing required parameters: skill_id, skill_name, repo_url"
+                    })
+                
+                marketplace = _get_marketplace()
+                result = await asyncio.to_thread(
+                    marketplace.download_skill,
+                    skill_id=skill_id,
+                    skill_name=skill_name,
+                    repo_url=repo_url
+                )
+                return JSONResponse(content=result)
+            except Exception as e:
+                return JSONResponse(content={
+                    "success": False,
+                    "message": f"Installation failed: {str(e)}"
+                })
+        
+        @self.app.get("/api/skills/installed")
+        async def get_installed_skills():
+            """获取已安装的 Skills 列表"""
+            try:
+                marketplace = _get_marketplace()
+                result = await asyncio.to_thread(marketplace.list_installed_skills)
+                return JSONResponse(content=result)
+            except Exception as e:
+                return JSONResponse(content={
+                    "success": False,
+                    "skills": [],
+                    "error": str(e)
+                })
+        
+        @self.app.delete("/api/skills/{skill_name}")
+        async def uninstall_skill(skill_name: str):
+            """卸载 Skill"""
+            try:
+                marketplace = _get_marketplace()
+                result = await asyncio.to_thread(
+                    marketplace.uninstall_skill,
+                    skill_name=skill_name
+                )
+                return JSONResponse(content=result)
+            except Exception as e:
+                return JSONResponse(content={
+                    "success": False,
+                    "message": f"Uninstallation failed: {str(e)}"
+                })
+
         # 轮次数据获取接口（供前端对话链视图使用）
         # 注意：需要 paw 实例注入 chunk_manager，通过 set_chunk_manager 方法
         self._chunk_manager_ref = None

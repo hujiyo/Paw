@@ -49,7 +49,6 @@ export interface SessionChunk {
 export interface DomRefs {
     messages: HTMLElement;
     msgWrap: HTMLElement;
-    chainList: HTMLElement;
     [key: string]: HTMLElement | null;
 }
 
@@ -150,11 +149,8 @@ export const ChatHistory: ChatHistoryManager = {
     renderChainFromData(turns: BackendTurn[]): void {
         if (!this.dom) return;
         
-        if (!turns.length) {
-            this.dom.chainList.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;text-align:center;padding:2rem 1rem">发送消息开始对话</div>';
-            return;
-        }
-        this.dom.chainList.innerHTML = '';
+        // 当前对话视图已移除，此方法不再需要
+        return;
 
         turns.forEach((turn) => {
             const el = document.createElement('div');
@@ -210,7 +206,6 @@ export const ChatHistory: ChatHistoryManager = {
                 });
             });
 
-            this.dom!.chainList.appendChild(el);
         });
     },
 
