@@ -3,6 +3,7 @@ import { $, $$ } from './utils.js';
 import { AppState } from './store.js';
 import { escapeHtml } from './utils.js';
 import { Browser } from './browser.js';
+import { FileEditor } from './file-editor.js';
 
 interface FileTab {
     id: string;      // 唯一标识（使用文件路径的 hash）
@@ -125,25 +126,10 @@ export class RightSidebar {
         const panelEl = document.createElement('div');
         panelEl.className = 'editor-panel editor-panel--file';
         panelEl.id = `panel-${tabId}`;
-        panelEl.innerHTML = `
-            <div class="file-panel-header">
-                <div>
-                    <span class="file-panel-name">${escapeHtml(name)}</span>
-                    <span class="file-panel-path">${escapeHtml(path)}</span>
-                </div>
-            </div>
-            <pre><code id="code-${tabId}"></code></pre>
-        `;
         this.panelsContainer?.appendChild(panelEl);
         
-        // 填充内容并高亮
-        const codeEl = panelEl.querySelector(`#code-${tabId}`);
-        if (codeEl) {
-            codeEl.textContent = content;
-            if ((window as any).hljs) {
-                (window as any).hljs.highlightElement(codeEl);
-            }
-        }
+        // 使用 FileEditor 渲染
+        new FileEditor(panelEl, { path, name, content });
         
         // 切换到新标签页
         this.switchToTab(tabId);

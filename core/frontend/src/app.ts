@@ -13,6 +13,7 @@ import { Planner } from './modules/planner.js';
 import { Browser } from './modules/browser.js';
 import { WorkspaceFilesSidebar } from './modules/workspace-files-sidebar.js';
 import { Skills } from './modules/skills.js';
+import { EditorSettings } from './modules/editor-settings.js';
 
 // ============ 类型定义 ============
 
@@ -201,6 +202,7 @@ Planner.init();
 Browser.init();
 WorkspaceFilesSidebar.init();
 Skills.init();
+EditorSettings.init();
 
 // 连接工作区文件侧边栏和右侧边栏：点击文件时在右侧边栏打开标签页
 WorkspaceFilesSidebar.onFileOpen((path, name, content) => {

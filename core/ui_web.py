@@ -319,6 +319,31 @@ class WebUI:
             except Exception as e:
                 return JSONResponse(content={"success": False, "error": str(e)})
 
+        @self.app.post("/api/fs/save")
+        async def save_file_content(request: Request):
+            """保存文件内容"""
+            try:
+                data = await request.json()
+                path_str = data.get("path")
+                content = data.get("content")
+                
+                if not path_str:
+                     return JSONResponse(content={"success": False, "error": "No path provided"})
+                
+                p = Path(path_str).resolve()
+                
+                # 确保父目录存在
+                if not p.parent.exists():
+                    return JSONResponse(content={"success": False, "error": "Parent directory does not exist"})
+                
+                try:
+                    p.write_text(content, encoding="utf-8")
+                    return JSONResponse(content={"success": True})
+                except Exception as e:
+                    return JSONResponse(content={"success": False, "error": str(e)})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()

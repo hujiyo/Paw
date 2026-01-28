@@ -37,8 +37,7 @@ export const Skills = {
     bindEvents(): void {
         // 工具栏打开/关闭按钮
         const openBtn = $<HTMLElement>('#skills-market-btn');
-        const closeBtn = $<HTMLElement>('#skills-market-close-btn');
-        const view = $<HTMLElement>('#skills-market-view');
+        const chatBtn = $<HTMLElement>('#chat-view-btn');
         
         if (openBtn) {
             openBtn.addEventListener('click', () => {
@@ -46,8 +45,8 @@ export const Skills = {
             });
         }
         
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
+        if (chatBtn) {
+            chatBtn.addEventListener('click', () => {
                 this.hide();
             });
         }
@@ -87,8 +86,17 @@ export const Skills = {
     
     show(): void {
         const view = $<HTMLElement>('#skills-market-view');
-        if (view) {
+        const chatView = $<HTMLElement>('#chat-view');
+        const skillsBtn = $<HTMLElement>('#skills-market-btn');
+        const chatBtn = $<HTMLElement>('#chat-view-btn');
+
+        if (view && chatView) {
             view.classList.add('skills-market-view--active');
+            chatView.classList.remove('chat-view--active');
+            
+            if (skillsBtn) skillsBtn.classList.add('toolbar__btn--active');
+            if (chatBtn) chatBtn.classList.remove('toolbar__btn--active');
+
             this.isVisible = true;
             // 打开时加载数据
             if (this.currentView === 'installed') {
@@ -99,8 +107,17 @@ export const Skills = {
     
     hide(): void {
         const view = $<HTMLElement>('#skills-market-view');
-        if (view) {
+        const chatView = $<HTMLElement>('#chat-view');
+        const skillsBtn = $<HTMLElement>('#skills-market-btn');
+        const chatBtn = $<HTMLElement>('#chat-view-btn');
+
+        if (view && chatView) {
             view.classList.remove('skills-market-view--active');
+            chatView.classList.add('chat-view--active');
+            
+            if (skillsBtn) skillsBtn.classList.remove('toolbar__btn--active');
+            if (chatBtn) chatBtn.classList.add('toolbar__btn--active');
+
             this.isVisible = false;
         }
     },
