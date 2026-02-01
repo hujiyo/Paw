@@ -73,7 +73,7 @@ class ChunkManager:
     
     def __init__(self, max_tokens: int = 64000, tools_schema: Optional[List[Dict]] = None):
         """初始化
-        
+
         Args:
             max_tokens: 最大token数
             tools_schema: 工具定义schema（OpenAI格式）
@@ -83,6 +83,7 @@ class ChunkManager:
         self.current_tokens = 0
         self.tools_schema = tools_schema or []
         self.tools_tokens = self._estimate_tools_tokens()
+        self._shell_just_opened = False  # 标记终端是否刚被打开
     
     def _estimate_tools_tokens(self) -> int:
         """估算工具schema的token数"""
@@ -280,6 +281,10 @@ class ChunkManager:
 
         - move_to_end=False: 原地更新内容，位置不变（用于定时刷新）
         - move_to_end=True: 保留历史内容，追加新输出到末尾（用于终端操作后）
+
+        关于 "=== 新终端 ===" 分隔符：
+        - 检测 self._shell_just_opened 标记
+        - 如果标记为 True 且存在旧 shell_chunk，说明终端刚重新打开，添加分隔符
         """
         if move_to_end:
             # 检查是否已存在 shell_chunk
@@ -290,11 +295,19 @@ class ChunkManager:
                     self.remove_shell_chunk()
                     break
 
-            # 如果有旧内容，追加新输出（用分隔线分开）
+            # 如果有旧内容，合并输出
             if existing_content:
-                combined = existing_content.rstrip() + "\n\n=== 新终端 ===\n" + output
+                if self._shell_just_opened:
+                    # 终端刚重新打开，添加分隔符
+                    combined = existing_content.rstrip() + "\n\n=== 新终端 ===\n" + output
+                    self._shell_just_opened = False  # 重置标记
+                else:
+                    # 同一终端会话，直接追加内容
+                    combined = existing_content.rstrip() + "\n\n" + output
                 return self.add_shell_output(combined)
             else:
+                # 首次打开终端，重置标记
+                self._shell_just_opened = False
                 return self.add_shell_output(output)
         else:
             # 原地更新内容
@@ -309,6 +322,14 @@ class ChunkManager:
                     return chunk
             # 不存在则创建（首次）
             return self.add_shell_output(output)
+
+    def mark_shell_opened(self):
+        """标记终端刚被打开（由 open_shell 工具调用）
+
+        当下次调用 update_shell_output(move_to_end=True) 时，
+        如果存在旧的 shell_chunk，会添加 "=== 新终端 ===" 分隔符
+        """
+        self._shell_just_opened = True
     
     def has_shell_chunk(self) -> bool:
         """检查是否存在Shell语块"""

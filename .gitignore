@@ -46,13 +46,10 @@ Thumbs.db
 
 MYSKILL.md
 
-# Legacy directories (can be removed after cleanup)
-core/
-electron/
-
 # TypeScript compilation output
 static/js/**/*.js
 !static/js/**/*.min.js
 src/main/**/*.js
 src/renderer/**/*.js
 *.js.map
+*.js

@@ -76,7 +76,7 @@ function getConfigPath(): string {
 
 function getLoadingPagePath(): string {
     if (app.isPackaged) {
-        return path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'templates', 'loading.html');
+        return path.join(process.resourcesPath, 'app.asar', 'resources', 'templates', 'loading.html');
     }
     return path.join(__dirname, '..', '..', 'resources', 'templates', 'loading.html');
 }
@@ -85,7 +85,7 @@ function getIconPath(): string {
     const iconFile = process.platform === 'win32' ? 'icon.ico' :
                      process.platform === 'darwin' ? 'icon.icns' : 'icon.png';
     if (app.isPackaged) {
-        return path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'icons', iconFile);
+        return path.join(process.resourcesPath, 'app.asar', 'resources', 'icons', iconFile);
     }
     return path.join(__dirname, '..', '..', 'resources', 'icons', iconFile);
 }

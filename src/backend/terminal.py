@@ -18,15 +18,16 @@ class ThreadedTerminal:
     def __init__(self, sandbox_dir: Path, shell_config: dict = None):
         self.sandbox_dir = sandbox_dir
         self.shell_config = shell_config or {}
-        
+
         # 线程通信队列
         self.command_queue = Queue()  # 主线程 -> 工作线程
         self.result_queue = Queue()   # 工作线程 -> 主线程
-        
+
         # 状态管理
         self.is_running = False
         self.worker_thread = None
-        
+        self._just_opened = False  # 标记终端是否刚被打开
+
         # 输出缓冲（按字节长度限制，以整行为单位截断）
         self.output_buffer = []
         # 从配置读取缓冲区大小（KB），默认24KB，范围4-64KB
@@ -34,7 +35,7 @@ class ThreadedTerminal:
         buffer_size_kb = max(4, min(64, buffer_size_kb))  # 限制范围
         self.max_buffer_size = buffer_size_kb * 1024  # 转换为字节
         self.lock = threading.Lock()
-        
+
         # 控制信号
         self._stop_flag = False
     
@@ -83,35 +84,35 @@ class ThreadedTerminal:
                 "error": "仅在 Windows 平台上支持线程终端",
                 "stderr": "仅在 Windows 平台上支持线程终端"
             }
-        
+
         if self.is_shell_open():
             return {
                 "success": True,
                 "message": "终端已在运行",
                 "type": "threaded"
             }
-        
+
         try:
             self._stop_flag = False
             self.output_buffer.clear()
-            
+
             # 启动工作线程
             self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
             self.worker_thread.start()
-            
+
             # 等待终端启动完成
             timeout = 5
             start_time = time.time()
             while not self.is_shell_open() and (time.time() - start_time) < timeout:
                 time.sleep(0.1)
-            
+
             if not self.is_shell_open():
                 return {
                     "success": False,
                     "error": "终端启动超时",
                     "stderr": "终端启动超时"
                 }
-            
+
             # 等待终端输出稳定（表示终端真正就绪）
             # 策略：如果连续 0.3 秒没有新输出，认为终端已就绪
             stable_timeout = 3  # 最多等待 3 秒
@@ -119,7 +120,7 @@ class ThreadedTerminal:
             stable_start = time.time()
             last_output = ""
             last_change_time = time.time()
-            
+
             while (time.time() - stable_start) < stable_timeout:
                 current_output = self.get_screen_snapshot()
                 if current_output != last_output:
@@ -130,15 +131,16 @@ class ThreadedTerminal:
                     # 输出已稳定且非空，终端就绪
                     break
                 time.sleep(0.05)
-            
+
             shell_type = self.shell_config.get('shell', 'powershell')
+            self._just_opened = True  # 标记终端刚被打开
             return {
                 "success": True,
                 "message": f"{shell_type.upper()} 终端已就绪",
                 "type": "threaded",
                 "screen": self.get_screen_snapshot()  # 返回当前屏幕内容
             }
-            
+
         except Exception as e:
             return {
                 "success": False,

@@ -113,6 +113,12 @@ class WebUI:
                     return JSONResponse(content={"success": False, "error": "请先配置 Embedding URL 和模型"})
                 
                 # 导入并调用校准函数
+                import sys
+                from pathlib import Path
+                # 添加 scripts 目录到路径
+                scripts_dir = Path(__file__).parent.parent.parent / "scripts"
+                if str(scripts_dir) not in sys.path:
+                    sys.path.insert(0, str(scripts_dir))
                 from calibrate_threshold import calibrate_api
                 
                 result = await asyncio.to_thread(

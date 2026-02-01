@@ -314,19 +314,19 @@ class BaseTools:
     
     def run_command(self, command: str, cwd: str = None, blocking: bool = True) -> Dict[str, Any]:
         """PROPOSE a command to run on behalf of the user.
-        
+
         Args:
             command: The exact command line string to execute
             cwd: The current working directory for the command
             blocking: If true, the command will block until finished
-        
+
         Returns:
             Execution result dictionary
         """
         # 过滤危险命令（会导致终端清屏或影响主程序）
         dangerous_commands = ['clear', 'cls', 'reset', 'tput clear', 'printf "\033c"']
         cmd_lower = command.strip().lower()
-        
+
         for dangerous_cmd in dangerous_commands:
             if dangerous_cmd in cmd_lower:
                 return {
@@ -335,8 +335,9 @@ class BaseTools:
                     "stdout": f"Command '{command}' skipped (screen clear commands are not allowed in this environment)",
                     "note": "Screen manipulation commands are blocked to preserve conversation context"
                 }
-        
+
         # 如果终端未打开，自动打开
+        shell_just_opened = False
         if not self.async_shell.is_shell_open():
             open_result = self.async_shell.open_shell()
             if not open_result.get("success"):
@@ -345,11 +346,19 @@ class BaseTools:
                     "error": f"无法打开终端: {open_result.get('error', '未知错误')}",
                     "stderr": f"无法打开终端: {open_result.get('error', '未知错误')}"
                 }
+            # 检查是否刚打开终端
+            shell_just_opened = getattr(self.async_shell, '_just_opened', False)
             # 等待终端完全启动
             import time
             time.sleep(1)
-        
-        return self.async_shell.enqueue_command(command)
+
+        result = self.async_shell.enqueue_command(command)
+
+        # 如果终端刚被打开，在返回值中添加标记
+        if shell_just_opened and isinstance(result, dict):
+            result["shell_just_opened"] = True
+
+        return result
 
     def open_shell(self) -> Dict[str, Any]:
         """打开共享异步终端窗口"""

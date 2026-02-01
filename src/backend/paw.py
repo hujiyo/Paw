@@ -359,7 +359,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
     
     def _refresh_shell_chunk(self, move_to_end: bool = False):
         """刷新Shell输出到chunk（如果终端已打开）
-        
+
         Args:
             move_to_end: 是否将 Shell chunk 移动到末尾
                 - True: 终端操作后调用，Shell chunk 紧跟在操作之后
@@ -474,16 +474,16 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         """执行工具调用 - 使用 ToolRegistry 统一管理"""
         tool_name = tool_call.get("tool")
         args = tool_call.get("args", {})
-        
+
         try:
             # 从 ToolRegistry 获取工具配置
             tool_config = ToolRegistry.get(tool_name)
-            
+
             if tool_config is None:
                 # 工具未注册
                 error_msg = ToolPrompts.get_error_messages()["unknown_tool"].format(tool_name=tool_name)
                 return {"success": False, "error": error_msg}
-            
+
             # 调用工具的 handler（支持同步和异步）
             handler = tool_config.handler
             result = handler(**args)
@@ -497,35 +497,46 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 # 判断是成功还是失败 - 只检查错误前缀，避免误判文件内容
                 error_prefixes = ["Error:", "Failed", "错误:", "失败:"]
                 is_error = any(result.startswith(prefix) for prefix in error_prefixes)
-                
+
                 if is_error:
                     return {"success": False, "error": result}
                 else:
                     # 默认视为成功（包括read_file返回的文件内容）
-                    return {"success": True, "result": result}
+                    success_result = {"success": True, "result": result}
             elif isinstance(result, dict):
                 # 如果已经是字典格式
                 if result.get("success"):
                     # 优先使用 result 字段，其次 stdout，最后序列化整个字典
                     output = result.get("result") or result.get("stdout")
                     if output:
-                        return {"success": True, "result": output}
+                        success_result = {"success": True, "result": output}
                     else:
                         # 将整个结果字典序列化为 JSON 字符串（Web 工具等）
                         import json
                         result_copy = {k: v for k, v in result.items() if k != "success"}
                         if result_copy:
-                            return {"success": True, "result": json.dumps(result_copy, ensure_ascii=False, indent=2)}
+                            success_result = {"success": True, "result": json.dumps(result_copy, ensure_ascii=False, indent=2)}
                         else:
                             success_msg = ToolPrompts.get_error_messages()["command_success"]
-                            return {"success": True, "result": success_msg}
+                            success_result = {"success": True, "result": success_msg}
                 else:
                     default_error = ToolPrompts.get_error_messages()["unknown_error"]
                     error = result.get("error") or result.get("stderr", default_error)
                     return {"success": False, "error": error}
             else:
-                return result
-                
+                success_result = result
+
+            # 特殊处理：检测终端是否刚被打开
+            if success_result.get("success"):
+                # 1. open_shell 工具成功执行
+                if tool_name == "open_shell":
+                    self.chunk_manager.mark_shell_opened()
+                # 2. run_command 工具自动打开了终端
+                elif success_result.get("shell_just_opened"):
+                    self.chunk_manager.mark_shell_opened()
+
+            return success_result
+
         except Exception as e:
             return {"success": False, "error": str(e)}
     
@@ -720,9 +731,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 self.workspace_dir = Path(snapshot.workspace_dir)
                 self.workspace_name = self.workspace_dir.name
                 self.tools.sandbox_dir = self.workspace_dir
-                # 更新终端的工作目录
-                if hasattr(self.tools.async_shell, 'working_directory'):
-                    self.tools.async_shell.working_directory = self.workspace_dir
             
             # 恢复模型（如果会话保存了模型信息）
             if snapshot.model and snapshot.model != 'unknown':
@@ -1484,9 +1492,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         self.workspace_dir = Path(workspace_dir)
                         self.workspace_name = self.workspace_dir.name
                         self.tools.sandbox_dir = self.workspace_dir
-                        # 更新终端的工作目录
-                        if hasattr(self.tools.async_shell, 'working_directory'):
-                            self.tools.async_shell.working_directory = self.workspace_dir
                         
                         # 创建新的 ChunkManager
                         from chunk_system import ChunkManager
@@ -1963,8 +1968,12 @@ async def main():
     )
     args = parser.parse_args()
 
-    # 确定工作目录: 命令行参数 > 默认用户主目录
-    workspace_dir = args.workspace or str(Path.home())
+    # 确定工作目录: 命令行参数 > 当前目录 > 用户主目录
+    if args.workspace:
+        workspace_dir = args.workspace
+    else:
+        # 使用当前工作目录（类似于 VSCode 的行为）
+        workspace_dir = str(Path.cwd())
 
     # 检查Web UI依赖
     try:
