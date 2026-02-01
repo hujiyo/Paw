@@ -8,7 +8,7 @@
   "scripts": {
     "start": "npm run compile && electron .",
     "dev": "npm run compile && electron . --dev",
-    "compile": "tsc",
+    "compile": "tsc -p tsconfig.main.json && tsc && node scripts/copy-static.js",
     "watch": "tsc -w",
     "build": "npm run compile && electron-builder",
     "build:win": "npm run compile && electron-builder --win",

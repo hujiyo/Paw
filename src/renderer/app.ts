@@ -378,12 +378,16 @@ ws.onmessage = (e: MessageEvent): void => handleEvent(JSON.parse(e.data) as WebS
 
 function handleEvent({ event, data }: WebSocketEvent): void {
     const handlers: Record<string, () => void> = {
-        'assistant_stream_start': () => startStream((data as StreamData).id),
+        'assistant_stream_start': () => {
+            ChatHistory.isInAssistantTurn = true;
+            startStream((data as StreamData).id);
+        },
         'assistant_stream_chunk': () => appendStream((data as StreamData).id, (data as StreamData).text || ''),
         'assistant_stream_end': () => endStream((data as StreamData).id),
         'tool_start': () => createTool(data as ToolStartData),
         'tool_result': () => updateTool(data as ToolResultData),
         'turn_end': () => {
+            ChatHistory.isInAssistantTurn = false;
             ChatHistory.endAssistantTurn();
             setGeneratingState(false);
         },
@@ -451,74 +455,72 @@ function handleTodosUpdated({ todos }: { todos: Array<{id: string; title: string
 function startStream(id: string): void {
     AppState.streamId = id;
     AppState.streamBuf = '';
-    
-    let existingMsg = dom.messages.querySelector('.msg--assistant:last-child');
-    
-    if (ChatHistory.isInAssistantTurn && existingMsg) {
-        // 同一轮次中，复用现有消息
-        const body = existingMsg.querySelector('.msg__body');
-        const actions = existingMsg.querySelector('.msg__actions');
-        
-        // 获取最后一个内容块
-        const lastContent = body?.querySelector('.msg__content:last-of-type') as HTMLElement | null;
-        
-        if (lastContent && !lastContent.innerHTML.trim()) {
-            // 如果最后的内容块为空，复用它
-            if (!lastContent.id) lastContent.id = id;
-        } else {
-            // 创建新的内容块，插入在操作按钮之前
-            const newContent = document.createElement('div');
-            newContent.className = 'msg__content';
-            newContent.id = id;
-            if (body && actions) {
-                body.insertBefore(newContent, actions);
-            } else if (body) {
-                body.appendChild(newContent);
-            }
-        }
-        
-        // 复用消息时也需要通知 ChatHistory（确保对话链正确更新）
-        ChatHistory.onStreamStart(id);
-    } else {
-        // 新轮次，创建新消息
-        dom.messages.appendChild(createMsgEl('assistant', 'PAW', '', id));
-        ChatHistory.onStreamStart(id);
+
+    // 后端每次 print_assistant 都发送 assistant_stream_start
+    // 前端逻辑：有 assistant 消息就追加，没有就创建（不猜测）
+    let msgEl = dom.messages.querySelector('.msg--assistant:last-child');
+
+    if (!msgEl) {
+        // 没有 assistant 消息，创建新的
+        msgEl = createMsgEl('assistant', 'PAW', '', id);
+        dom.messages.appendChild(msgEl);
     }
+
+    // 为这次流式输出创建新的内容块（每次都有独立容器）
+    const body = msgEl.querySelector('.msg__body');
+    const uniqueId = `stream-${id}`;
+    const content = document.createElement('div');
+    content.className = 'msg__content';
+    content.id = uniqueId;
+
+    // 直接追加到 body 末尾
+    if (body) {
+        body.appendChild(content);
+    }
+
+    // 保存当前内容块引用，供 appendStream 使用
+    AppState.currentContentEl = content;
+    ChatHistory.onStreamStart(id);
 }
 
 function appendStream(id: string, text: string): void {
-    let content = document.getElementById(id);
+    // 追加到 startStream 中创建的内容块
+    const content = AppState.currentContentEl;
+
     if (!content) {
-        content = dom.messages.querySelector('.msg--assistant:last-child .msg__content:last-of-type');
+        // 理论上不应该到达这里（startStream 会先被调用）
+        console.warn('[appendStream] No current content element, ignoring chunk');
+        return;
     }
-    if (!content) return;
-    
+
     AppState.streamBuf += text;
     content.innerHTML = marked.parse(AppState.streamBuf);
     scrollToBottom(dom.msgWrap);
 }
 
 function endStream(id: string): void {
-    let content = document.getElementById(id);
+    // 使用 startStream 中保存的内容块引用
+    const content = AppState.currentContentEl;
+
     if (!content) {
-        content = dom.messages.querySelector('.msg--assistant:last-child .msg__content:last-of-type');
+        console.warn('[endStream] No current content element');
+        return;
     }
-    
-    if (content) {
-        content.querySelectorAll('pre code').forEach(el => {
-            const pre = el.parentElement;
-            if (!pre) return;
-            const btn = document.createElement('button');
-            btn.className = 'copy-btn';
-            btn.textContent = 'Copy';
-            btn.onclick = (): void => { 
-                navigator.clipboard.writeText(el.textContent || ''); 
-                btn.textContent = 'Copied!'; 
-                setTimeout(() => btn.textContent = 'Copy', 2000); 
-            };
-            pre.appendChild(btn);
-        });
-    }
+
+    // 添加代码复制按钮
+    content.querySelectorAll('pre code').forEach(el => {
+        const pre = el.parentElement;
+        if (!pre) return;
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.textContent = 'Copy';
+        btn.onclick = (): void => {
+            navigator.clipboard.writeText(el.textContent || '');
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = 'Copy', 2000);
+        };
+        pre.appendChild(btn);
+    });
 
     ChatHistory.onStreamEnd(AppState.streamBuf);
 
@@ -526,6 +528,7 @@ function endStream(id: string): void {
     Browser.refresh();
     AppState.streamId = null;
     AppState.streamBuf = '';
+    AppState.currentContentEl = null; // 清理引用
 }
 
 // ============ 工具渲染逻辑 ============
@@ -547,7 +550,6 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
     if (name === 'stay_silent') {
         const msgEl = dom.messages.querySelector('.msg--assistant:last-child');
         if (msgEl) msgEl.remove();
-        
         ChatHistory.isInAssistantTurn = false;
         setGeneratingState(false);
         return;
@@ -557,37 +559,30 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
     el.id = `tool-${id}`;
     el.className = 'tool';
     el.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${name}</span> <span class="tool__args">${args}</span></div>`;
-    
+
     // 存储原始请求数据
     if (raw_request) {
         el.dataset.rawRequest = JSON.stringify(raw_request);
     }
 
+    // 前端逻辑：有 assistant 消息就追加，没有就创建（不猜测）
     let msgEl = dom.messages.querySelector('.msg--assistant:last-child');
-    
-    if (ChatHistory.isInAssistantTurn && msgEl) {
-        // 追加到消息体末尾（在操作按钮之前）
-        const body = msgEl.querySelector('.msg__body');
-        const actions = msgEl.querySelector('.msg__actions');
-        if (body && actions) {
-            body.insertBefore(el, actions);
-        } else if (body) {
-            body.appendChild(el);
-        } else {
-            // 兼容旧结构（不应该达到这里）
-            msgEl.appendChild(el);
-        }
-    } else {
-        // 新轮次，创建新消息
-        const msgId = `msg-${Date.now()}`;
-        const newMsgEl = createMsgEl('assistant', 'PAW', '', msgId);
-        dom.messages.appendChild(newMsgEl);
-        ChatHistory.onStreamStart(msgId);
-        
-        const body = newMsgEl.querySelector('.msg__body');
-        body?.appendChild(el);
+
+    if (!msgEl) {
+        // 没有 assistant 消息，创建新的
+        msgEl = createMsgEl('assistant', 'PAW', '', `msg-${Date.now()}`);
+        dom.messages.appendChild(msgEl);
     }
-    
+
+    // 追加工具到消息体（在操作按钮之前）
+    const body = msgEl.querySelector('.msg__body');
+    if (body) {
+        body.appendChild(el);
+    } else {
+        // 兼容旧结构（不应该到达这里）
+        msgEl.appendChild(el);
+    }
+
     ChatHistory.addTool(id, name);
     scrollToBottom(dom.msgWrap);
     

@@ -379,6 +379,12 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
     async def _call_llm_with_tools(self, messages: List[Dict]) -> Dict[str, Any]:
         """调用语言模型（支持Function Calling + 流式输出）
 
+        重构说明：流式处理采用单一数据源模式
+        - 在 chunk_manager 中创建一个"流式 chunk"
+        - 流式内容实时更新到这个 chunk
+        - Stop 时已累积的内容已保存在 chunk 中
+        - 消除显示和存储的不一致性
+
         Returns:
             {
                 "role": "assistant",
@@ -387,14 +393,12 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 "finish_reason": str
             }
         """
-        # 用于跟踪是否有内容输出（控制换行）
+        # 流式处理状态
         has_content = [False]
-        last_chunk = ['']
-        accumulated_content = ['']  # 累积完整内容（用于stop时保存）
-        was_stopped = [False]  # 是否被用户停止
+        was_stopped = [False]
 
         def on_content(text: str):
-            """流式内容回调"""
+            """流式内容回调 - 实时更新到 chunk"""
             # 检查停止请求
             if self._stop_event and self._stop_event.is_set():
                 was_stopped[0] = True
@@ -402,8 +406,13 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
             if not has_content[0]:
                 has_content[0] = True
-            last_chunk[0] = text
-            accumulated_content[0] += text  # 累积完整内容
+                # 首次接收到内容时，创建流式 chunk
+                self.chunk_manager.start_streaming_assistant_chunk()
+
+            # 实时更新 chunk 内容（单一数据源）
+            self.chunk_manager.append_to_streaming_chunk(text)
+
+            # 前端显示
             self.ui.print_assistant(text, end='', flush=True)
 
         # 使用统一的 LLM 客户端（传入当前 model，因为可能在运行时选择）
@@ -420,23 +429,41 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
         # 检查是否被用户停止
         if was_stopped[0]:
-            if has_content[0] and last_chunk[0] and not last_chunk[0].endswith('\n'):
-                print()
+            # 处理最后一行的换行
+            if has_content[0] and self.chunk_manager.chunks:
+                last_chunk = self.chunk_manager.chunks[-1]
+                if last_chunk.chunk_type == ChunkType.ASSISTANT and last_chunk.content:
+                    if not last_chunk.content.endswith('\n'):
+                        print()
             # 通知 WebUI 流式结束
             if hasattr(self.ui, 'assistant_stream_end') and callable(getattr(self.ui, 'assistant_stream_end')):
                 try:
                     self.ui.assistant_stream_end()
                 except Exception:
                     pass
+            # finalize 流式 chunk（即使 stop 也标记为完成）
+            if self.chunk_manager.is_streaming():
+                self.chunk_manager.finalize_streaming_chunk(tool_calls=[])
+
+            # 从 chunk 获取完整内容
+            final_content = None
+            if self.chunk_manager.chunks:
+                last_chunk = self.chunk_manager.chunks[-1]
+                if last_chunk.chunk_type == ChunkType.ASSISTANT:
+                    final_content = last_chunk.content
+
             return {
-                "content": accumulated_content[0] if has_content[0] else None,  # 返回累积的完整内容
+                "content": final_content,
                 "tool_calls": [],
                 "finish_reason": "stopped"
             }
 
         # 处理换行（只有当最后一行不是换行符时才打印换行）
-        if has_content[0] and last_chunk[0] and not last_chunk[0].endswith('\n'):
-            print()
+        if has_content[0] and self.chunk_manager.chunks:
+            last_chunk = self.chunk_manager.chunks[-1]
+            if last_chunk.chunk_type == ChunkType.ASSISTANT and last_chunk.content:
+                if not last_chunk.content.endswith('\n'):
+                    print()
 
         # 通知 WebUI 流式结束（如果支持）
         if hasattr(self.ui, 'assistant_stream_end') and callable(getattr(self.ui, 'assistant_stream_end')):
@@ -444,9 +471,13 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 self.ui.assistant_stream_end()
             except Exception:
                 pass
-        
-        # 错误处理（打印可见错误文本，避免“静默卡住”）
+
+        # 错误处理（打印可见错误文本，避免"静默卡住"）
         if response.is_error:
+            # finalize 流式 chunk（如果有）
+            if self.chunk_manager.is_streaming():
+                self.chunk_manager.finalize_streaming_chunk(tool_calls=[])
+
             if "API错误" in (response.content or ""):
                 error_template = ToolPrompts.get_error_messages()["api_error"]
                 error_msg = error_template.format(status="", error=response.content)
@@ -460,14 +491,25 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 "tool_calls": [],
                 "finish_reason": "error"
             }
-        
+
+        # finalize 流式 chunk（正常完成）
+        if self.chunk_manager.is_streaming():
+            self.chunk_manager.finalize_streaming_chunk(tool_calls=response.tool_calls)
+
         # 若整个流期间无任何输出但有最终文本，也要打印
         if (not has_content[0]) and response.content:
             self.ui.print_assistant(response.content + "\n")
-        
+
+        # 返回结果（优先从 chunk_manager 获取，确保单一数据源）
+        final_content = response.content
+        if has_content[0] and self.chunk_manager.chunks:
+            last_chunk = self.chunk_manager.chunks[-1]
+            if last_chunk.chunk_type == ChunkType.ASSISTANT:
+                final_content = last_chunk.content
+
         return {
             "role": "assistant",
-            "content": response.content,
+            "content": final_content,
             "tool_calls": response.tool_calls,
             "finish_reason": response.finish_reason
         }
@@ -965,17 +1007,15 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
             # 检查是否被停止
             if assistant_message.get("finish_reason") == "stopped":
-                # 用户停止了生成，保存已生成的部分内容
-                stopped_content = assistant_message.get("content")
-                if stopped_content:
-                    self.chunk_manager.add_assistant_response(stopped_content, tool_calls=[])
-                self.stop_requested = False  # 重置标志
+                # 流式 chunk 已经在 _call_llm_with_tools 中创建并 finalize
+                # 这里只需要重置标志并退出循环
+                self.stop_requested = False
                 break
 
             # 提取内容和工具调用
             content = assistant_message.get("content")
             tool_calls = assistant_message.get("tool_calls")
-            
+
             # 检测 stay_silent 调用：如果存在，丢弃所有其他内容和工具调用
             stay_silent_call = None
             if tool_calls:
@@ -983,17 +1023,29 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     if tc.get("function", {}).get("name") == "stay_silent":
                         stay_silent_call = tc
                         break
-            
+
             if stay_silent_call:
                 # stay_silent 模式：丢弃 content 和其他工具调用，只保留这个
                 content = None
                 tool_calls = [stay_silent_call]
-            
+
             # 添加assistant消息到chunk_manager（不包含recall，保持历史干净）
-            self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
+            # 注意：如果流式输出已完成，chunk 已经存在，不需要重复添加
+            # 只有在没有流式输出（比如只有 tool_calls）时才需要添加
+            if not self.chunk_manager.is_streaming():
+                # 没有流式输出，需要手动添加（比如只有 tool_calls 的情况）
+                self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
+
+            # 如果有流式输出但需要更新 tool_calls，更新最后一个 chunk 的 metadata
+            elif tool_calls and content:
+                # 流式 chunk 已经存在，更新其 tool_calls metadata
+                last_chunk = self.chunk_manager.chunks[-1]
+                if last_chunk.chunk_type == ChunkType.ASSISTANT:
+                    last_chunk.metadata["tool_calls"] = tool_calls
+
             if content:
                 final_response = content
-            
+
             # 注意：响应已在_call_llm_with_tools中流式显示
 
             # 执行工具调用

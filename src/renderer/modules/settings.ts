@@ -193,9 +193,12 @@ export const Settings: SettingsManager = {
                 this.showToast('Web模式下请手动输入路径', 'error');
             }
         });
-        
-        // 初始加载配置并应用主题
-        this.loadConfig();
+
+        // 延迟加载配置，避免阻塞页面初始化
+        // 使用 setTimeout 确保在其他模块初始化完成后再执行
+        setTimeout(() => {
+            this.loadConfig();
+        }, 50);
     },
 
     setupDropdown(opts: DropdownOptions): void {

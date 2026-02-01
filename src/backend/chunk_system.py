@@ -162,7 +162,7 @@ class ChunkManager:
     
     def add_assistant_response(self, response: str, tool_calls: Optional[List[Dict]] = None) -> Chunk:
         """添加AI回复（生成）
-        
+
         Args:
             response: 回复内容
             tool_calls: 工具调用列表（OpenAI格式）
@@ -171,7 +171,80 @@ class ChunkManager:
         if tool_calls:
             metadata['tool_calls'] = tool_calls
         return self.add_chunk(response or "", ChunkType.ASSISTANT, metadata=metadata)
-    
+
+    # ==================== 流式处理支持 ====================
+
+    def start_streaming_assistant_chunk(self) -> Chunk:
+        """开始流式输出：创建一个空的 assistant chunk
+
+        Returns:
+            创建的 chunk 引用，后续通过 append_to_streaming_chunk 更新内容
+        """
+        chunk = Chunk(
+            content="",
+            chunk_type=ChunkType.ASSISTANT,
+            metadata={"_streaming": True}  # 标记为流式中
+        )
+        chunk.estimate_tokens()
+        self.chunks.append(chunk)
+        self.current_tokens += chunk.tokens
+        return chunk
+
+    def append_to_streaming_chunk(self, text: str):
+        """向流式 chunk 追加内容（实时更新）
+
+        Args:
+            text: 要追加的文本片段
+        """
+        if not self.chunks:
+            return
+
+        last_chunk = self.chunks[-1]
+
+        # 确保最后一个 chunk 是流式中的 assistant chunk
+        if (last_chunk.chunk_type != ChunkType.ASSISTANT or
+            not last_chunk.metadata.get("_streaming")):
+            return
+
+        # 更新内容（重新计算 token）
+        old_tokens = last_chunk.tokens
+        last_chunk.content += text
+        last_chunk.tokens = 0
+        last_chunk.estimate_tokens()
+        self.current_tokens += last_chunk.tokens - old_tokens
+
+    def finalize_streaming_chunk(self, tool_calls: Optional[List[Dict]] = None):
+        """结束流式输出：标记 chunk 为完成状态
+
+        Args:
+            tool_calls: 工具调用列表（如果有）
+        """
+        if not self.chunks:
+            return
+
+        last_chunk = self.chunks[-1]
+
+        # 确保是流式中的 chunk
+        if (last_chunk.chunk_type != ChunkType.ASSISTANT or
+            not last_chunk.metadata.get("_streaming")):
+            return
+
+        # 移除流式标记，添加 tool_calls（如果有）
+        del last_chunk.metadata["_streaming"]
+        if tool_calls:
+            last_chunk.metadata["tool_calls"] = tool_calls
+
+    def is_streaming(self) -> bool:
+        """检查当前是否正在流式输出"""
+        if not self.chunks:
+            return False
+
+        last_chunk = self.chunks[-1]
+        return (last_chunk.chunk_type == ChunkType.ASSISTANT and
+                last_chunk.metadata.get("_streaming", False))
+
+    # ==================== 流式处理支持结束 ====================
+
     def add_thought(self, thought: str) -> Chunk:
         """添加AI思考（内部）"""
         return self.add_chunk(thought, ChunkType.THOUGHT)

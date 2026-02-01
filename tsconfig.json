@@ -1,18 +1,18 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "commonjs",
+    "module": "ES2020",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "outDir": "./dist",
+    "outDir": "./dist/renderer",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": false,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "sourceMap": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/renderer/**/*"],
   "exclude": ["node_modules", "dist", "paw_env"]
 }

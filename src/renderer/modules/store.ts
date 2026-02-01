@@ -15,6 +15,7 @@ interface AppStateType {
     isGenerating: boolean;
     streamId: string | null;
     streamBuf: string;
+    currentContentEl: HTMLElement | null;
     cachedSessions: SessionInfo[];
     init(): void;
 }
@@ -40,17 +41,18 @@ interface StatusBarManager {
 export const AppState: AppStateType = {
     // 左侧边栏状态
     sidebarVisible: true,
-    
+
     // 右侧边栏状态
     rightSidebarVisible: false,
-    
+
     // 生成状态
     isGenerating: false,
-    
+
     // 流式输出相关
     streamId: null,
     streamBuf: '',
-    
+    currentContentEl: null,
+
     // 会话列表缓存
     cachedSessions: [],
 

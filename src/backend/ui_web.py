@@ -606,19 +606,26 @@ class WebUI:
 
     def print_assistant(self, text: str, end: str = '', flush: bool = False):
         """流式输出助手消息
-        
-        消息发送顺序保证：
+
+        print_assistant 被 LLM 流式输出的每个 token 调用一次。
+
+        消息发送顺序：
         1. assistant_stream_start (首次调用时)
         2. assistant_stream_chunk (每次调用时)
-        通过有序队列确保前端按正确顺序接收
+        3. assistant_stream_end (由后端在流式结束时调用)
         """
+        # 首次调用时创建 stream_id
         if not hasattr(self, '_current_stream_id'):
             self._current_stream_id = str(uuid.uuid4())
             self.queue_message("assistant_stream_start", {"id": self._current_stream_id})
         self.queue_message("assistant_stream_chunk", {"id": self._current_stream_id, "text": text})
 
     def assistant_stream_end(self):
-        """结束流式输出"""
+        """结束当前流式输出
+
+        由后端在 LLM 流式输出结束时调用，清理 _current_stream_id。
+        工具调用后的新流式输出会创建新的 stream_id。
+        """
         if hasattr(self, '_current_stream_id'):
             self.queue_message("assistant_stream_end", {"id": self._current_stream_id})
             del self._current_stream_id

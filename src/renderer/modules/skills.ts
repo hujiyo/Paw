@@ -31,7 +31,10 @@ export const Skills = {
     
     init(): void {
         this.bindEvents();
-        this.loadInstalledSkills();
+        // 延迟加载已安装的 skills，避免阻塞页面初始化
+        setTimeout(() => {
+            this.loadInstalledSkills();
+        }, 150);
     },
     
     bindEvents(): void {
@@ -63,24 +66,27 @@ export const Skills = {
         const searchInput = $<HTMLInputElement>('#skills-search-input');
         const categorySelect = $<HTMLSelectElement>('#skills-category-select');
         const searchBtn = $<HTMLButtonElement>('#skills-search-btn');
-        
+
         if (searchInput && categorySelect && searchBtn) {
             const doSearch = () => {
                 this.searchSkills(searchInput.value, categorySelect.value);
             };
-            
+
             // 点击搜索按钮触发搜索
             searchBtn.addEventListener('click', doSearch);
-            
+
             // 输入框回车也触发搜索
             searchInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     doSearch();
                 }
             });
-            
-            // 初始搜索(显示所有)
-            this.searchSkills('', '');
+
+            // 延迟初始搜索，避免阻塞页面加载
+            // 使用 setTimeout 确保在其他模块初始化完成后再执行
+            setTimeout(() => {
+                this.searchSkills('', '');
+            }, 100);
         }
     },
     
