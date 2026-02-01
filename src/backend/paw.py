@@ -390,6 +390,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 用于跟踪是否有内容输出（控制换行）
         has_content = [False]
         last_chunk = ['']
+        accumulated_content = ['']  # 累积完整内容（用于stop时保存）
         was_stopped = [False]  # 是否被用户停止
 
         def on_content(text: str):
@@ -402,6 +403,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             if not has_content[0]:
                 has_content[0] = True
             last_chunk[0] = text
+            accumulated_content[0] += text  # 累积完整内容
             self.ui.print_assistant(text, end='', flush=True)
 
         # 使用统一的 LLM 客户端（传入当前 model，因为可能在运行时选择）
@@ -427,7 +429,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 except Exception:
                     pass
             return {
-                "content": last_chunk[0] if has_content[0] else None,
+                "content": accumulated_content[0] if has_content[0] else None,  # 返回累积的完整内容
                 "tool_calls": [],
                 "finish_reason": "stopped"
             }
@@ -963,7 +965,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
 
             # 检查是否被停止
             if assistant_message.get("finish_reason") == "stopped":
-                # 用户停止了生成，退出循环
+                # 用户停止了生成，保存已生成的部分内容
+                stopped_content = assistant_message.get("content")
+                if stopped_content:
+                    self.chunk_manager.add_assistant_response(stopped_content, tool_calls=[])
                 self.stop_requested = False  # 重置标志
                 break
 
