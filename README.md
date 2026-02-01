@@ -1,4 +1,4 @@
-<img src="core/logo/图标2.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="core/logo/图标3.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="core/logo/图标.png" width="128" height="128" alt="Paw">
+<img src="resources/icons/图标2.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="resources/icons/图标3.png" width="128" height="128" alt="Paw">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="resources/icons/图标.png" width="128" height="128" alt="Paw">
 
 # Paw - 桌面 AI Agent
 
@@ -30,10 +30,9 @@ paw_env\Scripts\activate
 # source paw_env/bin/activate
 
 # 2. 安装 Python 依赖
-pip install -r core/requirements.txt
+pip install -r requirements.txt
 
 # 3. 安装 Node 依赖并启动
-cd electron
 npm install
 npm start
 ```
@@ -43,8 +42,6 @@ npm start
 打包后的应用内置 Python 虚拟环境，用户无需安装 Python 即可使用。
 
 ```bash
-cd electron
-
 # Windows
 npm run build:win
 
@@ -55,7 +52,7 @@ npm run build:mac
 npm run build:linux
 ```
 
-安装包输出到 `dist/` 目录，约 150-200MB。
+安装包输出到 `dist-build/` 目录，约 150-200MB。
 
 ## 内置指令
 
@@ -76,55 +73,60 @@ npm run build:linux
 
 ```
 Paw/
-├── core/                   # Python 后端核心代码
-│   ├── paw.py              # 主程序入口
-│   ├── config.yaml         # 配置文件
-│   ├── requirements.txt    # Python 依赖
+├── src/                    # 所有源代码
+│   ├── main/              # Electron 主进程
+│   │   ├── main.ts        # 主进程入口
+│   │   └── preload.ts     # 预加载脚本
 │   │
-│   ├── tools.py            # 基础工具（文件/终端/Web）
-│   ├── tool_definitions.py # 工具 Schema 定义
-│   ├── tool_registry.py    # 工具注册中心
+│   ├── renderer/          # 前端渲染进程
+│   │   ├── app.ts         # 前端主逻辑
+│   │   ├── modules/       # 功能模块
+│   │   └── types/         # TypeScript 类型定义
 │   │
-│   ├── chunk_system.py     # 上下文管理
-│   ├── context_branch.py   # 上下文分支编辑
-│   ├── branch_executor.py  # 分支执行器
-│   │
-│   ├── memory.py           # 记忆系统
-│   ├── session_manager.py  # 会话管理
-│   │
-│   ├── prompts.py          # 提示词配置
-│   ├── call.py             # LLM API 客户端
-│   ├── ui_web.py           # Web UI 服务
-│   ├── terminal.py         # 异步终端管理
-│   │
-│   ├── templates/          # 前端 HTML 模板
-│   ├── static/             # 前端静态资源
-│   │   ├── css/
-│   │   └── js/
-│   └── logo/               # 应用图标
+│   └── backend/           # Python 后端
+│       ├── paw.py         # 主程序入口
+│       ├── config.yaml    # 配置文件
+│       ├── tools.py       # 基础工具（文件/终端/Web）
+│       ├── tool_definitions.py  # 工具 Schema 定义
+│       ├── tool_registry.py     # 工具注册中心
+│       ├── chunk_system.py      # 上下文管理
+│       ├── context_branch.py    # 上下文分支编辑
+│       ├── branch_executor.py   # 分支执行器
+│       ├── memory.py            # 记忆系统
+│       ├── session_manager.py   # 会话管理
+│       ├── prompts.py           # 提示词配置
+│       ├── call.py              # LLM API 客户端
+│       ├── ui_web.py            # Web UI 服务
+│       └── terminal.py          # 异步终端管理
 │
-├── electron/               # Electron 桌面封装
-│   ├── main.js             # Electron 主进程
-│   ├── preload.js          # 预加载脚本
-│   ├── package.json        # Node.js 配置
-│   └── resources/          # 应用图标资源
+├── resources/             # 资源文件
+│   ├── icons/            # 应用图标
+│   └── templates/        # HTML 模板
 │
-├── paw_env/                # Python 虚拟环境
-├── skills/                 # 用户自定义 Skill
-└── dist/                   # 打包输出目录
+├── static/               # 静态资源
+│   ├── css/             # 样式文件
+│   └── fonts/           # 字体文件
+│
+├── dist/                # TypeScript 编译输出
+├── dist-build/          # 应用打包输出
+├── paw_env/             # Python 虚拟环境
+├── package.json         # Node.js 配置
+├── tsconfig.json        # TypeScript 配置
+└── requirements.txt     # Python 依赖
 ```
 
 ## 依赖
 
-**Python 依赖** (core/requirements.txt):
+**Python 依赖** (requirements.txt):
 - pyyaml, colorama, requests
 - fastapi, uvicorn, websockets, aiohttp
-- ddgs (DuckDuckGo 搜索)
+- duckduckgo-search (DuckDuckGo 搜索)
 - beautifulsoup4, html2text
+- llama-cpp-python, chromadb (记忆系统)
 
-**Node.js 依赖** (electron/package.json):
+**Node.js 依赖** (package.json):
 - electron, electron-builder
-- js-yaml
+- js-yaml, typescript
 
 ## Paw记忆意图判断机制
 

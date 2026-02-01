@@ -2,15 +2,13 @@
   "name": "paw-desktop",
   "version": "1.2.0",
   "description": "Paw - 智能终端 AI Agent 桌面应用",
-  "main": "dist/main.js",
+  "main": "dist/main/main.js",
   "author": "Paw Team",
   "license": "MIT",
   "scripts": {
     "start": "npm run compile && electron .",
     "dev": "npm run compile && electron . --dev",
-    "compile": "tsc && tsc --project ../core/frontend/tsconfig.json",
-    "compile:electron": "tsc",
-    "compile:frontend": "tsc --project ../core/frontend/tsconfig.json",
+    "compile": "tsc",
     "watch": "tsc -w",
     "build": "npm run compile && electron-builder",
     "build:win": "npm run compile && electron-builder --win",
@@ -26,42 +24,42 @@
     "@types/node": "^20.10.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
-    "typescript": "^5.3.0"
+    "typescript": "^5.9.3"
   },
   "build": {
     "appId": "com.paw.desktop",
     "productName": "Paw",
     "directories": {
-      "output": "../dist",
+      "output": "dist-build",
       "buildResources": "resources"
     },
     "files": [
       "dist/**/*",
       "resources/**/*",
-      "!resources/generate-icon.ts"
+      "static/**/*"
     ],
     "extraResources": [
       {
-        "from": "../core",
-        "to": "core"
+        "from": "src/backend",
+        "to": "backend"
       },
       {
-        "from": "../paw_env",
+        "from": "paw_env",
         "to": "paw_env"
       }
     ],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
-      "icon": "resources/icon.ico"
+      "icon": "resources/icons/icon.ico"
     },
     "mac": {
       "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
-      "icon": "resources/icon.icns",
+      "icon": "resources/icons/icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
       "target": [{ "target": "AppImage", "arch": ["x64"] }],
-      "icon": "resources/icon.png",
+      "icon": "resources/icons/icon.png",
       "category": "Development"
     },
     "nsis": {

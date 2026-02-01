@@ -27,7 +27,7 @@ interface AppInfo {
     version: string;
     platform: NodeJS.Platform;
     isDev: boolean;
-    coreDir: string;
+    backendDir: string;
 }
 
 // ============ 全局状态 ============
@@ -38,13 +38,13 @@ let isServerReady: boolean = false;
 
 // ============ 路径管理（核心逻辑，非常简单） ============
 
-function getCoreDir(): string {
-    // 开发环境: electron/../core
-    // 生产环境: resources/core
+function getBackendDir(): string {
+    // 开发环境: dist/main/../../src/backend
+    // 生产环境: resources/backend
     if (app.isPackaged) {
-        return path.join(process.resourcesPath, 'core');
+        return path.join(process.resourcesPath, 'backend');
     }
-    return path.join(__dirname, '..', '..', 'core');
+    return path.join(__dirname, '..', '..', 'src', 'backend');
 }
 
 function getPythonPath(): string {
@@ -71,17 +71,23 @@ function getPythonPath(): string {
 }
 
 function getConfigPath(): string {
-    return path.join(getCoreDir(), 'config.yaml');
+    return path.join(getBackendDir(), 'config.yaml');
 }
 
 function getLoadingPagePath(): string {
-    return path.join(getCoreDir(), 'templates', 'loading.html');
+    if (app.isPackaged) {
+        return path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'templates', 'loading.html');
+    }
+    return path.join(__dirname, '..', '..', 'resources', 'templates', 'loading.html');
 }
 
 function getIconPath(): string {
     const iconFile = process.platform === 'win32' ? 'icon.ico' :
                      process.platform === 'darwin' ? 'icon.icns' : 'icon.png';
-    return path.join(__dirname, '..', 'resources', iconFile);
+    if (app.isPackaged) {
+        return path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'icons', iconFile);
+    }
+    return path.join(__dirname, '..', '..', 'resources', 'icons', iconFile);
 }
 
 // ============ 配置读取 ============
@@ -120,13 +126,13 @@ function sendError(error: string): void {
 }
 
 async function startPythonBackend(): Promise<void> {
-    const coreDir = getCoreDir();
+    const backendDir = getBackendDir();
     const pythonPath = getPythonPath();
-    const pawEntry = path.join(coreDir, 'paw.py');
+    const pawEntry = path.join(backendDir, 'paw.py');
 
     console.log('=== Paw 启动信息 ===');
     console.log('isPackaged:', app.isPackaged);
-    console.log('coreDir:', coreDir);
+    console.log('backendDir:', backendDir);
     console.log('pythonPath:', pythonPath);
     console.log('pawEntry:', pawEntry);
     console.log('====================');
@@ -136,7 +142,7 @@ async function startPythonBackend(): Promise<void> {
         const logPath = path.join(app.getPath('userData'), 'paw-startup.log');
         fs.writeFileSync(logPath, `=== Paw 启动日志 ===
 时间: ${new Date().toISOString()}
-coreDir: ${coreDir}
+backendDir: ${backendDir}
 pythonPath: ${pythonPath}
 pawEntry: ${pawEntry}
 Python存在: ${fs.existsSync(pythonPath)}
@@ -160,7 +166,7 @@ paw.py存在: ${fs.existsSync(pawEntry)}
     };
 
     pythonProcess = spawn(pythonPath, [pawEntry], {
-        cwd: coreDir,
+        cwd: backendDir,
         env: env,
         stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -315,7 +321,7 @@ function setupIpcHandlers(): void {
         version: app.getVersion(),
         platform: process.platform,
         isDev: !app.isPackaged,
-        coreDir: getCoreDir()
+        backendDir: getBackendDir()
     }));
 
     ipcMain.handle('get-theme-colors', (): ThemeColors => getThemeColors());

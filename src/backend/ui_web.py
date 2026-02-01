@@ -51,13 +51,16 @@ class WebUI:
         self._stop_callback = callback
 
     def _setup_routes(self):
-        # 挂载静态文件
-        self.app.mount("/static", StaticFiles(directory="static"), name="static")
+        # 挂载静态文件（开发环境和生产环境路径不同）
+        static_dir = Path(__file__).parent.parent.parent / "static"
+        self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
         @self.app.get("/", response_class=HTMLResponse)
         async def get_index():
             try:
-                with open("templates/index.html", "r", encoding="utf-8") as f:
+                templates_dir = Path(__file__).parent.parent.parent / "resources" / "templates"
+                index_path = templates_dir / "index.html"
+                with open(index_path, "r", encoding="utf-8") as f:
                     return HTMLResponse(content=f.read())
             except FileNotFoundError:
                 return HTMLResponse(content="Error: index.html not found.", status_code=500)
