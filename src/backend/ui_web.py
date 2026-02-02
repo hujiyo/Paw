@@ -10,6 +10,7 @@ import asyncio
 import uuid
 import yaml
 import json
+import os
 import aiohttp
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -51,9 +52,23 @@ class WebUI:
         self._stop_callback = callback
 
     def _setup_routes(self):
-        # 挂载静态文件（开发环境和生产环境路径不同）
-        static_dir = Path(__file__).parent.parent.parent / "static"
-        self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        # 从环境变量读取路径（由Electron设置）
+        # 这样无论开发还是生产环境，路径都是明确的
+        renderer_dir = os.getenv('PAW_RENDERER_DIR')
+        static_dir = os.getenv('PAW_STATIC_DIR')
+
+        if not renderer_dir or not Path(renderer_dir).exists():
+            raise RuntimeError(f"JS目录不存在或未设置: PAW_RENDERER_DIR={renderer_dir}")
+
+        if not static_dir or not Path(static_dir).exists():
+            raise RuntimeError(f"静态资源目录不存在或未设置: PAW_STATIC_DIR={static_dir}")
+
+        # 挂载静态资源
+        self.app.mount("/static", StaticFiles(directory=static_dir), name="static")
+        self.app.mount("/js", StaticFiles(directory=renderer_dir), name="js")
+
+        print(f"[WebUI] 静态资源: /static -> {static_dir}")
+        print(f"[WebUI] JS文件: /js -> {renderer_dir}")
 
         @self.app.get("/", response_class=HTMLResponse)
         async def get_index():

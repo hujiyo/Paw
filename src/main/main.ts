@@ -159,10 +159,21 @@ paw.py存在: ${fs.existsSync(pawEntry)}
 
     sendStatus('正在启动 Python 后端...');
 
+    // 计算静态资源路径
+    const rendererDir = app.isPackaged
+        ? path.join(process.resourcesPath, 'renderer')
+        : path.join(__dirname, '..', 'renderer');
+
+    const staticDir = app.isPackaged
+        ? path.join(process.resourcesPath, 'static')
+        : path.join(__dirname, '..', '..', 'static');
+
     const env = {
         ...process.env,
         PYTHONUNBUFFERED: '1',
-        PYTHONIOENCODING: 'utf-8'
+        PYTHONIOENCODING: 'utf-8',
+        PAW_RENDERER_DIR: rendererDir,
+        PAW_STATIC_DIR: staticDir
     };
 
     pythonProcess = spawn(pythonPath, [pawEntry], {
