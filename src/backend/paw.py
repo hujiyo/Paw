@@ -237,19 +237,15 @@ class Paw:
         skills_prompt = self._get_skills_prompt()
         if skills_prompt:
             prompt = prompt + "\n\n" + skills_prompt
-        
+
         # 注入记忆（如果有）
         if self.memory_manager is not None:
             memory_prompt = self.memory_manager.get_memory_prompt()
             if memory_prompt:
                 prompt = prompt + "\n\n" + memory_prompt
 
-        # 添加或更新系统提示词到语块管理器
-        has_system = any(c.chunk_type == ChunkType.SYSTEM for c in self.chunk_manager.chunks)
-        if has_system:
-            self.chunk_manager.update_latest_system_prompt(prompt)
-        else:
-            self.chunk_manager.add_system_prompt(prompt)
+        # 不再自动添加到 chunk_manager，避免触发会话保存
+        # 系统提示词将在用户首次发送消息时添加
         return prompt
 
     def _get_skills_prompt(self) -> str:
@@ -898,59 +894,27 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         self.ui.send_session_list(sessions, self.current_session_id)
     
     async def _ensure_active_session(self):
-        """确保启动时有一个活动会话
-        
-        逻辑：
-        1. 如果已有会话，加载最近的会话
-        2. 如果没有会话，创建一个新的空会话
+        """启动时的会话处理
+
+        不自动加载任何会话，让用户自行决定：
+        - 可以通过侧边栏选择历史会话
+        - 可以通过新建对话按钮创建新会话
+        - 可以直接发送消息开始新对话
         """
-        sessions = self.session_manager.list_sessions(limit=50)
-        
-        if sessions:
-            # 有历史会话，加载最近的一个
-            latest_session = sessions[0]
-            if self._load_session(latest_session['session_id'], sync_ui=True):
-                self.system_prompt = self._create_system_prompt()
-        else:
-            # 没有历史会话，创建新会话
-            from chunk_system import ChunkManager
-            self.chunk_manager = ChunkManager(
-                max_tokens=64000,
-                tools_schema=TOOLS_SCHEMA,
-                save_callback=self._save_session
-            )
-            
-            # 更新 WebUI 的 chunk_manager 引用
-            if hasattr(self.ui, 'set_chunk_manager'):
-                self.ui.set_chunk_manager(self.chunk_manager)
-            
-            new_session = self.session_manager.save_session(
-                chunk_manager=self.chunk_manager,
-                workspace_dir=str(self.workspace_dir),
-                model=self.model,
-                shell_open=False,
-                shell_pid=None,
-                session_id=None
-            )
-            self.current_session_id = new_session.session_id
-            
-            # 通知前端
-            if hasattr(self.ui, 'send_message'):
-                sessions = self.session_manager.list_sessions(limit=50)
-                await self.ui.send_message("session_list", {
-                    "sessions": sessions,
-                    "current_id": self.current_session_id
-                })
-                await self.ui.send_message('new_chat', {
-                    'session_id': new_session.session_id
-                })
+        # 只同步会话列表到前端，不加载任何会话
+        self._sync_session_list()
     
     async def process_input(self, user_input: str) -> str:
         """处理用户输入 - 完全符合OpenAI Function Calling标准"""
         # 重置停止事件
         self._stop_event = asyncio.Event()
 
-        # 0. 添加用户输入
+        # 0. 确保系统提示词已添加（仅在首次对话时添加）
+        has_system = any(c.chunk_type == ChunkType.SYSTEM for c in self.chunk_manager.chunks)
+        if not has_system:
+            self.chunk_manager.add_system_prompt(self.system_prompt)
+
+        # 1. 添加用户输入
         self.chunk_manager.add_user_input(user_input)
         
         # 1. 生命值递减：衰减已有记忆
