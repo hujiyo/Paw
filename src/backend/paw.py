@@ -455,7 +455,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             return {
                 "content": final_content,
                 "tool_calls": [],
-                "finish_reason": "stopped"
+                "finish_reason": "stopped",
+                "has_streaming_chunk": has_content[0]  # 标志：是否已创建流式chunk
             }
 
         # 处理换行（只有当最后一行不是换行符时才打印换行）
@@ -489,7 +490,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             return {
                 "content": error_msg,
                 "tool_calls": [],
-                "finish_reason": "error"
+                "finish_reason": "error",
+                "has_streaming_chunk": False  # 错误时没有流式chunk
             }
 
         # finalize 流式 chunk（正常完成）
@@ -511,7 +513,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             "role": "assistant",
             "content": final_content,
             "tool_calls": response.tool_calls,
-            "finish_reason": response.finish_reason
+            "finish_reason": response.finish_reason,
+            "has_streaming_chunk": has_content[0]  # 标志：是否已创建流式chunk
         }
     
     async def _execute_tool(self, tool_call: Dict) -> Dict[str, Any]:
@@ -1030,15 +1033,14 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 tool_calls = [stay_silent_call]
 
             # 添加assistant消息到chunk_manager（不包含recall，保持历史干净）
-            # 注意：如果流式输出已完成，chunk 已经存在，不需要重复添加
-            # 只有在没有流式输出（比如只有 tool_calls）时才需要添加
-            if not self.chunk_manager.is_streaming():
-                # 没有流式输出，需要手动添加（比如只有 tool_calls 的情况）
-                self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
+            # 使用 has_streaming_chunk 标志判断是否已创建chunk（避免重复）
+            has_chunk = assistant_message.get("has_streaming_chunk", False)
 
-            # 如果有流式输出但需要更新 tool_calls，更新最后一个 chunk 的 metadata
-            elif tool_calls and content:
-                # 流式 chunk 已经存在，更新其 tool_calls metadata
+            if not has_chunk:
+                # 没有流式chunk，需要手动添加（比如只有 tool_calls 的情况）
+                self.chunk_manager.add_assistant_response(content, tool_calls=tool_calls)
+            elif tool_calls:
+                # 流式 chunk 已存在，如果需要，更新其 tool_calls metadata
                 last_chunk = self.chunk_manager.chunks[-1]
                 if last_chunk.chunk_type == ChunkType.ASSISTANT:
                     last_chunk.metadata["tool_calls"] = tool_calls
@@ -1269,21 +1271,26 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 # 编辑语块内容
                 success = self.chunk_manager.edit_chunk_content(real_idx, new_content)
                 self.ui.show_edit_result('edit', success)
+                if success:
+                    self._save_session()
             
             elif action == 'delete':
                 # 删除单个语块
                 success = self.chunk_manager.delete_chunk(real_idx)
                 self.ui.show_edit_result('delete', success)
-                # 删除后调整索引
-                if success and current_index > 0:
-                    current_index -= 1
+                if success:
+                    self._save_session()
+                    # 删除后调整索引
+                    if current_index > 0:
+                        current_index -= 1
             
             elif action == 'delete_from':
                 # 回滚：删除此条及之后的所有
                 deleted_count = self.chunk_manager.delete_chunks_from(real_idx)
                 self.ui.show_edit_result('delete_from', deleted_count > 0, f"(删除了 {deleted_count} 条)")
-                # 删除后调整索引
                 if deleted_count > 0:
+                    self._save_session()
+                    # 删除后调整索引
                     current_index = max(0, len(self.chunk_manager.get_editable_chunks()) - 1)
         
         # 退出编辑模式，备用屏幕已自动恢复主屏幕
@@ -1959,7 +1966,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         response = await self._call_llm_with_tools(messages)
         
         # 处理响应
-        if response.get("content"):
+        has_chunk = response.get("has_streaming_chunk", False)
+        if response.get("content") and not has_chunk:
             self.chunk_manager.add_assistant_response(response["content"])
         
         # 处理工具调用
