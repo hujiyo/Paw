@@ -452,21 +452,47 @@ function handleTodosUpdated({ todos }: { todos: Array<{id: string; title: string
 }
 
 // ============ 流式处理逻辑 ============
+//
+// 【架构设计 - 强制遵循后端的 turns 定义】
+//
+// **核心原则：一个 assistant turn = 前端的一个【PAW】消息容器**
+//
+// 后端 chunk_system.py 中的 get_turns() 定义了消息轮次结构：
+// - 一个 assistant turn 从第一个 ASSISTANT chunk 开始
+// - 包含所有后续的 TOOL_CALL 和 TOOL_RESULT chunks
+// - 直到遇到下一个 USER chunk 为止
+//
+// 前端必须遵循的渲染规则：
+// 1. 消息容器复用：必须复用最后一个 .msg--assistant 元素
+// 2. 创建新容器的时机：只有完全不存在时才创建新的【PAW】消息
+// 3. 内容块追加：所有文本块、工具都在同一个【PAW】消息的 body 中
+// 4. 绝对禁止：因为系统消息、工具调用等原因创建新的 assistant 消息
+//
+// 验证标准：
+// - 用户刷新页面后，看到的消息结构应该和运行时完全一致
+// - 一个 assistant turn 只有一个【PAW】标记
+// - 所有内容（文本、工具）都在这个【PAW】消息内
+//
+// =============================================================
+
 function startStream(id: string): void {
     AppState.streamId = id;
     AppState.streamBuf = '';
 
     // 后端每次 print_assistant 都发送 assistant_stream_start
-    // 前端逻辑：有 assistant 消息就追加，没有就创建（不猜测）
+    // 前端逻辑：必须复用最后一个 assistant 消息容器
     let msgEl = dom.messages.querySelector('.msg--assistant:last-child');
 
     if (!msgEl) {
-        // 没有 assistant 消息，创建新的
+        // 只有在完全不存在时才创建新的【PAW】消息
+        // 这是新的 assistant turn 的开始
         msgEl = createMsgEl('assistant', 'PAW', '', id);
         dom.messages.appendChild(msgEl);
     }
+    // 否则必须复用现有的【PAW】消息，追加内容到其中
 
     // 为这次流式输出创建新的内容块（每次都有独立容器）
+    // 注意：内容块（.msg__content）和消息容器（.msg--assistant）是不同层级
     const body = msgEl.querySelector('.msg__body');
     const uniqueId = `stream-${id}`;
     const content = document.createElement('div');
@@ -532,6 +558,24 @@ function endStream(id: string): void {
 }
 
 // ============ 工具渲染逻辑 ============
+//
+// 【架构设计 - 工具调用属于同一个 assistant turn】
+//
+// **核心原则：工具调用和结果必须追加到当前 assistant 消息中**
+//
+// 根据后端的 turns 定义，一个 assistant turn 包含：
+// - ASSISTANT chunks（文本内容）
+// - TOOL_CALL chunks（工具调用）
+// - TOOL_RESULT chunks（工具结果）
+//
+// 前端渲染规则：
+// 1. 工具元素必须追加到最后一个 .msg--assistant 消息的 body 中
+// 2. 只有在完全不存在 assistant 消息时才创建新的【PAW】消息
+// 3. 工具和文本内容在同一个消息容器内，只是不同的内容块
+// 4. 绝对禁止：为工具调用创建独立的【PAW】消息
+//
+// =============================================================
+
 function createTool({ id, name, args, raw_request }: ToolStartData): void {
     // Context-Aware Focus Switching - 只在右侧边栏已经打开时切换标签，不强制打开
     if (AppState.rightSidebarVisible) {

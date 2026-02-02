@@ -38,7 +38,8 @@ class WebUI:
         self._pending: List[Dict[str, Any]] = []
         self.is_webui = True  # 标识为 WebUI 模式
         self._stop_callback = None  # 停止回调函数
-        
+        self._paw_instance = None  # Paw 实例引用（用于退出时保存）
+
         # === 有序消息队列系统 ===
         # 解决 asyncio.create_task() fire-and-forget 导致的消息乱序问题
         self._msg_queue: asyncio.Queue = None  # 延迟初始化（需要在事件循环中创建）
@@ -50,6 +51,10 @@ class WebUI:
     def set_stop_callback(self, callback):
         """设置停止回调函数，用于立即响应 /stop 命令"""
         self._stop_callback = callback
+
+    def set_paw_instance(self, paw_instance):
+        """设置 Paw 实例引用，用于退出时保存会话"""
+        self._paw_instance = paw_instance
 
     def _setup_routes(self):
         # 从环境变量读取路径（由Electron设置）
@@ -428,6 +433,25 @@ class WebUI:
             except WebSocketDisconnect:
                 print("INFO:     WebSocket connection closed.")
                 self.websocket = None
+
+                # WebSocket 断开时，主动保存会话到磁盘
+                # 这是关键：确保用户关闭浏览器时数据不丢失
+                if self._paw_instance and hasattr(self._paw_instance, '_save_session'):
+                    try:
+                        print("INFO:     Saving session before shutdown...")
+                        self._paw_instance._save_session()
+                        print("INFO:     Session saved successfully.")
+                    except Exception as e:
+                        print(f"ERROR:    Failed to save session on disconnect: {e}")
+                        import traceback
+                        print(f"ERROR:    {traceback.format_exc()}")
+
+                # 通知主循环保存并退出（发送退出命令到 chat_queue）
+                try:
+                    await self.chat_queue.put("exit")
+                except Exception as e:
+                    print(f"WARNING:  Failed to send exit signal: {e}")
+                # WebSocketDisconnect 异常会导致函数自然退出，不需要 break
 
     async def _handle_fetch_models(self, websocket: WebSocket, msg: Dict):
         """处理获取模型列表的请求"""

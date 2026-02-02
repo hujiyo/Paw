@@ -113,7 +113,12 @@ class Paw:
         _mark("WebTools 初始化")
 
         # 上下文管理（使用语块系统，传入工具schema）
-        self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+        # 设置自动保存回调：任何内容变化都会触发 _save_session()
+        self.chunk_manager = ChunkManager(
+            max_tokens=64000,
+            tools_schema=TOOLS_SCHEMA,
+            save_callback=self._save_session
+        )
         _mark("ChunkManager 初始化")
 
         # 记忆系统：延迟初始化到 run() 里
@@ -735,15 +740,18 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 session_id=self.current_session_id
             )
 
-            # 更新当前会话ID
-            if self.current_session_id is None:
+            # 更新当前会话ID（即使 session_id 已传入也更新，确保一致性）
+            if self.current_session_id is None or self.current_session_id != snapshot.session_id:
                 self.current_session_id = snapshot.session_id
 
             # 同步会话列表到 Web UI
             self._sync_session_list()
 
+            return True
+
         except Exception as e:
-            self.ui.print_dim(f"[Session] 保存会话失败: {e}")
+            print(f"[Session] 保存会话失败: {e}")
+            return False
 
     def _load_session(self, session_id: str, sync_ui: bool = True) -> bool:
         """加载会话
@@ -814,8 +822,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 self.ui.send_session_load(self.chunk_manager.to_json())
                 self.ui.send_session_loaded(snapshot.session_id, snapshot.title)
 
-            self.ui.print_success(f"已恢复会话: {snapshot.title}")
-            
             # 更新状态栏
             self._update_status_bar()
             
@@ -908,7 +914,11 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         else:
             # 没有历史会话，创建新会话
             from chunk_system import ChunkManager
-            self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+            self.chunk_manager = ChunkManager(
+                max_tokens=64000,
+                tools_schema=TOOLS_SCHEMA,
+                save_callback=self._save_session
+            )
             
             # 更新 WebUI 的 chunk_manager 引用
             if hasattr(self.ui, 'set_chunk_manager'):
@@ -1084,6 +1094,17 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 传递原始 tool_call 数据用于详情显示
                     self.ui.show_tool_start(tool_call_id, function_name, args_str, raw_request=tool_call)
 
+                    # 添加工具调用到 chunk_manager（保存完整的 tool_call 信息）
+                    tool_call_data = json.dumps({
+                        "id": tool_call_id,
+                        "type": "function",
+                        "function": {
+                            "name": function_name,
+                            "arguments": raw_args
+                        }
+                    }, ensure_ascii=False)
+                    self.chunk_manager.add_tool_call(tool_call_data)
+
                     # 执行工具
                     result = await self._execute_tool({
                         "tool": function_name,
@@ -1119,7 +1140,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         tool_name=function_name,
                         max_call_pairs=max_call_pairs
                     )
-                    
+
                     # 如果是 Todo 工具，推送更新到前端（类似 Shell 终端输出的实时推送机制）
                     if function_name in ('create_todo_list', 'add_todos', 'mark_todo_as_done', 'read_todos'):
                         if hasattr(self.ui, 'send_todos_updated') and hasattr(self.tools, '_todo_plan'):
@@ -1151,9 +1172,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         # 保存对话到记忆系统
         if final_response and not user_input.startswith("[系统"):
             self._save_conversation(user_input, final_response)
-
-        # 自动保存会话
-        self._save_session()
 
         # 更新状态栏（显示当前 token 用量）
         self._update_status_bar()
@@ -1271,25 +1289,21 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 # 编辑语块内容
                 success = self.chunk_manager.edit_chunk_content(real_idx, new_content)
                 self.ui.show_edit_result('edit', success)
-                if success:
-                    self._save_session()
-            
+
             elif action == 'delete':
                 # 删除单个语块
                 success = self.chunk_manager.delete_chunk(real_idx)
                 self.ui.show_edit_result('delete', success)
                 if success:
-                    self._save_session()
                     # 删除后调整索引
                     if current_index > 0:
                         current_index -= 1
-            
+
             elif action == 'delete_from':
                 # 回滚：删除此条及之后的所有
                 deleted_count = self.chunk_manager.delete_chunks_from(real_idx)
                 self.ui.show_edit_result('delete_from', deleted_count > 0, f"(删除了 {deleted_count} 条)")
                 if deleted_count > 0:
-                    self._save_session()
                     # 删除后调整索引
                     current_index = max(0, len(self.chunk_manager.get_editable_chunks()) - 1)
         
@@ -1559,7 +1573,11 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         
                         # 创建新的 ChunkManager
                         from chunk_system import ChunkManager
-                        self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+                        self.chunk_manager = ChunkManager(
+                            max_tokens=64000,
+                            tools_schema=TOOLS_SCHEMA,
+                            save_callback=self._save_session
+                        )
                         
                         # 更新 WebUI 的 chunk_manager 引用
                         if hasattr(self.ui, 'set_chunk_manager'):
@@ -1616,14 +1634,14 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         
                         # 更新状态栏
                         self._update_status_bar()
-                        
-                        self.ui.print_success(f'新对话已创建 (工作区: {self.workspace_name})')
                         continue
                 except (json.JSONDecodeError, ValueError):
                     # 不是 JSON，继续作为普通消息处理
                     pass
                 
                 if user_input.lower() in ['exit', 'quit', 'bye']:
+                    # 退出前保存会话，确保数据不丢失
+                    self._save_session()
                     self.ui.print_goodbye()
                     break
                 
@@ -1705,7 +1723,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     session_id = user_input.split(' ', 1)[1].strip()
                     if session_id:
                         if self.session_manager.delete_session(session_id):
-                            self.ui.print_success(f"已删除会话: {session_id}")
                             # 同步会话列表
                             self._sync_session_list()
                         else:
@@ -1729,7 +1746,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                             deleted = self.chunk_manager.delete_last_turn()
                         
                         if deleted:
-                            self._save_session()
                             self.ui.print_dim(f"[已删除消息]")
                         else:
                             self.ui.print_dim(f"[没有可删除的消息]")
@@ -1745,7 +1761,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                             user_msg = self.chunk_manager.get_turn_content(last_user_turn)
                             # 删除最后一个助手轮次
                             self.chunk_manager.delete_last_turn('assistant')
-                            self._save_session()
                             # 重新处理用户输入
                             should_send_turn_end = True
                             await self.process_input(user_msg)
@@ -1816,7 +1831,11 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                                     })
                         else:
                             # 创建新的空会话
-                            self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+                            self.chunk_manager = ChunkManager(
+                                max_tokens=64000,
+                                tools_schema=TOOLS_SCHEMA,
+                                save_callback=self._save_session
+                            )
                             
                             # 更新 WebUI 的 chunk_manager 引用
                             if hasattr(self.ui, 'set_chunk_manager'):
@@ -1879,9 +1898,13 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             except KeyboardInterrupt:
                 interrupted_msg = UIPrompts.get_startup_messages()["interrupted"]
                 self.ui.print_dim(interrupted_msg)
+                # 中断前保存会话，确保数据不丢失
+                self._save_session()
                 break
             except Exception as e:
                 self.ui.print_error(f"Error: {e}")
+                # 异常前保存会话，确保数据不丢失
+                self._save_session()
                 # 异常时也需要发送 turn_end（如果之前标记了）
             finally:
                 # 只有处理普通消息时才发送 turn_end
@@ -1922,7 +1945,11 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             ))
 
         # 2. 创建新会话
-        self.chunk_manager = ChunkManager(max_tokens=64000, tools_schema=TOOLS_SCHEMA)
+        self.chunk_manager = ChunkManager(
+            max_tokens=64000,
+            tools_schema=TOOLS_SCHEMA,
+            save_callback=self._save_session
+        )
         
         # 更新 WebUI 的 chunk_manager 引用
         if hasattr(self.ui, 'set_chunk_manager'):
@@ -1955,8 +1982,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 'session_id': new_session.session_id
             })
             
-        self.ui.print_success(f'新对话已创建 (工作区: {self.workspace_dir})')
-
     async def _continue_generation(self):
         """继续生成回复"""
         # 获取当前上下文
@@ -1974,9 +1999,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         tool_calls = response.get("tool_calls", [])
         if tool_calls:
             await self._handle_tool_calls(tool_calls)
-        
-        # 保存会话
-        self._save_session()
 
     async def _handle_tool_calls(self, tool_calls: list):
         """处理工具调用（从 process_input 中提取的逻辑）"""
@@ -1985,15 +2007,27 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             func = tc.get("function", {})
             tool_name = func.get("name", "")
             args_str = func.get("arguments", "{}")
-            
+            raw_args = args_str  # 保存原始参数字符串
+
             try:
                 args = json.loads(args_str) if isinstance(args_str, str) else args_str
             except json.JSONDecodeError:
                 args = {}
-            
+
+            # 添加工具调用到 chunk_manager（保存完整的 tool_call 信息）
+            tool_call_data = json.dumps({
+                "id": tool_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": raw_args
+                }
+            }, ensure_ascii=False)
+            self.chunk_manager.add_tool_call(tool_call_data)
+
             # 执行工具
             result = await self._execute_tool({"tool": tool_name, "args": args})
-            
+
             # 添加工具结果到上下文
             self.chunk_manager.add_tool_result(
                 tool_call_id=tool_id,
@@ -2052,11 +2086,22 @@ async def main():
     ui = WebUI(host=args.host, port=args.port)
     paw = Paw(ui=ui, workspace_dir=workspace_dir)
 
+    # 设置 Paw 实例引用到 WebUI，用于退出时保存会话
+    ui.set_paw_instance(paw)
+
     # 并发运行Web服务器和Paw主循环
-    await asyncio.gather(
+    # 使用 return_exceptions=True 防止一个任务取消时影响另一个任务
+    # 这样 WebSocket 断开时， Paw 主循环有时间完成保存操作
+    results = await asyncio.gather(
         ui.run_server(),
-        paw.run()
+        paw.run(),
+        return_exceptions=True
     )
+
+    # 检查是否有异常
+    for result in results:
+        if isinstance(result, Exception):
+            print(f"WARNING:  Task ended with exception: {result}")
 
 
 if __name__ == "__main__":

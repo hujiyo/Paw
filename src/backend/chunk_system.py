@@ -69,14 +69,23 @@ class Chunk:
 class ChunkManager:
     """
     语块管理器 - 管理整个对话的上下文
+
+    【架构设计 - 自动持久化】
+
+    ChunkManager 是单一数据源和单一持久化点：
+    - 任何添加到 ChunkManager 的内容都会自动触发保存到磁盘
+    - 持久化是内部行为，外部不需要手动调用保存
+    - 通过 save_callback 回调实现解耦
     """
-    
-    def __init__(self, max_tokens: int = 64000, tools_schema: Optional[List[Dict]] = None):
+
+    def __init__(self, max_tokens: int = 64000, tools_schema: Optional[List[Dict]] = None,
+                 save_callback: Optional[callable] = None):
         """初始化
 
         Args:
             max_tokens: 最大token数
             tools_schema: 工具定义schema（OpenAI格式）
+            save_callback: 保存回调函数，在内容更新时自动调用
         """
         self.chunks: List[Chunk] = []
         self.max_tokens = max_tokens
@@ -84,7 +93,17 @@ class ChunkManager:
         self.tools_schema = tools_schema or []
         self.tools_tokens = self._estimate_tools_tokens()
         self._shell_just_opened = False  # 标记终端是否刚被打开
-    
+        self.save_callback = save_callback  # 自动保存回调
+
+    def _trigger_save(self):
+        """触发自动保存（内部被动行为）"""
+        if self.save_callback:
+            try:
+                self.save_callback()
+            except Exception as e:
+                # 保存失败不应影响正常流程
+                print(f"[ChunkManager] Auto-save failed: {e}")
+
     def _estimate_tools_tokens(self) -> int:
         """估算工具schema的token数"""
         if not self.tools_schema:
@@ -93,13 +112,14 @@ class ChunkManager:
         tools_json = json.dumps(self.tools_schema, ensure_ascii=False)
         # 粗略估算：4个字符约1个token
         return len(tools_json) // 4
-    
-    def add_chunk(self, content: str, chunk_type: ChunkType, 
+
+    def add_chunk(self, content: str, chunk_type: ChunkType,
                   metadata: Optional[Dict[str, Any]] = None) -> Chunk:
         """
         添加语块
-        
+
         在添加时就明确标记类型，不需要后续猜测
+        添加后自动触发持久化
         """
         chunk = Chunk(
             content=content,
@@ -109,6 +129,10 @@ class ChunkManager:
         chunk.estimate_tokens()
         self.chunks.append(chunk)
         self.current_tokens += chunk.tokens
+
+        # 自动触发保存
+        self._trigger_save()
+
         return chunk
     
     def add_system_prompt(self, prompt: str) -> Chunk:
@@ -188,6 +212,10 @@ class ChunkManager:
         chunk.estimate_tokens()
         self.chunks.append(chunk)
         self.current_tokens += chunk.tokens
+
+        # 触发保存（chunk 的创建需要持久化）
+        self._trigger_save()
+
         return chunk
 
     def append_to_streaming_chunk(self, text: str):
@@ -213,6 +241,9 @@ class ChunkManager:
         last_chunk.estimate_tokens()
         self.current_tokens += last_chunk.tokens - old_tokens
 
+        # 触发保存（流式更新的内容也需要持久化）
+        self._trigger_save()
+
     def finalize_streaming_chunk(self, tool_calls: Optional[List[Dict]] = None):
         """结束流式输出：标记 chunk 为完成状态
 
@@ -233,6 +264,9 @@ class ChunkManager:
         del last_chunk.metadata["_streaming"]
         if tool_calls:
             last_chunk.metadata["tool_calls"] = tool_calls
+
+        # 触发保存（流式结束时的状态需要持久化）
+        self._trigger_save()
 
     def is_streaming(self) -> bool:
         """检查当前是否正在流式输出"""
@@ -327,6 +361,9 @@ class ChunkManager:
                         # tool_calls 为空且无文本内容，删除整个 assistant chunk
                         self.current_tokens -= chunk.tokens
                         self.chunks.pop(i)
+
+                        # 自动触发保存
+                        self._trigger_save()
                     else:
                         # 还有其他 tool_calls 或有文本内容，只更新
                         chunk.metadata['tool_calls'] = new_tool_calls
@@ -335,10 +372,13 @@ class ChunkManager:
     def _remove_chunk_by_tool_call_id(self, tool_call_id: str):
         """删除指定 tool_call_id 的 tool_result chunk"""
         for i, chunk in enumerate(self.chunks):
-            if (chunk.chunk_type == ChunkType.TOOL_RESULT and 
+            if (chunk.chunk_type == ChunkType.TOOL_RESULT and
                 chunk.metadata.get('tool_call_id') == tool_call_id):
                 self.current_tokens -= chunk.tokens
                 self.chunks.pop(i)
+
+                # 自动触发保存
+                self._trigger_save()
                 return
     
     def add_shell_output(self, output: str) -> Chunk:
@@ -392,6 +432,10 @@ class ChunkManager:
                     chunk.estimate_tokens()
                     self.current_tokens += chunk.tokens - old_tokens
                     chunk.timestamp = datetime.now()
+
+                    # 自动触发保存
+                    self._trigger_save()
+
                     return chunk
             # 不存在则创建（首次）
             return self.add_shell_output(output)
@@ -414,6 +458,10 @@ class ChunkManager:
             if chunk.chunk_type == ChunkType.SHELL:
                 self.current_tokens -= chunk.tokens
                 self.chunks.pop(i)
+
+                # 自动触发保存
+                self._trigger_save()
+
                 return True
         return False
     
@@ -670,6 +718,9 @@ class ChunkManager:
         system_chunks = [c for c in self.chunks if c.chunk_type == ChunkType.SYSTEM]
         self.chunks = system_chunks
         self.current_tokens = sum(c.tokens for c in system_chunks)
+
+        # 自动触发保存
+        self._trigger_save()
     
     # ==================== 对话编辑功能 ====================
     
@@ -726,6 +777,10 @@ class ChunkManager:
             # 删除语块
             self.current_tokens -= chunk.tokens
             self.chunks = [c for i, c in enumerate(self.chunks) if i != index]
+
+            # 自动触发保存
+            self._trigger_save()
+
             return True
         return False
     
@@ -752,9 +807,12 @@ class ChunkManager:
         # 截断
         self.chunks = self.chunks[:index]
         self.current_tokens -= deleted_tokens
-        
+
+        # 自动触发保存
+        self._trigger_save()
+
         return deleted_count
-    
+
     def edit_chunk_content(self, index: int, new_content: str) -> bool:
         """编辑指定语块的内容
         
@@ -777,7 +835,10 @@ class ChunkManager:
             chunk.tokens = 0
             chunk.estimate_tokens()
             self.current_tokens += chunk.tokens - old_tokens
-            
+
+            # 自动触发保存
+            self._trigger_save()
+
             return True
         return False
     
@@ -858,14 +919,43 @@ class ChunkManager:
         return manager    
 
     # ==================== 轮次管理功能 ====================
-    
+    #
+    # 【架构设计 - 消息渲染的唯一真实来源】
+    #
+    # **核心原则：后端定义消息结构，前端只负责渲染**
+    #
+    # 1. 一个 assistant turn（轮次）的定义：
+    #    - 从第一个 ASSISTANT chunk 开始
+    #    - 包含所有后续的 TOOL_CALL 和 TOOL_RESULT chunks
+    #    - 直到遇到下一个 USER chunk 为止
+    #    - 一个 assistant 可能包含多个文本块（流式输出的每个片段都是独立块）
+    #
+    # 2. 前端渲染规则（强制要求）：
+    #    - 流式输出时：复用最后一个 assistant 消息容器，追加内容块
+    #    - 会话恢复时：按照 turns 数据结构重建 DOM，每个 turn 对应一个消息容器
+    #    - 工具调用和结果：作为内容块插入到 assistant 消息的 body 中
+    #
+    # 3. 绝对禁止的行为：
+    #    - ❌ 前端自己判断什么时候创建新的【PAW】消息
+    #    - ❌ 流式输出和会话恢复使用不同的聚合逻辑
+    #    - ❌ 系统消息插入到对话流中打断 assistant 消息
+    #
+    # 4. 验证标准：
+    #    - 运行时显示 == 刷新后显示
+    #    - 一个 assistant turn 前端只显示一个【PAW】标记
+    #    - 所有文本块、工具调用、工具结果都在同一个【PAW】消息容器内
+    #
+    # =================================================
+
     def get_turns(self) -> List[Dict[str, Any]]:
         """获取对话轮次列表
-        
+
+        这是消息渲染的唯一真实来源（Single Source of Truth）。
+
         将 chunks 按轮次组织，每个轮次包含：
         - USER 轮次：单个用户消息
         - ASSISTANT 轮次：可能包含多个文本块、工具调用和工具结果
-        
+
         Returns:
             轮次列表，每个轮次包含 role, start_idx, end_idx, chunks
         """
@@ -972,8 +1062,12 @@ class ChunkManager:
             if i < len(self.chunks):
                 deleted_tokens += self.chunks[i].tokens
                 self.chunks.pop(i)
-        
+
         self.current_tokens -= deleted_tokens
+
+        # 自动触发保存
+        self._trigger_save()
+
         return True
 
     def delete_last_turn(self, role: str = None) -> bool:

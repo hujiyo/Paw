@@ -237,7 +237,31 @@ export const ChatHistory: ChatHistoryManager = {
     },
 
     // 加载历史会话 (包含 chunks 解析逻辑)
-    // 注意：轮次数据不再在前端维护，而是通过 renderChain() 从后端获取
+    //
+    // 【架构设计 - 会话恢复必须和流式输出使用相同的渲染逻辑】
+    //
+    // **核心原则：刷新后的显示必须和运行时完全一致**
+    //
+    // 后端的 chunks 数据结构定义：
+    // - chunks 按时间顺序排列，包含所有类型的消息
+    // - 一个 assistant turn 包含多个 chunks（文本、工具调用、工具结果）
+    // - 直到遇到下一个 user chunk，assistant turn 结束
+    //
+    // 前端必须遵循的重建规则：
+    // 1. 使用 currentAssistantMsgEl 跟踪当前 assistant 消息容器
+    // 2. 遇到 user chunk 时：重置 currentAssistantMsgEl = null（结束当前 turn）
+    // 3. 遇到 assistant chunk 时：
+    //    - 如果存在 currentAssistantMsgEl：追加内容到现有消息
+    //    - 否则：创建新的【PAW】消息（新的 assistant turn 开始）
+    // 4. 工具调用和结果：作为内容块插入到 currentAssistantMsgEl 的 body 中
+    //
+    // 验证标准：
+    // - 运行时显示 == 刷新后显示
+    // - 一个 assistant turn = 一个【PAW】消息容器
+    // - 所有内容（文本、工具）都在同一个容器内
+    //
+    // ==========================================================
+
     loadSessionChunks(chunks: SessionChunk[]): void {
         this.messages = [];
         this.isInAssistantTurn = false;
@@ -272,31 +296,29 @@ export const ChatHistory: ChatHistoryManager = {
                     if (chunk.content) {
                         // 追加新的文本块到 msg__body
                         const body = currentAssistantMsgEl.querySelector('.msg__body');
-                        const actions = currentAssistantMsgEl.querySelector('.msg__actions');
-                        
-                        const newContent = document.createElement('div');
-                        newContent.className = 'msg__content';
-                        newContent.innerHTML = marked.parse(chunk.content);
-                        
-                        if (body && actions) {
-                            body.insertBefore(newContent, actions);
-                        } else if (body) {
+
+                        if (body) {
+                            const newContent = document.createElement('div');
+                            newContent.className = 'msg__content';
+                            newContent.innerHTML = marked.parse(chunk.content);
                             body.appendChild(newContent);
                         }
                     }
                 } else {
+                    // 创建新的 assistant 消息容器（即使 content 为空也要创建）
                     const msgId = `msg-${Date.now()}-${Math.random()}`;
                     currentAssistantMsgId = msgId;
+
+                    // 即使内容为空，也要记录这个 chunk（可能有 tool_calls）
                     this.messages.push({ id: msgId, role: 'assistant', text: chunk.content || '' });
-                    
+
                     currentAssistantMsgEl = createMsgEl('assistant', 'PAW', chunk.content || '', msgId);
                     this.dom!.messages.appendChild(currentAssistantMsgEl);
                 }
 
                 if (chunk.metadata?.tool_calls) {
                     const body = currentAssistantMsgEl?.querySelector('.msg__body');
-                    const actions = currentAssistantMsgEl?.querySelector('.msg__actions');
-                    
+
                     chunk.metadata.tool_calls.forEach(tc => {
                         const func = tc.function || {};
                         const args = func.arguments || '{}';
@@ -311,17 +333,15 @@ export const ChatHistory: ChatHistoryManager = {
                             parsedArgs = args as ToolArgs;
                         }
                         toolArgsMap.set(tc.id, parsedArgs);
-                        
+
                         const toolEl = document.createElement('div');
                         toolEl.id = `tool-${tc.id}`;
                         toolEl.className = 'tool';
                         toolEl.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${func.name || ''}</span> <span class="tool__args">${typeof args === 'string' ? args : JSON.stringify(args)}</span></div>`;
                         toolEl.dataset.rawRequest = JSON.stringify(tc);
-                        
-                        // 追加到 body（在 actions 之前）
-                        if (body && actions) {
-                            body.insertBefore(toolEl, actions);
-                        } else if (body) {
+
+                        // 追加到 body 末尾
+                        if (body) {
                             body.appendChild(toolEl);
                         }
                     });
