@@ -884,7 +884,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             self.chunk_manager = ChunkManager.from_json(
                 snapshot.chunks,
                 max_tokens=64000,
-                tools_schema=TOOLS_SCHEMA
+                tools_schema=TOOLS_SCHEMA,
+                save_callback=self._save_session
             )
             
             # 更新 WebUI 的 chunk_manager 引用

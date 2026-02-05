@@ -872,18 +872,20 @@ class ChunkManager:
 
     @classmethod
     def from_json(cls, data: List[Dict[str, Any]], max_tokens: int = 64000,
-                  tools_schema: Optional[List[Dict]] = None) -> 'ChunkManager':
+                  tools_schema: Optional[List[Dict]] = None,
+                  save_callback: Optional[callable] = None) -> 'ChunkManager':
         """从JSON导入
 
         Args:
             data: JSON格式的语块数据
             max_tokens: 最大token数
             tools_schema: 工具定义schema
+            save_callback: 保存回调函数，绑定到实例中用于自动持久化
 
         Returns:
-            新的ChunkManager实例
+            新的ChunkManager实例（已绑定save_callback）
         """
-        manager = cls(max_tokens=max_tokens, tools_schema=tools_schema)
+        manager = cls(max_tokens=max_tokens, tools_schema=tools_schema, save_callback=save_callback)
 
         for item in data:
             chunk_type = ChunkType(item.get("type", "user"))
