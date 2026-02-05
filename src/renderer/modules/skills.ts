@@ -9,6 +9,8 @@ interface Skill {
     repo_url: string;
     stars: number;
     author: string;
+    is_repo_entry?: boolean;  // 是否为索引仓库中的仓库条目
+    repo_path?: string;  // 索引仓库中的完整路径 (owner/repo)
 }
 
 interface InstalledSkill {
@@ -30,10 +32,10 @@ export const Skills = {
     isVisible: false,
 
     // 当前浏览的仓库
-    currentRepo: 'anthropics/skills',
+    currentRepo: 'hujiyo/skills-index',
 
     // 仓库浏览历史
-    repoHistory: new Set<string>(['anthropics/skills']),
+    repoHistory: new Set<string>(['hujiyo/skills-index']),
 
     init(): void {
         this.bindEvents();
@@ -74,8 +76,13 @@ export const Skills = {
 
         if (repoInput && repoBtn) {
             const switchRepo = () => {
-                const newRepo = repoInput.value.trim();
-                if (newRepo && newRepo !== this.currentRepo) {
+                let newRepo = repoInput.value.trim();
+                // 如果输入为空，默认填充官方索引库
+                if (!newRepo) {
+                    newRepo = 'hujiyo/skills-index';
+                    repoInput.value = newRepo;
+                }
+                if (newRepo !== this.currentRepo) {
                     this.switchRepository(newRepo);
                 }
             };
@@ -199,7 +206,10 @@ export const Skills = {
             repoInput.value = repo;
         }
         if (currentRepoDisplay) {
-            currentRepoDisplay.textContent = `当前仓库: ${repo}`;
+            // 判断是否为索引仓库（local 或已通过后端检测）
+            const isLocal = repo.toLowerCase() === 'local' || repo.toLowerCase() === 'paw';
+            const repoType = isLocal ? '本地索引' : '仓库';
+            currentRepoDisplay.textContent = `当前${repoType}: ${repo}`;
         }
 
         // 清空搜索框并重新加载
@@ -209,7 +219,10 @@ export const Skills = {
         }
 
         // 显示切换成功提示
-        this.showToast(`📂 已切换到仓库: ${repo}`, 'success');
+        const isLocal = repo.toLowerCase() === 'local' || repo.toLowerCase() === 'paw';
+        const icon = isLocal ? '📋' : '📂';
+        const repoType = isLocal ? '本地索引' : '仓库';
+        this.showToast(`${icon} 已切换到${repoType}: ${repo}`, 'success');
 
         // 重新搜索（清空关键词以显示该仓库的所有 skills）
         this.searchSkills('', '');
@@ -236,12 +249,18 @@ export const Skills = {
                 this.currentRepo = data.current_repo;
                 const currentRepoDisplay = $<HTMLElement>('#skills-current-repo');
                 if (currentRepoDisplay) {
-                    currentRepoDisplay.textContent = `当前仓库: ${data.current_repo}`;
+                    const repoType = data.is_index ? '索引仓库' : '仓库';
+                    currentRepoDisplay.textContent = `当前${repoType}: ${data.current_repo}`;
                 }
             }
 
             if (data.success && data.skills && data.skills.length > 0) {
-                this.renderSkillsList(data.skills);
+                // 如果是索引仓库，渲染索引列表
+                if (data.is_index) {
+                    this.renderIndexList(data.skills);
+                } else {
+                    this.renderSkillsList(data.skills);
+                }
             } else {
                 const errorMsg = data.error || '未找到匹配的 Skills';
                 skillsList.innerHTML = `
@@ -260,7 +279,53 @@ export const Skills = {
             `;
         }
     },
-    
+
+    renderIndexList(repos: Skill[]): void {
+        const skillsList = $<HTMLElement>('#skills-list');
+        if (!skillsList) return;
+
+        skillsList.innerHTML = '';
+
+        repos.forEach(repo => {
+            const card = document.createElement('div');
+            card.className = 'skill-card skill-card--index';
+
+            card.innerHTML = `
+                <div class="skill-card__header">
+                    <div>
+                        <div class="skill-card__title">${this.escapeHtml(repo.name)}</div>
+                        <div class="skill-card__author">${this.escapeHtml(repo.author)}</div>
+                    </div>
+                    <svg class="skill-card__index-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </div>
+                <div class="skill-card__description">${this.escapeHtml(repo.description)}</div>
+                <div class="skill-card__footer">
+                    <span class="skill-card__category skill-card__category--index">${this.escapeHtml(repo.category)}</span>
+                    <button class="skill-card__install-btn skill-card__install-btn--navigate"
+                            data-repo-path="${this.escapeHtml(repo.repo_path || repo.author + '/' + repo.name)}">
+                        浏览仓库 →
+                    </button>
+                </div>
+            `;
+
+            // 浏览按钮事件 - 切换到该仓库
+            const navigateBtn = card.querySelector('.skill-card__install-btn--navigate') as HTMLButtonElement;
+            if (navigateBtn) {
+                navigateBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const repoPath = navigateBtn.dataset.repoPath;
+                    if (repoPath) {
+                        this.switchRepository(repoPath);
+                    }
+                });
+            }
+
+            skillsList.appendChild(card);
+        });
+    },
+
     renderSkillsList(skills: Skill[]): void {
         const skillsList = $<HTMLElement>('#skills-list');
         if (!skillsList) return;

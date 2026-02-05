@@ -2741,6 +2741,38 @@ body {
     cursor: wait;
 }
 
+/* 索引仓库卡片样式 */
+.skill-card--index {
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.skill-card--index:hover {
+    border-color: rgba(139, 92, 246, 0.5);
+}
+
+.skill-card__index-icon {
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.skill-card__category--index {
+    background: rgba(139, 92, 246, 0.1);
+    border-color: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+}
+
+.skill-card__install-btn--navigate {
+    background: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.skill-card__install-btn--navigate:hover {
+    background: rgba(139, 92, 246, 0.3);
+    border-color: rgba(139, 92, 246, 0.5);
+}
+
+
 /* 已安装 Skill 卡片 */
 .installed-card {
     padding: 1rem;
