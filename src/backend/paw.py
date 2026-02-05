@@ -36,6 +36,7 @@ from memory import MemoryManager
 from branch_executor import AutoContextManager
 from session_manager import SessionManager
 from call import LLMClient, LLMConfig
+from tool_executor import ToolExecutor
 
 
 class Paw:
@@ -89,6 +90,22 @@ class Paw:
         # 注册所有工具到 ToolRegistry
         register_all_tools(self.tools)
         _mark("注册工具")
+
+        # 工具执行器（线程隔离模式）
+        tool_execution_cfg = config.get('tool_execution', {})
+        self.tool_execution_mode = tool_execution_cfg.get('mode', 'threaded')
+        tool_timeout = tool_execution_cfg.get('timeout', 30.0)
+
+        if self.tool_execution_mode == 'threaded':
+            self.tool_executor = ToolExecutor(timeout=tool_timeout)
+            self.tool_executor.set_tool_handler_getter(
+                lambda tool_name: ToolRegistry.get(tool_name).handler
+                    if ToolRegistry.get(tool_name) else None
+            )
+            self.tool_executor.start()
+            _mark("ToolExecutor 初始化")
+        else:
+            self.tool_executor = None
         
         # API配置（优先级：参数 > config.yaml > 默认值）
         self.api_url = api_url or config.get('api', {}).get('url') or "http://localhost:1234/v1/chat/completions"
@@ -519,10 +536,66 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         }
     
     async def _execute_tool(self, tool_call: Dict) -> Dict[str, Any]:
-        """执行工具调用 - 使用 ToolRegistry 统一管理"""
+        """执行工具调用 - 支持线程隔离和直接执行模式"""
         tool_name = tool_call.get("tool")
         args = tool_call.get("args", {})
 
+        try:
+            # 根据配置选择执行模式
+            if self.tool_execution_mode == 'threaded' and self.tool_executor:
+                return await self._execute_tool_threaded(tool_name, args)
+            else:
+                return await self._execute_tool_direct(tool_name, args)
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _execute_tool_threaded(self, tool_name: str, args: dict) -> Dict[str, Any]:
+        """使用线程隔离模式执行工具"""
+        try:
+            # 生成任务ID
+            task_id = f"{tool_name}_{int(time.time() * 1000)}"
+
+            # 注册任务事件（用于 Event 等待机制）
+            event = self.tool_executor.register_task_event(task_id)
+
+            # 发送任务到工具执行线程
+            self.tool_executor.command_queue.put({
+                "type": "execute_tool",
+                "task_id": task_id,
+                "tool_name": tool_name,
+                "args": args,
+                "timeout": self.tool_executor.timeout
+            })
+
+            # 等待结果
+            result = await self._wait_for_tool_result(task_id, event, timeout=self.tool_executor.timeout + 5.0)
+
+            # 处理结果
+            if result["type"] == "success":
+                return self._process_tool_result(tool_name, result["result"])
+            elif result["type"] == "async_task":
+                # 异步工具：在主线程执行
+                handler = ToolRegistry.get(tool_name).handler
+                async_result = await handler(**args)
+                return self._process_tool_result(tool_name, async_result)
+            elif result["type"] == "timeout":
+                return {"success": False, "error": f"工具 '{tool_name}' 执行超时（{self.tool_executor.timeout}秒）"}
+            else:
+                error_type = result.get("error_type", "")
+                error_msg = result["error"]
+                # 格式化错误信息
+                if "FileNotFoundError" in error_type:
+                    error_msg = f"文件未找到: {error_msg}"
+                elif "PermissionError" in error_type:
+                    error_msg = f"权限错误: {error_msg}"
+                return {"success": False, "error": error_msg}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _execute_tool_direct(self, tool_name: str, args: dict) -> Dict[str, Any]:
+        """直接执行工具（原有实现，用于降级）"""
         try:
             # 从 ToolRegistry 获取工具配置
             tool_config = ToolRegistry.get(tool_name)
@@ -540,53 +613,94 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             if asyncio.iscoroutine(result):
                 result = await result
 
-            # 统一返回格式
-            if isinstance(result, str):
-                # 判断是成功还是失败 - 只检查错误前缀，避免误判文件内容
-                error_prefixes = ["Error:", "Failed", "错误:", "失败:"]
-                is_error = any(result.startswith(prefix) for prefix in error_prefixes)
-
-                if is_error:
-                    return {"success": False, "error": result}
-                else:
-                    # 默认视为成功（包括read_file返回的文件内容）
-                    success_result = {"success": True, "result": result}
-            elif isinstance(result, dict):
-                # 如果已经是字典格式
-                if result.get("success"):
-                    # 优先使用 result 字段，其次 stdout，最后序列化整个字典
-                    output = result.get("result") or result.get("stdout")
-                    if output:
-                        success_result = {"success": True, "result": output}
-                    else:
-                        # 将整个结果字典序列化为 JSON 字符串（Web 工具等）
-                        import json
-                        result_copy = {k: v for k, v in result.items() if k != "success"}
-                        if result_copy:
-                            success_result = {"success": True, "result": json.dumps(result_copy, ensure_ascii=False, indent=2)}
-                        else:
-                            success_msg = ToolPrompts.get_error_messages()["command_success"]
-                            success_result = {"success": True, "result": success_msg}
-                else:
-                    default_error = ToolPrompts.get_error_messages()["unknown_error"]
-                    error = result.get("error") or result.get("stderr", default_error)
-                    return {"success": False, "error": error}
-            else:
-                success_result = result
-
-            # 特殊处理：检测终端是否刚被打开
-            if success_result.get("success"):
-                # 1. open_shell 工具成功执行
-                if tool_name == "open_shell":
-                    self.chunk_manager.mark_shell_opened()
-                # 2. run_command 工具自动打开了终端
-                elif success_result.get("shell_just_opened"):
-                    self.chunk_manager.mark_shell_opened()
-
-            return success_result
+            return self._process_tool_result(tool_name, result)
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def _wait_for_tool_result(self, task_id: str, event, timeout: float) -> Dict:
+        """
+        等待工具执行结果（使用 threading.Event + asyncio 适配）
+
+        Args:
+            task_id: 任务ID
+            event: threading.Event 对象，由工作线程触发
+            timeout: 超时时间（秒）
+
+        Returns:
+            工具执行结果字典
+
+        Raises:
+            TimeoutError: 超时未获取到结果
+        """
+        from queue import Empty
+
+        # 使用 asyncio.to_thread 等待 Event 触发，避免轮询
+        try:
+            # 在工作线程中等待事件触发（阻塞）
+            await asyncio.to_thread(event.wait, timeout=timeout)
+        except Exception:
+            raise TimeoutError(f"Tool execution timeout after {timeout}s")
+
+        # 事件已触发，从队列获取结果
+        try:
+            # 非阻塞检查结果队列
+            result = self.tool_executor.result_queue.get_nowait()
+            if result.get("task_id") == task_id:
+                return result
+            else:
+                # 不是我们的结果，放回队列
+                self.tool_executor.result_queue.put(result)
+                raise ValueError(f"Received result for different task: {result.get('task_id')}")
+        except Empty:
+            raise ValueError(f"Event triggered but no result in queue for task {task_id}")
+
+    def _process_tool_result(self, tool_name: str, result: Any) -> Dict[str, Any]:
+        """处理工具结果（统一格式化逻辑）"""
+        # 统一返回格式
+        if isinstance(result, str):
+            # 判断是成功还是失败 - 只检查错误前缀，避免误判文件内容
+            error_prefixes = ["Error:", "Failed", "错误:", "失败:"]
+            is_error = any(result.startswith(prefix) for prefix in error_prefixes)
+
+            if is_error:
+                return {"success": False, "error": result}
+            else:
+                # 默认视为成功（包括read_file返回的文件内容）
+                success_result = {"success": True, "result": result}
+        elif isinstance(result, dict):
+            # 如果已经是字典格式
+            if result.get("success"):
+                # 优先使用 result 字段，其次 stdout，最后序列化整个字典
+                output = result.get("result") or result.get("stdout")
+                if output:
+                    success_result = {"success": True, "result": output}
+                else:
+                    # 将整个结果字典序列化为 JSON 字符串（Web 工具等）
+                    import json
+                    result_copy = {k: v for k, v in result.items() if k != "success"}
+                    if result_copy:
+                        success_result = {"success": True, "result": json.dumps(result_copy, ensure_ascii=False, indent=2)}
+                    else:
+                        success_msg = ToolPrompts.get_error_messages()["command_success"]
+                        success_result = {"success": True, "result": success_msg}
+            else:
+                default_error = ToolPrompts.get_error_messages()["unknown_error"]
+                error = result.get("error") or result.get("stderr", default_error)
+                return {"success": False, "error": error}
+        else:
+            success_result = result
+
+        # 特殊处理：检测终端是否刚被打开
+        if success_result.get("success"):
+            # 1. open_shell 工具成功执行
+            if tool_name == "open_shell":
+                self.chunk_manager.mark_shell_opened()
+            # 2. run_command 工具自动打开了终端
+            elif success_result.get("shell_just_opened"):
+                self.chunk_manager.mark_shell_opened()
+
+        return success_result
     
     def _estimate_tokens(self, messages: List[Dict]) -> int:
         """估算token数量"""
@@ -1426,7 +1540,17 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         print(f"\n当前Token使用: {current_tokens}/{max_tokens} ({current_tokens/max_tokens*100:.1f}%)")
         print(f"当前Chunk数量: {len(self.chunk_manager.chunks)}")
         print("="*50 + "\n")
-    
+
+    def cleanup(self):
+        """清理资源"""
+        # 停止工具执行器
+        if hasattr(self, 'tool_executor') and self.tool_executor:
+            self.tool_executor.stop()
+
+        # 清理工具
+        if hasattr(self, 'tools'):
+            self.tools.cleanup()
+
     async def _select_model(self, use_alternate_screen: bool = False) -> str:
         """选择模型
 
