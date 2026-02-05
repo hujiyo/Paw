@@ -728,29 +728,45 @@ class BaseTools:
         Returns:
             Base Path + SKILL.md 内容（去除 frontmatter）+ 可选的 reference/examples
         """
-        skills_dir = Path.home() / ".paw" / "skills"
-        skill_dir = skills_dir / skill_name
+        skills_dir = (Path.home() / ".paw" / "skills").resolve()
+        try:
+            skill_dir = (skills_dir / skill_name).resolve()
+            skill_dir.relative_to(skills_dir)
+        except Exception:
+            return f"Error: Skill '{skill_name}' is outside the skills directory."
+
+        if not skill_dir.exists():
+            return f"Error: Skill '{skill_name}' not found at {skill_dir}"
+
         skill_md = skill_dir / "SKILL.md"
 
         if not skill_md.exists():
             return f"Error: Skill '{skill_name}' not found. SKILL.md does not exist at {skill_md}"
 
         try:
-            content = skill_md.read_text(encoding='utf-8')
+            content = skill_md.read_text(encoding='utf-8').lstrip('\ufeff')
 
-            # 移除 YAML frontmatter（第一个 --- 和第二个 --- 之间的内容）
-            lines = content.split('\n')
-            content_start = 0
-            found_first = False
-            for i, line in enumerate(lines):
-                if line.strip() == '---':
-                    if not found_first:
-                        found_first = True
-                    else:
-                        content_start = i + 1
-                        break
+            def _strip_frontmatter(text: str) -> str:
+                """仅在文件开头存在 YAML frontmatter 时才移除"""
+                lines = text.splitlines()
+                if not lines:
+                    return text.strip()
 
-            skill_body = '\n'.join(lines[content_start:]).strip()
+                first_non_empty = next(
+                    (idx for idx, line in enumerate(lines) if line.strip()),
+                    None
+                )
+                if first_non_empty is None or lines[first_non_empty].strip() != '---':
+                    return text.strip()
+
+                for idx in range(first_non_empty + 1, len(lines)):
+                    if lines[idx].strip() == '---':
+                        return '\n'.join(lines[idx + 1:]).lstrip('\r\n')
+
+                # 未找到结束标记，返回原文
+                return text.strip()
+
+            skill_body = _strip_frontmatter(content)
 
             # 构建返回内容
             parts = []
@@ -831,12 +847,25 @@ class BaseTools:
         import subprocess
         import platform
 
-        skills_dir = Path.home() / ".paw" / "skills"
-        skill_dir = skills_dir / skill_name
-        script_path = skill_dir / "scripts" / script_name
+        skills_dir = (Path.home() / ".paw" / "skills").resolve()
+        try:
+            skill_dir = (skills_dir / skill_name).resolve()
+            skill_dir.relative_to(skills_dir)
+        except Exception:
+            return f"Error: Skill '{skill_name}' is outside the skills directory."
 
         if not skill_dir.exists():
             return f"Error: Skill '{skill_name}' not found at {skill_dir}"
+
+        scripts_dir = (skill_dir / "scripts").resolve()
+        if not scripts_dir.exists():
+            return f"Error: scripts directory not found for skill '{skill_name}'"
+
+        try:
+            script_path = (scripts_dir / script_name).resolve()
+            script_path.relative_to(scripts_dir)
+        except Exception:
+            return "Error: Script path escapes the scripts directory."
 
         if not script_path.exists():
             return f"Error: Script '{script_name}' not found at {script_path}"

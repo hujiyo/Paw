@@ -214,15 +214,16 @@ class WebUI:
             return self._skill_marketplace
         
         @self.app.get("/api/skills/search")
-        async def search_skills(q: str = "", category: str = "", page: int = 1):
-            """搜索 Skills"""
+        async def search_skills(q: str = "", category: str = "", page: int = 1, repo: str = ""):
+            """搜索 Skills，支持指定仓库"""
             try:
                 marketplace = _get_marketplace()
                 result = await asyncio.to_thread(
                     marketplace.search_skills,
                     query=q,
                     category=category,
-                    page=page
+                    page=page,
+                    repo=repo
                 )
                 return JSONResponse(content=result)
             except Exception as e:
@@ -231,6 +232,7 @@ class WebUI:
                     "skills": [],
                     "total": 0,
                     "page": page,
+                    "current_repo": repo,
                     "error": str(e)
                 })
         

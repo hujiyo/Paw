@@ -138,16 +138,25 @@
                     <!-- 市场视图 -->
                     <div class="skills-market-content skills-market-content--active" id="skills-market-content">
                         <div class="skills-search-bar">
-                            <input type="text" class="skills-search" id="skills-search-input" placeholder="搜索 skills..." />
-                            <select class="skills-category" id="skills-category-select">
-                                <option value="">所有分类</option>
-                                <option value="development">开发</option>
-                                <option value="creative">创意</option>
-                                <option value="enterprise">企业</option>
-                                <option value="documentation">文档</option>
-                            </select>
-                            <button class="skills-search-btn" id="skills-search-btn">🔍</button>
+                            <div class="skills-repo-input-group">
+                                <input type="text" class="skills-repo-input" id="skills-repo-input" placeholder="浏览仓库 (如: anthropics/skills)" value="anthropics/skills" />
+                                <button class="skills-repo-btn" id="skills-repo-btn" title="切换仓库">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="skills-search-input-group">
+                                <input type="text" class="skills-search" id="skills-search-input" placeholder="在当前仓库中搜索..." />
+                                <button class="skills-search-btn" id="skills-search-btn">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
+                        <div class="skills-current-repo" id="skills-current-repo">当前仓库: anthropics/skills</div>
                         <div class="skills-list" id="skills-list">
                             <div class="skills-empty">
                                 <div class="skills-empty__icon">📦</div>

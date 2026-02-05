@@ -22,13 +22,19 @@ interface InstalledSkill {
 export const Skills = {
     // 当前视图：'market' | 'installed'
     currentView: 'market' as 'market' | 'installed',
-    
+
     // 已安装的 skills（用于检查状态）
     installedSkills: new Set<string>(),
-    
+
     // 界面是否可见
     isVisible: false,
-    
+
+    // 当前浏览的仓库
+    currentRepo: 'anthropics/skills',
+
+    // 仓库浏览历史
+    repoHistory: new Set<string>(['anthropics/skills']),
+
     init(): void {
         this.bindEvents();
         // 延迟加载已安装的 skills，避免阻塞页面初始化
@@ -36,24 +42,24 @@ export const Skills = {
             this.loadInstalledSkills();
         }, 150);
     },
-    
+
     bindEvents(): void {
         // 工具栏打开/关闭按钮
         const openBtn = $<HTMLElement>('#skills-market-btn');
         const chatBtn = $<HTMLElement>('#chat-view-btn');
-        
+
         if (openBtn) {
             openBtn.addEventListener('click', () => {
                 this.show();
             });
         }
-        
+
         if (chatBtn) {
             chatBtn.addEventListener('click', () => {
                 this.hide();
             });
         }
-        
+
         // Skills 子 tab 切换（市场/已安装）
         $$<HTMLElement>('.skills-market-tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -61,15 +67,37 @@ export const Skills = {
                 this.switchView(view);
             });
         });
-        
+
+        // 仓库输入和切换
+        const repoInput = $<HTMLInputElement>('#skills-repo-input');
+        const repoBtn = $<HTMLButtonElement>('#skills-repo-btn');
+
+        if (repoInput && repoBtn) {
+            const switchRepo = () => {
+                const newRepo = repoInput.value.trim();
+                if (newRepo && newRepo !== this.currentRepo) {
+                    this.switchRepository(newRepo);
+                }
+            };
+
+            // 点击切换按钮
+            repoBtn.addEventListener('click', switchRepo);
+
+            // 回车切换仓库
+            repoInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    switchRepo();
+                }
+            });
+        }
+
         // 搜索输入和按钮
         const searchInput = $<HTMLInputElement>('#skills-search-input');
-        const categorySelect = $<HTMLSelectElement>('#skills-category-select');
         const searchBtn = $<HTMLButtonElement>('#skills-search-btn');
 
-        if (searchInput && categorySelect && searchBtn) {
+        if (searchInput && searchBtn) {
             const doSearch = () => {
-                this.searchSkills(searchInput.value, categorySelect.value);
+                this.searchSkills(searchInput.value, '');
             };
 
             // 点击搜索按钮触发搜索
@@ -130,50 +158,96 @@ export const Skills = {
     
     switchView(view: 'market' | 'installed'): void {
         this.currentView = view;
-        
+
         // 更新 tab 样式
         $$<HTMLElement>('.skills-market-tab').forEach(tab => {
             const isActive = tab.dataset.skillsView === view;
             tab.classList.toggle('skills-market-tab--active', isActive);
         });
-        
+
         // 切换视图
         const marketContent = $<HTMLElement>('#skills-market-content');
         const installedContent = $<HTMLElement>('#skills-installed-content');
-        
+
         if (marketContent && installedContent) {
             marketContent.classList.toggle('skills-market-content--active', view === 'market');
             installedContent.classList.toggle('skills-market-content--active', view === 'installed');
         }
-        
+
         // 加载对应数据
         if (view === 'installed') {
             this.loadInstalledSkills();
         }
     },
+
+    switchRepository(repo: string): void {
+        // 验证仓库格式
+        if (!repo || !repo.includes('/')) {
+            this.showToast('❌ 仓库格式错误，请使用 "owner/repo" 格式', 'error');
+            return;
+        }
+
+        // 更新当前仓库
+        this.currentRepo = repo;
+        this.repoHistory.add(repo);
+
+        // 更新 UI
+        const repoInput = $<HTMLInputElement>('#skills-repo-input');
+        const currentRepoDisplay = $<HTMLElement>('#skills-current-repo');
+
+        if (repoInput) {
+            repoInput.value = repo;
+        }
+        if (currentRepoDisplay) {
+            currentRepoDisplay.textContent = `当前仓库: ${repo}`;
+        }
+
+        // 清空搜索框并重新加载
+        const searchInput = $<HTMLInputElement>('#skills-search-input');
+        if (searchInput) {
+            searchInput.value = '';
+        }
+
+        // 显示切换成功提示
+        this.showToast(`📂 已切换到仓库: ${repo}`, 'success');
+
+        // 重新搜索（清空关键词以显示该仓库的所有 skills）
+        this.searchSkills('', '');
+    },
     
     async searchSkills(query: string, category: string): Promise<void> {
         const skillsList = $<HTMLElement>('#skills-list');
         if (!skillsList) return;
-        
+
         // 显示加载状态
         skillsList.innerHTML = '<div class="skills-empty"><div class="skills-empty__text">搜索中...</div></div>';
-        
+
         try {
             const params = new URLSearchParams();
             if (query) params.append('q', query);
             if (category) params.append('category', category);
-            
+            if (this.currentRepo) params.append('repo', this.currentRepo);
+
             const response = await fetch(`/api/skills/search?${params}`);
             const data = await response.json();
-            
+
+            // 更新当前仓库显示（如果后端返回了仓库信息）
+            if (data.current_repo && data.current_repo !== this.currentRepo) {
+                this.currentRepo = data.current_repo;
+                const currentRepoDisplay = $<HTMLElement>('#skills-current-repo');
+                if (currentRepoDisplay) {
+                    currentRepoDisplay.textContent = `当前仓库: ${data.current_repo}`;
+                }
+            }
+
             if (data.success && data.skills && data.skills.length > 0) {
                 this.renderSkillsList(data.skills);
             } else {
+                const errorMsg = data.error || '未找到匹配的 Skills';
                 skillsList.innerHTML = `
                     <div class="skills-empty">
                         <div class="skills-empty__icon">🔍</div>
-                        <div class="skills-empty__text">未找到匹配的 Skills</div>
+                        <div class="skills-empty__text">${this.escapeHtml(errorMsg)}</div>
                     </div>
                 `;
             }

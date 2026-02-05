@@ -37,17 +37,18 @@ class SkillMarketplace:
         # 设置请求超时
         self.timeout = 30
     
-    def search_skills(self, query: str = "", category: str = "", page: int = 1, 
-                     use_ai_search: bool = False) -> Dict[str, Any]:
+    def search_skills(self, query: str = "", category: str = "", page: int = 1,
+                     use_ai_search: bool = False, repo: str = "") -> Dict[str, Any]:
         """
         搜索 Skills
-        
+
         Args:
             query: 搜索关键词
             category: 分类筛选
             page: 页码
             use_ai_search: 是否使用 AI 语义搜索
-            
+            repo: 指定仓库，格式 "owner/repo"，如 "anthropics/skills" 或 "hujiyo/vibe-coding"
+
         Returns:
             搜索结果字典，格式：
             {
@@ -66,118 +67,154 @@ class SkillMarketplace:
                 ],
                 "total": 100,
                 "page": 1,
+                "current_repo": "anthropics/skills",
                 "error": "error message if failed"
             }
         """
         # 检查缓存
-        cache_key = f"{query}:{category}:{page}:{use_ai_search}"
+        cache_key = f"{repo}:{query}:{category}:{page}:{use_ai_search}"
         if cache_key in self._search_cache:
             return self._search_cache[cache_key]
-        
+
         try:
             # 从 GitHub 获取
-            result = self._fetch_from_github(query, category, page)
-            
+            result = self._fetch_from_github(query, category, page, repo)
+
             # 缓存结果
             if result["success"]:
                 self._search_cache[cache_key] = result
-            
+
             return result
-            
+
         except Exception as e:
             return {
                 "success": False,
                 "skills": [],
                 "total": 0,
                 "page": page,
+                "current_repo": repo,
                 "error": str(e)
             }
     
-    def _fetch_from_github(self, query: str, category: str, page: int) -> Dict[str, Any]:
+    def _fetch_from_github(self, query: str, category: str, page: int, repo: str = "") -> Dict[str, Any]:
         """
-        从 GitHub 多个源聚合 skills
+        从指定 GitHub 仓库获取 skills
+
+        Args:
+            query: 搜索关键词（用于过滤 skills）
+            category: 分类筛选
+            page: 页码
+            repo: 仓库路径 "owner/repo"，默认为 "anthropics/skills"
         """
         try:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            
+
             headers = {
                 'Accept': 'application/vnd.github.v3+json',
                 'User-Agent': 'Paw-Skills-Browser'
             }
-            
+
+            # 使用指定的仓库，默认为 anthropics/skills
+            target_repo = repo if repo else "anthropics/skills"
+
+            # 验证仓库格式
+            if '/' not in target_repo:
+                return {
+                    'success': False,
+                    'skills': [],
+                    'total': 0,
+                    'page': page,
+                    'current_repo': target_repo,
+                    'error': f'Invalid repository format. Use "owner/repo" format like "anthropics/skills"'
+                }
+
             all_skills = []
-            
-            # 源 1: anthropics/skills
+
+            # 从指定仓库的 skills 目录获取
             try:
-                api_url = "https://api.github.com/repos/anthropics/skills/contents/skills"
+                owner, repo_name = target_repo.split('/', 1)
+                api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/skills"
                 response = requests.get(api_url, headers=headers, timeout=10, verify=False)
+
                 if response.status_code == 200:
                     data = response.json()
-                    for item in data:
-                        if item['type'] == 'dir':
-                            all_skills.append({
-                                'id': f"anthropics-{item['name']}",
-                                'name': item['name'].replace('-', ' ').title(),
-                                'description': f"Official skill: {item['name']}",
-                                'category': 'official',
-                                'repo_url': f"https://github.com/anthropics/skills/tree/main/skills/{item['name']}",
-                                'stars': 0,
-                                'author': 'anthropics'
-                            })
-            except:
-                pass
-            
-            # 源 2: 直接搜索 GitHub 仓库
-            if query or not all_skills:
-                search_query = query if query else "claude skill SKILL.md"
-                search_url = f"https://api.github.com/search/repositories?q={requests.utils.quote(search_query)}&sort=stars&per_page=20"
-                try:
-                    response = requests.get(search_url, headers=headers, timeout=10, verify=False)
-                    if response.status_code == 200:
-                        data = response.json()
-                        for repo in data.get('items', []):
-                            all_skills.append({
-                                'id': repo['full_name'].replace('/', '-'),
-                                'name': repo['name'].replace('-', ' ').title(),
-                                'description': repo.get('description', '') or 'No description',
-                                'category': 'community',
-                                'repo_url': repo['html_url'],
-                                'stars': repo.get('stargazers_count', 0),
-                                'author': repo['owner']['login']
-                            })
-                except:
-                    pass
-            
-            # 关键词过滤
+                    if isinstance(data, list):
+                        for item in data:
+                            if item['type'] == 'dir':
+                                skill_name = item['name']
+                                all_skills.append({
+                                    'id': f"{owner}-{skill_name}",
+                                    'name': skill_name,
+                                    'description': f"Skill from {target_repo}: {skill_name}",
+                                    'category': 'community' if owner != 'anthropics' else 'official',
+                                    'repo_url': f"https://github.com/{target_repo}/tree/main/skills/{skill_name}",
+                                    'stars': 0,
+                                    'author': owner
+                                })
+                    elif isinstance(data, dict) and data.get('type') == 'file':
+                        # 单个文件情况（如果仓库根目录就是 SKILL.md）
+                        all_skills.append({
+                            'id': f"{owner}-{repo_name}",
+                            'name': repo_name,
+                            'description': f"Skill from {target_repo}",
+                            'category': 'community' if owner != 'anthropics' else 'official',
+                            'repo_url': f"https://github.com/{target_repo}",
+                            'stars': 0,
+                            'author': owner
+                        })
+                elif response.status_code == 404:
+                    # 仓库不存在或没有 skills 目录
+                    return {
+                        'success': False,
+                        'skills': [],
+                        'total': 0,
+                        'page': page,
+                        'current_repo': target_repo,
+                        'error': f'Repository "{target_repo}" not found or has no "skills/" directory. Please check the repository name and ensure it contains a skills folder.'
+                    }
+            except Exception as e:
+                return {
+                    'success': False,
+                    'skills': [],
+                    'total': 0,
+                    'page': page,
+                    'current_repo': target_repo,
+                    'error': f'Failed to fetch from repository: {str(e)}'
+                }
+
+            # 关键词过滤（在已有 skills 中搜索）
             if query:
                 query_lower = query.lower()
-                all_skills = [s for s in all_skills 
-                             if query_lower in s['name'].lower() 
+                all_skills = [s for s in all_skills
+                             if query_lower in s['name'].lower()
                              or query_lower in s['description'].lower()]
-            
+
             if not all_skills:
                 return {
                     'success': False,
                     'skills': [],
                     'total': 0,
                     'page': page,
-                    'error': 'No skills found'
+                    'current_repo': target_repo,
+                    'error': f'No skills found in repository "{target_repo}"' + (f' matching "{query}"' if query else '')
                 }
-            
+
             return {
                 'success': True,
                 'skills': all_skills,
                 'total': len(all_skills),
-                'page': page
+                'page': page,
+                'current_repo': target_repo
             }
-            
+
         except Exception as e:
             return {
                 'success': False,
                 'skills': [],
                 'total': 0,
                 'page': page,
+                'current_repo': repo if repo else "anthropics/skills",
                 'error': str(e)
             }
     
