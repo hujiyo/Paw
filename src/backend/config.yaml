@@ -2,12 +2,9 @@ identity:
   name: Paw
   username: hujiyo
   honey: 老公
-
-# 工具执行配置
 tool_execution:
-  mode: threaded  # "threaded" | "direct" (threaded=线程隔离, direct=直接执行)
-  timeout: 30.0   # 工具执行超时时间（秒）
-
+  mode: threaded
+  timeout: 30.0
 api:
   key: aef418d2241a4e008fcdd61370cef5cc.VDXiXUnwJLWHcliy
   url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions

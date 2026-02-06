@@ -40,6 +40,9 @@ class SkillMarketplace:
         # 缓存搜索结果（避免频繁请求）
         self._search_cache: Dict[str, Any] = {}
         
+        # 索引仓库判断缓存（避免每次搜索都发HTTP请求）
+        self._index_repo_cache: Dict[str, bool] = {}
+        
         # 设置请求超时
         self.timeout = 30
     
@@ -281,7 +284,8 @@ class SkillMarketplace:
         """
         判断是否为索引仓库
 
-        只检查仓库是否包含 skills-index.md 文件，不依赖仓库名称
+        优先使用缓存结果，然后检查仓库是否包含 skills-index.md 文件，
+        网络失败时回退到仓库名称关键词判断。
 
         Args:
             repo: 仓库路径 "owner/repo" 或 "local"（本地索引）
@@ -293,11 +297,21 @@ class SkillMarketplace:
         if repo.lower() == 'local' or repo.lower() == 'paw':
             return True
 
+        # 检查缓存
+        if repo in self._index_repo_cache:
+            return self._index_repo_cache[repo]
+
+        if '/' not in repo:
+            self._index_repo_cache[repo] = False
+            return False
+
+        # 基于仓库名称的快速判断（作为后备）
+        repo_name_lower = repo.split('/', 1)[1].lower()
+        name_hints = ('index', 'awesome', 'registry', 'catalog', 'hub')
+        name_suggests_index = any(hint in repo_name_lower for hint in name_hints)
+
         # 检查远程仓库是否包含 skills-index.md
         try:
-            if '/' not in repo:
-                return False
-
             owner, repo_name = repo.split('/', 1)
 
             headers = {
@@ -309,11 +323,15 @@ class SkillMarketplace:
             index_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/skills-index.md"
             response = requests.get(index_url, headers=headers, timeout=10, verify=False)
 
-            # 如果文件存在，返回 True
-            return response.status_code == 200
+            is_index = response.status_code == 200
+            self._index_repo_cache[repo] = is_index
+            return is_index
 
-        except Exception:
-            return False
+        except Exception as e:
+            # 网络失败时回退到名称判断
+            print(f"[SkillMarketplace] _is_index_repository network check failed for '{repo}': {e}, falling back to name heuristic: {name_suggests_index}")
+            self._index_repo_cache[repo] = name_suggests_index
+            return name_suggests_index
 
     def _fetch_local_index(self, query: str, page: int) -> Dict[str, Any]:
         """

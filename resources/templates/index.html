@@ -62,7 +62,7 @@
         </aside>
 
         <main class="main">
-            <!-- 顶部工具栏 -->
+            <!-- 顶部工具栏 - 固定不随滚动 -->
             <div class="toolbar">
                 <div class="toolbar__left-group">
                     <button class="toolbar__btn" id="toggle-sidebar" title="切换侧边栏 (Ctrl+B)">
@@ -70,7 +70,6 @@
                             <path d="M4 2h10a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1zm0 1v10h3V3H4zm4 0v10h6V3H8z"/>
                         </svg>
                     </button>
-                    <!-- 工作区文件目录侧边栏按钮：当右侧边栏打开时显示 -->
                     <button class="toolbar__btn" id="toggle-workspace-files-sidebar" title="工作区文件 (Ctrl+Shift+E)" style="display:none;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
@@ -83,16 +82,16 @@
                             <path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1a5 5 0 110 10A5 5 0 018 3zm.5 2.5a.5.5 0 00-1 0v2h-2a.5.5 0 000 1h2v2a.5.5 0 001 0v-2h2a.5.5 0 000-1h-2v-2z"/>
                         </svg>
                     </button>
-                    <button class="toolbar__btn toolbar__btn--active" id="chat-view-btn" title="聊天">
+                    <button class="toolbar__btn toolbar__btn--active" id="chat-view-btn" title="消息">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                         </svg>
                     </button>
                     <button class="toolbar__btn" id="skills-market-btn" title="Skills">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                            <line x1="9" y1="9" x2="15" y2="9"></line>
-                            <line x1="9" y1="15" x2="15" y2="15"></line>
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                            <path d="M2 17l10 5 10-5"></path>
+                            <path d="M2 12l10 5 10-5"></path>
                         </svg>
                     </button>
                 </div>
@@ -105,71 +104,82 @@
                 </button>
             </div>
 
-            <!-- 聊天视图 -->
-            <div id="chat-view" class="chat-view chat-view--active">
-                <div class="status-bar" id="status-bar"></div>
-                <div class="messages-wrapper" id="messages-wrapper">
-                    <div class="messages" id="messages"></div>
-                </div>
-                <div class="input-area">
-                    <div class="input-wrap">
-                        <form class="input-form" id="input-form">
-                            <textarea id="input" placeholder="Ask Paw anything..." rows="1"></textarea>
-                            <button type="submit" id="send-btn">Send</button>
-                        </form>
+            <!-- 标签页内容容器 -->
+            <div class="main__content">
+                <!-- 消息界面（聊天标签） -->
+                <div id="chat-view" class="chat-view chat-view--active">
+                    <div class="status-bar" id="status-bar"></div>
+                    <div class="messages-wrapper" id="messages-wrapper">
+                        <div class="messages" id="messages"></div>
+                    </div>
+                    <div class="input-area">
+                        <div class="input-wrap">
+                            <form class="input-form" id="input-form">
+                                <textarea id="input" placeholder="Ask Paw anything..." rows="1"></textarea>
+                                <button type="submit" id="send-btn">Send</button>
+                            </form>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Skill商城界面 -->
-            <div id="skills-market-view" class="skills-market-view">
-                <div class="skills-market-container">
-                    <div class="skills-market-header">
-                        <div class="skills-market-header__title">Skills</div>
-                        <!-- 关闭按钮已移除 -->
+                <!-- Skills 界面（Skills标签） -->
+                <div id="skills-market-view" class="skills-market-view">
+                    <!-- 顶部导航栏：仓库 + 面包屑 + 搜索 -->
+                    <div class="skills-topbar">
+                        <div class="skills-topbar__nav">
+                            <button class="skills-nav-btn skills-nav-btn--back" id="skills-back-btn" title="返回索引库" style="display:none;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+                            </button>
+                            <div class="skills-breadcrumb" id="skills-breadcrumb">
+                                <span class="skills-breadcrumb__item skills-breadcrumb__item--active">hujiyo/skills-index</span>
+                            </div>
+                        </div>
+                        <div class="skills-topbar__actions">
+                            <div class="skills-repo-bar">
+                                <svg class="skills-repo-bar__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+                                <input type="text" class="skills-repo-bar__input" id="skills-repo-input" value="hujiyo/skills-index" placeholder="owner/repo" />
+                                <button class="skills-repo-bar__go-btn" id="skills-repo-go-btn" title="前往仓库">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
+                                </button>
+                            </div>
+                            <div class="skills-search-compact">
+                                <svg class="skills-search-compact__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                <input type="text" class="skills-search-compact__input" id="skills-search-input" placeholder="搜索关键词..." />
+                            </div>
+                        </div>
                     </div>
-                    
-                    <!-- 切换标签 -->
-                    <div class="skills-market-tabs">
-                        <button class="skills-market-tab skills-market-tab--active" data-skills-view="market">市场</button>
-                        <button class="skills-market-tab" data-skills-view="installed">已安装</button>
+
+                    <!-- 子标签切换：市场 / 已安装 -->
+                    <div class="skills-subtabs">
+                        <button class="skills-subtab skills-subtab--active" data-skills-view="market">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                            市场
+                        </button>
+                        <button class="skills-subtab" data-skills-view="installed">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            已安装
+                        </button>
                     </div>
-                    
+
                     <!-- 市场视图 -->
                     <div class="skills-market-content skills-market-content--active" id="skills-market-content">
-                        <div class="skills-search-bar">
-                            <div class="skills-repo-input-group">
-                                <input type="text" class="skills-repo-input" id="skills-repo-input" placeholder="浏览仓库 (如: hujiyo/skills-index)" value="hujiyo/skills-index" />
-                                <button class="skills-repo-btn" id="skills-repo-btn" title="切换仓库">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                                    </svg>
-                                </button>
-                            </div>
-                            <div class="skills-search-input-group">
-                                <input type="text" class="skills-search" id="skills-search-input" placeholder="在当前仓库中搜索..." />
-                                <button class="skills-search-btn" id="skills-search-btn">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <circle cx="11" cy="11" r="8"></circle>
-                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="skills-current-repo" id="skills-current-repo">当前仓库: hujiyo/skills-index</div>
-                        <div class="skills-list" id="skills-list">
+                        <div class="skills-grid" id="skills-list">
                             <div class="skills-empty">
-                                <div class="skills-empty__icon">📦</div>
-                                <div class="skills-empty__text">点击搜索按钮浏览 Skills</div>
+                                <div class="skills-empty__icon">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                                </div>
+                                <div class="skills-empty__text">正在加载 Skills...</div>
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- 已安装视图 -->
                     <div class="skills-market-content" id="skills-installed-content">
-                        <div class="installed-list" id="installed-list">
+                        <div class="skills-grid" id="installed-list">
                             <div class="skills-empty">
-                                <div class="skills-empty__icon">💭</div>
+                                <div class="skills-empty__icon">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                </div>
                                 <div class="skills-empty__text">暂未安装任何 Skill</div>
                             </div>
                         </div>

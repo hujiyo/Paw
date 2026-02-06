@@ -104,7 +104,6 @@ interface DomElements {
     newChatBtn: HTMLButtonElement;
     viewHistory: HTMLElement;
     viewMemory: HTMLElement;
-    viewSkills: HTMLElement;
     // Memory
     memoryCanvas: HTMLElement;
     memoryEmpty: HTMLElement;
@@ -150,7 +149,6 @@ const dom: DomElements = {
     newChatBtn: $<HTMLButtonElement>('#new-chat-btn')!,
     viewHistory: $<HTMLElement>('#view-history')!,
     viewMemory: $<HTMLElement>('#view-memory')!,
-    viewSkills: $<HTMLElement>('#view-skills')!,
     // Memory
     memoryCanvas: $<HTMLElement>('#memory-canvas')!,
     memoryEmpty: $<HTMLElement>('#memory-empty')!,
@@ -357,6 +355,8 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 initSidebarState();
 
 // ============ 视图切换 ============
+
+// 侧边栏标签切换（历史/记忆）
 $$<HTMLElement>('.sidebar__tab').forEach(tab => {
     tab.addEventListener('click', () => {
         $$<HTMLElement>('.sidebar__tab').forEach(t => t.classList.remove('sidebar__tab--active'));
@@ -364,9 +364,27 @@ $$<HTMLElement>('.sidebar__tab').forEach(tab => {
         const view = tab.dataset.view;
         dom.viewHistory.classList.toggle('sidebar__view--active', view === 'history');
         dom.viewMemory.classList.toggle('sidebar__view--active', view === 'memory');
-        dom.viewSkills.classList.toggle('sidebar__view--active', view === 'skills');
     });
 });
+
+// 工具栏按钮切换主内容区视图（消息/Skills）
+const chatViewBtn = $<HTMLElement>('#chat-view-btn');
+const skillsMarketBtn = $<HTMLElement>('#skills-market-btn');
+
+if (chatViewBtn) {
+    chatViewBtn.addEventListener('click', () => {
+        Skills.hide();
+        chatViewBtn.classList.add('toolbar__btn--active');
+        if (skillsMarketBtn) skillsMarketBtn.classList.remove('toolbar__btn--active');
+    });
+}
+if (skillsMarketBtn) {
+    skillsMarketBtn.addEventListener('click', () => {
+        Skills.show();
+        if (chatViewBtn) chatViewBtn.classList.remove('toolbar__btn--active');
+        skillsMarketBtn.classList.add('toolbar__btn--active');
+    });
+}
 
 // ============ WebSocket 事件处理 ============
 ws.onopen = (): void => {
