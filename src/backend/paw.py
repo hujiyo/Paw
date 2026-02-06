@@ -838,6 +838,14 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
     def _save_session(self):
         """保存当前会话快照"""
         try:
+            # 空会话检测：如果从未分配会话ID且没有用户消息，不保存
+            if self.current_session_id is None:
+                from chunk_system import ChunkType
+                has_user_message = any(c.chunk_type == ChunkType.USER for c in self.chunk_manager.chunks)
+                if not has_user_message:
+                    # 空会话，不创建文件
+                    return False
+
             # 获取 Shell 状态
             terminal_status = self.tools.get_terminal_status()
 

@@ -15,7 +15,7 @@ from typing import Dict, List, Any, Optional
 import requests
 from urllib.parse import urlparse
 
-from skills_index_client import SkillsIndexPlug, SkillsIndexEntry
+from lib.skills_index_interface import SkillsIndexHub, SkillsIndexEntry
 
 
 class SkillMarketplace:
@@ -33,9 +33,9 @@ class SkillMarketplace:
         self.skills_dir = Path.home() / ".paw" / "skills"
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         
-        # 初始化 SkillsIndexPlug（默认连接官方索引库）
-        self.index_plug = SkillsIndexPlug()
-        self.index_plug.connect()
+        # 初始化 SkillsIndexHub（默认连接官方索引库）
+        self.index_hub = SkillsIndexHub()
+        self.index_hub.connect()
         
         # 缓存搜索结果（避免频繁请求）
         self._search_cache: Dict[str, Any] = {}
@@ -422,15 +422,9 @@ class SkillMarketplace:
                               or query_lower in r['description'].lower()
                               or query_lower in r['author'].lower()]
 
-            # 分页（每页 20 个）
-            per_page = 20
-            start_idx = (page - 1) * per_page
-            end_idx = start_idx + per_page
-            paginated_repos = repositories[start_idx:end_idx]
-
             return {
                 'success': True,
-                'skills': paginated_repos,
+                'skills': repositories,
                 'total': len(repositories),
                 'page': page,
                 'current_repo': 'local',
@@ -452,7 +446,7 @@ class SkillMarketplace:
         """
         从索引仓库获取技能仓库列表
 
-        使用 SkillsIndexPlug 解析 skills-index.md 格式
+        使用 SkillsIndexHub 解析 skills-index.md 格式
 
         Args:
             repo: 索引仓库路径 "owner/repo" 或 "local"（本地索引）
@@ -467,12 +461,12 @@ class SkillMarketplace:
             return self._fetch_local_index(query, page)
 
         try:
-            # 使用 SkillsIndexPlug 连接并解析远程索引
-            plug = SkillsIndexPlug()
+            # 使用 SkillsIndexHub 连接并解析远程索引
+            hub = SkillsIndexHub()
             
             # 构造源路径（支持 owner/repo 格式）
             if '/' in repo:
-                plug.connect(repo)
+                hub.connect(repo)
             else:
                 return {
                     'success': False,
@@ -485,7 +479,7 @@ class SkillMarketplace:
                 }
 
             # 获取所有条目
-            entries = plug.list_entries()
+            entries = hub.list_entries()
             
             # 转换为前端需要的格式
             repositories = []
@@ -533,15 +527,9 @@ class SkillMarketplace:
                               or query_lower in r['description'].lower()
                               or query_lower in r['author'].lower()]
 
-            # 分页（每页 20 个）
-            per_page = 20
-            start_idx = (page - 1) * per_page
-            end_idx = start_idx + per_page
-            paginated_repos = repositories[start_idx:end_idx]
-
             return {
                 'success': True,
-                'skills': paginated_repos,
+                'skills': repositories,
                 'total': len(repositories),
                 'page': page,
                 'current_repo': repo,

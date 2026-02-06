@@ -35,7 +35,7 @@ class SkillsIndexEntry:
         return asdict(self)
 
 
-class SkillsIndexPlug:
+class SkillsIndexHub:
     """A lightweight parser and query helper for the Skills Index format."""
 
     DEFAULT_SOURCE = "https://raw.githubusercontent.com/hujiyo/skills-index/master/skills-index.md"
@@ -266,4 +266,4 @@ class SkillsIndexPlug:
         return entries
 
 
-__all__ = ["SkillsIndexPlug", "SkillsIndexEntry"]
+__all__ = ["SkillsIndexHub", "SkillsIndexEntry"]

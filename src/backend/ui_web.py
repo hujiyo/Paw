@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Web UI系统 - 重构版
-负责启动Web服务并与前端进行WebSocket通信，精确复刻终端UI的交互逻辑。
+负责启动Web服务并与前端进行WebSocket通信
 """
 
 from typing import List, Dict, Any
@@ -209,7 +209,7 @@ class WebUI:
         def _get_marketplace():
             """获取 SkillMarketplace 实例（懒加载）"""
             if self._skill_marketplace is None:
-                from skill_marketplace import SkillMarketplace
+                from lib.skill_marketplace import SkillMarketplace
                 self._skill_marketplace = SkillMarketplace()
             return self._skill_marketplace
         
