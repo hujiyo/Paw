@@ -10,12 +10,8 @@ Paw 记忆意图判断阈值推荐
    - 负例：不需要回忆的即时问题
 2. 计算所有样本与"回忆意图锚点"的相似度
 3. 找到最大化类间距离的阈值
-
-用法：
-    python calibrate_threshold.py [embedding_url] [embedding_model]
 """
 
-import os
 import sys
 import math
 import requests
@@ -23,9 +19,11 @@ import yaml
 from pathlib import Path
 from typing import List, Tuple
 
-# 添加 core 目录到路径
-SCRIPT_DIR = Path(__file__).parent
-sys.path.insert(0, str(SCRIPT_DIR))
+SCRIPT_DIR = Path(__file__).resolve().parent
+BACKEND_DIR = SCRIPT_DIR.parent
+
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from memory import _RECALL_INTENT_TEXT as RECALL_INTENT_TEXT, DEFAULT_EMBEDDING_URLS
 
@@ -91,8 +89,8 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
 
 
 def load_config() -> dict:
-    """加载 config.yaml"""
-    config_path = SCRIPT_DIR / "config.yaml"
+    """加载 src/backend/config.yaml"""
+    config_path = BACKEND_DIR / "config.yaml"
     if config_path.exists():
         with open(config_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
@@ -368,33 +366,3 @@ def calibrate_api(embedding_url: str, embedding_model: str) -> dict:
         return {"success": False, "error": "Embedding API 请求超时"}
     except Exception as e:
         return {"success": False, "error": str(e)}
-
-
-def main():
-    try:
-        # 获取参数
-        url_arg = sys.argv[1] if len(sys.argv) > 1 else None
-        model_arg = sys.argv[2] if len(sys.argv) > 2 else None
-        
-        embedding_url, embedding_model = get_embedding_config(url_arg, model_arg)
-        
-        threshold, stats = calibrate(embedding_url, embedding_model)
-        
-        print(f"\n校准完成！")
-        return 0
-        
-    except RuntimeError as e:
-        print(f"\n错误: {e}")
-        return 1
-    except KeyboardInterrupt:
-        print("\n\n已取消")
-        return 1
-    except Exception as e:
-        print(f"\n错误: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
