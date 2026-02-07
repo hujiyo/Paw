@@ -154,11 +154,11 @@ class SkillsIndexHub:
                 except urllib.error.URLError:
                     # GitHub 访问失败，尝试 Gitee 镜像
                     gitee_target = target.replace(
-                        "https://raw.githubusercontent.com/hujiyo/skills-index/master",
-                        "https://gitee.com/hujiyo/skills-index/raw/master"
+                        "https://raw.githubusercontent.com/hujiyo/skills-index/HEAD",
+                        "https://gitee.com/hujiyo/skills-index/raw/HEAD"
                     ).replace(
                         "https://api.github.com/repos/hujiyo/skills-index/contents/skills-index.md",
-                        "https://gitee.com/hujiyo/skills-index/raw/master/skills-index.md"
+                        "https://gitee.com/hujiyo/skills-index/raw/HEAD/skills-index.md"
                     )
                     try:
                         with urllib.request.urlopen(gitee_target, timeout=15) as resp:
@@ -182,19 +182,19 @@ class SkillsIndexHub:
             owner_repo = target.strip().strip("/")
             # 特殊处理 hujiyo/skills-index：优先 GitHub，失败则使用 Gitee
             if owner_repo.lower() == "hujiyo/skills-index":
-                github_url = f"https://raw.githubusercontent.com/hujiyo/skills-index/master/skills-index.md"
+                github_url = f"https://raw.githubusercontent.com/hujiyo/skills-index/HEAD/skills-index.md"
                 try:
                     return self._load_source(github_url)
                 except RuntimeError:
                     # GitHub 失败，使用 Gitee 镜像
-                    gitee_url = f"https://gitee.com/hujiyo/skills-index/raw/master/skills-index.md"
+                    gitee_url = f"https://gitee.com/hujiyo/skills-index/raw/HEAD/skills-index.md"
                     try:
                         with urllib.request.urlopen(gitee_url, timeout=15) as resp:
                             return resp.read().decode("utf-8")
                     except urllib.error.URLError as exc:
                         raise RuntimeError(f"Failed to fetch skills index from both GitHub and Gitee: {exc}")
             else:
-                raw_url = f"https://raw.githubusercontent.com/{owner_repo}/main/skills-index.md"
+                raw_url = f"https://raw.githubusercontent.com/{owner_repo}/HEAD/skills-index.md"
                 return self._load_source(raw_url)
 
         raise ValueError(

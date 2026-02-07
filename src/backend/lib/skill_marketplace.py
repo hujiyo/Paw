@@ -87,16 +87,9 @@ class SkillMarketplace:
             return self._search_cache[cache_key]
 
         try:
-            # 检查是否为索引仓库（包含 "awesome" 或 "index" 关键词）
+            # 直接获取仓库内容（索引 + skills 包）
             target_repo = repo if repo else "hujiyo/skills-index"
-            is_index = self._is_index_repository(target_repo)
-
-            if is_index:
-                # 解析索引仓库
-                result = self._fetch_index_repository(target_repo, query, page)
-            else:
-                # 从 GitHub 获取普通仓库
-                result = self._fetch_from_github(query, category, page, repo)
+            result = self._fetch_from_github(query, category, page, target_repo)
 
             # 缓存结果
             if result["success"]:
@@ -128,6 +121,7 @@ class SkillMarketplace:
             repo: 仓库路径 "owner/repo"，默认为 "hujiyo/skills-index"
         """
         try:
+            # 准备请求头
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -136,7 +130,7 @@ class SkillMarketplace:
                 'User-Agent': 'Paw-Skills-Browser'
             }
 
-            # 使用指定的仓库，默认为 hujiyo/skills-index
+            # 确定目标仓库
             target_repo = repo if repo else "hujiyo/skills-index"
 
             # 验证仓库格式
@@ -148,50 +142,64 @@ class SkillMarketplace:
                     'page': page,
                     'current_repo': target_repo,
                     'is_index': False,
+                    'has_skills': False,
                     'error': f'Invalid repository format. Use "owner/repo" format like "hujiyo/skills-index"'
                 }
 
             owner, repo_name = target_repo.split('/', 1)
+
+            # 检查是否为本地索引
+            if target_repo.lower() in ['local', 'paw']:
+                return self._fetch_local_index(query, page)
+
+            # 探测仓库内容类型并获取所有可用内容
+            content_types = self._discover_repo_content(owner, repo_name, headers)
             
-            # 递归搜索包含 SKILL.md 的目录
-            all_skills = self._find_skills_in_repo(owner, repo_name, headers)
-
-            if not all_skills:
+            all_items = []
+            
+            # 1. 获取索引内容
+            if content_types["has_index"]:
+                index_items = self._get_index_entries(owner, repo_name, headers, query)
+                for item in index_items:
+                    item['item_type'] = 'index_entry'
+                    all_items.append(item)
+            
+            # 2. 获取 skills/ 目录下的技能包
+            if content_types["has_skills_dir"]:
+                skills_dir = content_types["skills_subdir"]
+                skill_packages = self._get_skills_in_directory(owner, repo_name, headers, skills_dir, query)
+                for item in skill_packages:
+                    item['item_type'] = 'skill_package'
+                    all_items.append(item)
+            
+            # 3. 如果根目录有 SKILL.md 且没有 skills/ 目录，整个仓库作为 skill 包
+            if content_types["has_root_skill"] and not content_types["has_skills_dir"]:
+                root_skill = self._get_root_skill_package(owner, repo_name, query)
+                if root_skill:
+                    root_skill['item_type'] = 'skill_package'
+                    all_items.append(root_skill)
+            
+            # 如果没有找到任何内容
+            if not all_items:
                 return {
                     'success': False,
                     'skills': [],
                     'total': 0,
                     'page': page,
                     'current_repo': target_repo,
-                    'is_index': False,
-                    'error': f'Repository "{target_repo}" 中未找到任何包含 SKILL.md 的 skill 目录'
-                }
-
-            # 关键词过滤（在已有 skills 中搜索）
-            if query:
-                query_lower = query.lower()
-                all_skills = [s for s in all_skills
-                             if query_lower in s['name'].lower()
-                             or query_lower in s['description'].lower()]
-
-            if not all_skills:
-                return {
-                    'success': False,
-                    'skills': [],
-                    'total': 0,
-                    'page': page,
-                    'current_repo': target_repo,
-                    'is_index': False,
-                    'error': f'No skills found in repository "{target_repo}"' + (f' matching "{query}"' if query else '')
+                    'is_index': content_types["has_index"],
+                    'has_skills': content_types["has_skills_dir"] or content_types["has_root_skill"],
+                    'error': f'Repository "{target_repo}" 中没有找到索引或技能包'
                 }
 
             return {
                 'success': True,
-                'skills': all_skills,
-                'total': len(all_skills),
+                'skills': all_items,
+                'total': len(all_items),
                 'page': page,
                 'current_repo': target_repo,
-                'is_index': False
+                'is_index': content_types["has_index"],
+                'has_skills': content_types["has_skills_dir"] or content_types["has_root_skill"]
             }
 
         except Exception as e:
@@ -202,6 +210,7 @@ class SkillMarketplace:
                 'page': page,
                 'current_repo': repo if repo else "hujiyo/skills-index",
                 'is_index': False,
+                'has_skills': False,
                 'error': str(e)
             }
 
@@ -280,58 +289,232 @@ class SkillMarketplace:
 
         return skills
 
-    def _is_index_repository(self, repo: str) -> bool:
+    def _discover_repo_content(self, owner: str, repo_name: str, headers: Dict[str, str]) -> Dict[str, Any]:
         """
-        判断是否为索引仓库
+        探测仓库内容结构，返回可用的内容类型
 
-        优先使用缓存结果，然后检查仓库是否包含 skills-index.md 文件，
-        网络失败时回退到仓库名称关键词判断。
-
-        Args:
-            repo: 仓库路径 "owner/repo" 或 "local"（本地索引）
+        探测规则（按优先级）：
+        1. 根目录是否有 skills-index.md → 索引内容
+        2. 是否有 skills/ 目录 → 该目录下的子文件夹作为 skills 包
+        3. 根目录是否有 SKILL.md（不区分大小写）→ 整个仓库作为 skill 包
 
         Returns:
-            是否为索引仓库
-        """
-        # 检查是否为本地索引
-        if repo.lower() == 'local' or repo.lower() == 'paw':
-            return True
-
-        # 检查缓存
-        if repo in self._index_repo_cache:
-            return self._index_repo_cache[repo]
-
-        if '/' not in repo:
-            self._index_repo_cache[repo] = False
-            return False
-
-        # 基于仓库名称的快速判断（作为后备）
-        repo_name_lower = repo.split('/', 1)[1].lower()
-        name_hints = ('index', 'awesome', 'registry', 'catalog', 'hub')
-        name_suggests_index = any(hint in repo_name_lower for hint in name_hints)
-
-        # 检查远程仓库是否包含 skills-index.md
-        try:
-            owner, repo_name = repo.split('/', 1)
-
-            headers = {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'Paw-Skills-Browser'
+            {
+                "has_index": bool,
+                "has_skills_dir": bool,
+                "has_root_skill": bool,
+                "skills_subdir": str or None,  # 如果存在 skills/ 目录
             }
+        """
+        result = {
+            "has_index": False,
+            "has_skills_dir": False,
+            "has_root_skill": False,
+            "skills_subdir": None
+        }
 
-            # 尝试获取 skills-index.md 文件
+        api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/"
+        
+        try:
+            response = requests.get(api_url, headers=headers, timeout=10, verify=False)
+            if response.status_code != 200:
+                return result
+
+            items = response.json()
+            if not isinstance(items, list):
+                return result
+
+            for item in items:
+                if item['type'] == 'file' and item['name'].lower() == 'skills-index.md':
+                    result["has_index"] = True
+                elif item['type'] == 'dir' and item['name'].lower() == 'skills':
+                    result["has_skills_dir"] = True
+                    result["skills_subdir"] = item['name']
+                elif item['type'] == 'file' and item['name'].upper() == 'SKILL.MD':
+                    result["has_root_skill"] = True
+
+        except Exception:
+            pass
+
+        return result
+
+    def _get_index_entries(self, owner: str, repo_name: str, headers: Dict[str, str], query: str = "") -> List[Dict[str, Any]]:
+        """
+        从远程仓库获取 skills-index.md 中的索引条目
+
+        Args:
+            owner: 仓库所有者
+            repo_name: 仓库名称
+            headers: HTTP 请求头
+            query: 搜索关键词（可选过滤）
+
+        Returns:
+            索引条目列表
+        """
+        try:
+            # 获取 skills-index.md 内容
             index_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/skills-index.md"
             response = requests.get(index_url, headers=headers, timeout=10, verify=False)
+            
+            if response.status_code != 200:
+                return []
 
-            is_index = response.status_code == 200
-            self._index_repo_cache[repo] = is_index
-            return is_index
+            content_data = response.json()
+            if 'content' not in content_data:
+                return []
+
+            import base64
+            content = base64.b64decode(content_data['content']).decode('utf-8')
+
+            # 解析索引内容
+            from lib.skills_index_interface import SkillsIndexHub
+            hub = SkillsIndexHub()
+            hub._raw_text = content
+            hub._entries = hub._parse_index(content)
+            hub._source = f"{owner}/{repo_name}"
+
+            entries = hub.list_entries()
+            
+            # 转换为统一格式
+            items = []
+            for entry in entries:
+                repo_path = entry['repository']
+                item_owner = entry['owner']
+                item_name = entry['name']
+                subpath = entry.get('subpath')
+                category = entry.get('category') or '索引条目'
+                description = entry.get('description') or f"点击浏览 {item_owner} 的 {item_name} 技能仓库"
+                
+                display_name = repo_path
+                if subpath:
+                    display_name = f"{repo_path} (/{subpath})"
+
+                # 关键词过滤
+                if query:
+                    query_lower = query.lower()
+                    if not (query_lower in display_name.lower() or 
+                            query_lower in description.lower() or
+                            query_lower in item_owner.lower()):
+                        continue
+
+                items.append({
+                    'id': repo_path.replace('/', '-'),
+                    'name': display_name,
+                    'description': description,
+                    'category': category,
+                    'repo_url': f"https://github.com/{repo_path}",
+                    'stars': 0,
+                    'author': item_owner,
+                    'is_repo_entry': True,
+                    'repo_path': repo_path,
+                    'custom_path': subpath
+                })
+
+            return items
 
         except Exception as e:
-            # 网络失败时回退到名称判断
-            print(f"[SkillMarketplace] _is_index_repository network check failed for '{repo}': {e}, falling back to name heuristic: {name_suggests_index}")
-            self._index_repo_cache[repo] = name_suggests_index
-            return name_suggests_index
+            print(f"[SkillMarketplace] _get_index_entries failed for {owner}/{repo_name}: {e}")
+            return []
+
+    def _get_skills_in_directory(self, owner: str, repo_name: str, headers: Dict[str, str], 
+                                  directory: str, query: str = "") -> List[Dict[str, Any]]:
+        """
+        获取指定目录下的技能包（该目录的直接子目录中包含 SKILL.md 的）
+
+        Args:
+            owner: 仓库所有者
+            repo_name: 仓库名称
+            headers: HTTP 请求头
+            directory: 要搜索的目录名称（如 'skills'）
+            query: 搜索关键词（可选过滤）
+
+        Returns:
+            技能包列表
+        """
+        items = []
+        api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{directory}"
+        
+        try:
+            response = requests.get(api_url, headers=headers, timeout=10, verify=False)
+            if response.status_code != 200:
+                return items
+
+            subdirs = response.json()
+            if not isinstance(subdirs, list):
+                return items
+
+            for subdir in subdirs:
+                if subdir['type'] != 'dir':
+                    continue
+
+                # 检查该子目录是否有 SKILL.md
+                skill_path = f"{directory}/{subdir['name']}"
+                skill_md_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{skill_path}/SKILL.md"
+                
+                try:
+                    md_response = requests.get(skill_md_url, headers=headers, timeout=5, verify=False)
+                    if md_response.status_code != 200:
+                        # 尝试不区分大小写（GitHub API 是区分大小写的，尝试 SKILLS.md）
+                        skill_md_url2 = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{skill_path}/SKILLS.md"
+                        md_response = requests.get(skill_md_url2, headers=headers, timeout=5, verify=False)
+                        if md_response.status_code != 200:
+                            continue
+
+                    skill_name = subdir['name']
+                    
+                    # 关键词过滤
+                    if query:
+                        query_lower = query.lower()
+                        if query_lower not in skill_name.lower():
+                            continue
+
+                    items.append({
+                        'id': f"{owner}-{skill_name}",
+                        'name': skill_name,
+                        'description': f"Skill from {owner}/{repo_name}/{skill_path}",
+                        'category': 'community',
+                        'repo_url': f"https://github.com/{owner}/{repo_name}/tree/HEAD/{skill_path}",
+                        'stars': 0,
+                        'author': owner,
+                        'path': skill_path
+                    })
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"[SkillMarketplace] _get_skills_in_directory failed for {owner}/{repo_name}/{directory}: {e}")
+
+        return items
+
+    def _get_root_skill_package(self, owner: str, repo_name: str, query: str = "") -> Optional[Dict[str, Any]]:
+        """
+        将整个仓库作为单个 skill 包返回
+
+        Args:
+            owner: 仓库所有者
+            repo_name: 仓库名称
+            query: 搜索关键词（可选过滤）
+
+        Returns:
+            skill 包字典，如果不匹配查询则返回 None
+        """
+        # 关键词过滤
+        if query:
+            query_lower = query.lower()
+            if query_lower not in repo_name.lower() and query_lower not in owner.lower():
+                return None
+
+        return {
+            'id': f"{owner}-{repo_name}",
+            'name': repo_name,
+            'description': f"Skill from {owner}/{repo_name}",
+            'category': 'community',
+            'repo_url': f"https://github.com/{owner}/{repo_name}",
+            'stars': 0,
+            'author': owner,
+            'path': ''
+        }
 
     def _fetch_local_index(self, query: str, page: int) -> Dict[str, Any]:
         """
@@ -621,14 +804,9 @@ class SkillMarketplace:
             is_subdir = len(path_parts) > 2 and path_parts[2] == 'tree'
             subdir_path = '/'.join(path_parts[4:]) if is_subdir else None
             
-            # 下载 ZIP
-            zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/main.zip"
+            # 下载 ZIP - 使用 HEAD 自动适配默认分支（main/master 兼容）
+            zip_url = f"https://github.com/{owner}/{repo}/archive/HEAD.zip"
             result = self._download_from_github(zip_url, skill_name, subdir_path)
-            
-            if not result["success"]:
-                # 尝试 master 分支
-                zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/master.zip"
-                result = self._download_from_github(zip_url, skill_name, subdir_path)
             
             return result
             
