@@ -1590,76 +1590,180 @@ body {
 }
 .sys-msg.error { color: var(--error-color); }
 
-/* ========== 工具调用 - Shell 风格 ========== */
+/* ========== 工具调用 - 卡片式 ========== */
 .tool {
-    margin: 0;
-    font-size: 0.8rem;
+    margin: 0.2rem 0;
+    font-size: 0.78rem;
     font-family: var(--font-family);
     line-height: 1.5;
-    padding: 0.4rem 0.5rem;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    overflow: hidden;
+    transition: border-color 0.2s;
+    position: relative;
 }
-.tool:hover {
-    background: rgba(255, 255, 255, 0.02);
-    border-color: var(--border-color);
-    box-shadow: 0 0 0 1px rgba(255, 158, 128, 0.2);
+.tool::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--tool-color);
+    transition: background 0.2s;
+    opacity: 0.7;
 }
+.tool--success::before { background: var(--success-color); opacity: 1; }
+.tool--error::before   { background: var(--error-color); opacity: 1; }
+
 .tool__header {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.3rem 0.55rem 0.3rem 0.75rem;
+    cursor: default;
+    user-select: none;
+    min-width: 0;
 }
-.tool__spinner {
-    width: 0.8em;
-    height: 0.8em;
-    border: 2px solid var(--tool-color);
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-right: 0.4rem;
+.tool--done .tool__header {
+    cursor: pointer;
+}
+.tool--done .tool__header:hover {
+    background: var(--hover-bg);
+}
+
+.tool__icon-wrap {
+    display: flex;
+    align-items: center;
     flex-shrink: 0;
+    color: var(--text-secondary);
 }
-@keyframes spin { to { transform: rotate(360deg); } }
-.tool__icon {
-    margin-right: 0.4rem;
-    min-width: 0.8em;
-    flex-shrink: 0;
-}
+.tool--running .tool__icon-wrap { color: var(--tool-color); }
+.tool--success .tool__icon-wrap { color: var(--success-color); }
+.tool--error   .tool__icon-wrap { color: var(--error-color); }
+
 .tool__name {
-    color: var(--tool-color);
-    margin-right: 0.3rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    flex-shrink: 0;
+    font-size: 0.78rem;
 }
+
 .tool__args {
     color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.73rem;
+    opacity: 0.8;
 }
-.tool__body {
-    margin-top: 0.1rem;
-    padding-left: 0;
+
+.tool__meta {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-left: 0.3rem;
+}
+
+.tool__elapsed {
     color: var(--text-secondary);
+    font-size: 0.68rem;
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+}
+
+.tool__spinner {
+    width: 0.7em;
+    height: 0.7em;
+    border: 1.5px solid var(--tool-color);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.tool__status-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+.tool__status-icon--ok  { color: var(--success-color); }
+.tool__status-icon--err { color: var(--error-color); }
+
+.tool__chevron {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    opacity: 0.4;
+    transition: transform 0.2s ease, opacity 0.2s;
+}
+.tool--done .tool__header:hover .tool__chevron { opacity: 0.8; }
+.tool--expanded .tool__chevron { transform: rotate(180deg); opacity: 0.7; }
+
+.tool__body {
+    display: none;
+    padding: 0.3rem 0.55rem 0.3rem 0.75rem;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-color);
+    max-height: 480px;
+    overflow-y: auto;
+}
+.tool--expanded .tool__body {
+    display: block;
+}
+
+.tool__detail-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+    min-width: 0;
+}
+.tool__detail-row + .tool__detail-row {
+    border-top: 1px solid var(--border-color);
+}
+.tool__detail-key {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    min-width: 3.5rem;
+}
+.tool__detail-val {
+    font-size: 0.73rem;
+    color: var(--text-primary);
+    opacity: 0.85;
+    min-width: 0;
     word-break: break-all;
 }
-.tool__body-line {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start; /* 确保多行内容时顶部对齐 */
-}
-.tool__branch {
-    min-width: 1.4em; /* 给符号预留固定宽度 */
-    flex-shrink: 0;
-    user-select: none; /* 防止复制时选中符号 */
+.tool__detail-pre {
+    font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+    font-size: 0.7rem;
     color: var(--text-secondary);
-}
-.tool__content {
-    flex: 1;
-    min-width: 0; /* 防止内容过长撑破容器 */
     white-space: pre-wrap;
     word-break: break-all;
+    margin: 0;
+    line-height: 1.6;
+    opacity: 0.9;
 }
-.tool--success .tool__icon { color: var(--success-color); }
-.tool--error .tool__icon { color: var(--error-color); }
+
+.tool--running {
+    animation: tool-pulse 1.8s ease-in-out infinite;
+}
+@keyframes tool-pulse {
+    0%, 100% { border-color: var(--border-color); }
+    50%       { border-color: var(--tool-color); }
+}
 
 /* 工具详情弹窗 */
 .tool-detail-modal {

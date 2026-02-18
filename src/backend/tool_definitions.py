@@ -21,6 +21,22 @@ from tool_registry import (
     transform_to_summary,
     transform_truncate
 )
+from display_formatters import (
+    format_read_file,
+    format_edit_file,
+    format_multi_edit_file,
+    format_file_operation,
+    format_list_dir,
+    format_find_by_name,
+    format_grep_search,
+    format_search_web,
+    format_load_url_content,
+    format_read_page,
+    format_todo_operation,
+    format_wait,
+    format_run_command,
+    format_default
+)
 
 # ============================================================
 # Schema 定义
@@ -719,8 +735,7 @@ def register_all_tools(tools_instance):
         name="read_file",
         schema=SCHEMA_READ_FILE,
         handler=tools_instance.read_file,
-        # 暂时不压缩，保持原有行为
-        # 后续可添加: singleton_key=key_by_arg("file_path"), max_instances=5
+        display_format=format_read_file,
         category="file"
     )
     
@@ -728,8 +743,7 @@ def register_all_tools(tools_instance):
         name="write_to_file",
         schema=SCHEMA_WRITE_TO_FILE,
         handler=tools_instance.write_to_file,
-        # 暂时不压缩，保持原有行为
-        # 后续可添加: result_transform=transform_to_summary("✓ 写入 {file_path}")
+        display_format=format_file_operation,
         category="file"
     )
     
@@ -737,6 +751,7 @@ def register_all_tools(tools_instance):
         name="delete_file",
         schema=SCHEMA_DELETE_FILE,
         handler=tools_instance.delete_file,
+        display_format=format_file_operation,
         category="file"
     )
     
@@ -746,6 +761,7 @@ def register_all_tools(tools_instance):
         name="edit",
         schema=SCHEMA_EDIT,
         handler=tools_instance.edit,
+        display_format=format_edit_file,
         category="edit"
     )
     
@@ -753,6 +769,7 @@ def register_all_tools(tools_instance):
         name="multi_edit",
         schema=SCHEMA_MULTI_EDIT,
         handler=tools_instance.multi_edit,
+        display_format=format_multi_edit_file,
         category="edit"
     )
     
@@ -762,6 +779,7 @@ def register_all_tools(tools_instance):
         name="find_by_name",
         schema=SCHEMA_FIND_BY_NAME,
         handler=tools_instance.find_by_name,
+        display_format=format_find_by_name,
         category="search"
     )
     
@@ -769,6 +787,7 @@ def register_all_tools(tools_instance):
         name="grep_search",
         schema=SCHEMA_GREP_SEARCH,
         handler=tools_instance.grep_search,
+        display_format=format_grep_search,
         category="search"
     )
     
@@ -776,6 +795,7 @@ def register_all_tools(tools_instance):
         name="list_dir",
         schema=SCHEMA_LIST_DIR,
         handler=tools_instance.list_dir,
+        display_format=format_list_dir,
         category="search"
     )
     
@@ -788,9 +808,8 @@ def register_all_tools(tools_instance):
         name="run_command",
         schema=SCHEMA_RUN_COMMAND,
         handler=tools_instance.run_command,
-        # shell chunk 的管理目前由 _refresh_shell_chunk 处理
-        # 这里的 singleton_key 暂时不生效，保持兼容
         singleton_key=key_constant("shell"),
+        display_format=format_run_command,
         category="shell"
     )
     
@@ -799,6 +818,7 @@ def register_all_tools(tools_instance):
         schema=SCHEMA_OPEN_SHELL,
         handler=tools_instance.open_shell,
         singleton_key=key_constant("shell"),
+        display_format=format_default,
         category="shell"
     )
     
@@ -807,6 +827,7 @@ def register_all_tools(tools_instance):
         schema=SCHEMA_INTERRUPT_COMMAND,
         handler=tools_instance.interrupt_command,
         singleton_key=key_constant("shell"),
+        display_format=format_default,
         category="shell"
     )
     
@@ -816,7 +837,8 @@ def register_all_tools(tools_instance):
         name="wait",
         schema=SCHEMA_WAIT,
         handler=tools_instance.wait,
-        max_call_pairs=3,  # 只保留最近3次调用（tool_call + tool_result 配对）
+        max_call_pairs=3,
+        display_format=format_wait,
         category="utility"
     )
     # === TODO-list 工具 (重构: Atom Tools) ===
@@ -825,7 +847,8 @@ def register_all_tools(tools_instance):
         name="create_todo_list",
         schema=SCHEMA_CREATE_TODO_LIST,
         handler=tools_instance.create_todo_list,
-        singleton_key=key_constant("todo_list"), # 始终保留最新的 TODO 列表
+        singleton_key=key_constant("todo_list"),
+        display_format=format_todo_operation,
         category="planning"
     )
     
@@ -833,8 +856,8 @@ def register_all_tools(tools_instance):
         name="add_todos",
         schema=SCHEMA_ADD_TODOS,
         handler=tools_instance.add_todos,
-        # add操作保留上下文有助于 LLM 知道它刚才加了什么
         max_call_pairs=5,
+        display_format=format_todo_operation,
         category="planning"
     )
     
@@ -843,6 +866,7 @@ def register_all_tools(tools_instance):
         schema=SCHEMA_MARK_TODO_AS_DONE,
         handler=tools_instance.mark_todo_as_done,
         max_call_pairs=5,
+        display_format=format_todo_operation,
         category="planning"
     )
     
@@ -850,9 +874,8 @@ def register_all_tools(tools_instance):
         name="read_todos",
         schema=SCHEMA_READ_TODOS,
         handler=tools_instance.read_todos,
-        # 读取操作结果可能很大，且create_todo_list/add/mark已经隐式包含了状态
-        # 所以这里可以设置为 transform_to_summary，或者保留少量
         max_call_pairs=1,
+        display_format=format_todo_operation,
         category="planning"
     )
     
@@ -861,6 +884,7 @@ def register_all_tools(tools_instance):
         schema=SCHEMA_STAY_SILENT,
         handler=tools_instance.stay_silent,
         max_call_pairs=1,
+        display_format=format_default,
         category="utility"
     )
 
@@ -869,7 +893,8 @@ def register_all_tools(tools_instance):
         name="load_skill",
         schema=SCHEMA_LOAD_SKILL,
         handler=tools_instance.load_skill,
-        max_call_pairs=1,  # 只保留最近一次加载
+        max_call_pairs=1,
+        display_format=format_default,
         category="skill"
     )
 
@@ -877,7 +902,8 @@ def register_all_tools(tools_instance):
         name="run_skill_script",
         schema=SCHEMA_RUN_SKILL_SCRIPT,
         handler=tools_instance.run_skill_script,
-        max_call_pairs=3,  # 保留最近3次调用
+        max_call_pairs=3,
+        display_format=format_default,
         category="skill"
     )
 
@@ -894,6 +920,7 @@ def register_web_tools(web_tools_instance):
         name="search_web",
         schema=SCHEMA_SEARCH_WEB,
         handler=web_tools_instance.search_web,
+        display_format=format_search_web,
         category="web"
     )
     
@@ -901,6 +928,7 @@ def register_web_tools(web_tools_instance):
         name="load_url_content",
         schema=SCHEMA_LOAD_URL_CONTENT,
         handler=web_tools_instance.load_url_content,
+        display_format=format_load_url_content,
         category="web"
     )
     
@@ -908,6 +936,7 @@ def register_web_tools(web_tools_instance):
         name="read_page",
         schema=SCHEMA_READ_PAGE,
         handler=web_tools_instance.read_page,
+        display_format=format_read_page,
         category="web"
     )
 

@@ -1204,14 +1204,11 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 确保result_text总是被定义
                     if success:
                         result_text = str(result.get("result", ""))
-                        # 不再在后端生成显示信息，完全交由前端处理
-                        # display = self._get_tool_display(function_name, result_text, function_args)
-                        self.ui.show_tool_result(tool_call_id, function_name, None, success=True, raw_response=result)
+                        self.ui.show_tool_result(tool_call_id, function_name, function_args, result, success=True)
                     else:
                         error_msg = result.get('error', '未知错误')
                         result_text = f"错误: {error_msg}"
-                        # 错误信息也只传递原始数据
-                        self.ui.show_tool_result(tool_call_id, function_name, None, success=False, raw_response=result)
+                        self.ui.show_tool_result(tool_call_id, function_name, function_args, result, success=False)
 
                     # 获取工具配置，检查上下文策略
                     tool_config = ToolRegistry.get(function_name)

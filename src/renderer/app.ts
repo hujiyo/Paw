@@ -1,7 +1,7 @@
 // 主入口文件
 import { $, $$, initMarkdown, scrollToBottom, escapeHtml } from './modules/utils.js';
 import { ThemeColors } from './modules/theme.js';
-import { createMsgEl, addSysMsg, updateToolElement, renderModalContent, getToolDisplay, setMessageActions } from './modules/render.js';
+import { createMsgEl, addSysMsg, updateToolElement, renderModalContent, getDefaultDisplay, setMessageActions, getToolIcon } from './modules/render.js';
 import { ChatHistory, DomRefs, SessionChunk } from './modules/chat.js';
 import { Memory, Conversation, MemoryResult, MemoryDomRefs } from './modules/memory.js';
 import { Settings } from './modules/settings.js';
@@ -28,9 +28,8 @@ interface ToolResultData {
     id: string;
     name: string;
     display: {
-        line1: string;
-        line2: string;
-        has_line2: boolean;
+        abstract: string;
+        details: Record<string, string> | null;
     };
     success: boolean;
     raw_response?: Record<string, unknown>;
@@ -619,8 +618,10 @@ function createTool({ id, name, args, raw_request }: ToolStartData): void {
 
     const el = document.createElement('div');
     el.id = `tool-${id}`;
-    el.className = 'tool';
-    el.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${name}</span> <span class="tool__args">${args}</span></div>`;
+    el.className = 'tool tool--running';
+    el.dataset.startTime = String(Date.now());
+    const icon = getToolIcon(name);
+    el.innerHTML = `<div class="tool__header"><span class="tool__icon-wrap">${icon}</span><span class="tool__name">${escapeHtml(name)}</span>${args ? `<span class="tool__args">${escapeHtml(args)}</span>` : ''}<span class="tool__meta"><span class="tool__spinner"></span></span></div>`;
 
     // 存储原始请求数据
     if (raw_request) {
@@ -665,37 +666,18 @@ function updateTool({ id, name, display, success, raw_response }: ToolResultData
         return;
     }
 
-    // 如果后端没有提供 display 数据（或者数据不完整），则在前端动态计算
-    // 这是为了解耦前后端，让前端全权负责渲染逻辑
+    // 后端已计算好 display，直接使用
+    // 如果后端没有提供 display，使用默认降级处理
+    console.log('[updateTool] name:', name, 'display:', JSON.stringify(display));
     let finalDisplay = display;
-    if (!finalDisplay || (!finalDisplay.line1 && !finalDisplay.line2)) {
-        // 尝试从 raw_response 获取结果文本
+    if (!finalDisplay || !finalDisplay.abstract) {
         let resultText = '';
         if (raw_response) {
             if (raw_response.result !== undefined) resultText = String(raw_response.result);
             else if (raw_response.error !== undefined) resultText = String(raw_response.error);
             else if (raw_response.content !== undefined) resultText = String(raw_response.content);
         }
-
-        // 尝试从 dataset.rawRequest 获取参数
-        let args = {};
-        try {
-            if (el.dataset.rawRequest) {
-                const req = JSON.parse(el.dataset.rawRequest);
-                // rawRequest 结构通常是 { function: { arguments: "{...}" } } 或直接是参数对象
-                // 这里我们要适配 OpenAI 标准结构
-                const rawArgs = req.function?.arguments;
-                if (typeof rawArgs === 'string') {
-                    args = JSON.parse(rawArgs);
-                } else if (typeof rawArgs === 'object') {
-                    args = rawArgs;
-                }
-            }
-        } catch (e) {
-            console.warn('Failed to parse args for display generation', e);
-        }
-
-        finalDisplay = getToolDisplay(name, resultText, args);
+        finalDisplay = getDefaultDisplay(resultText);
     }
 
     updateToolElement(el, name, finalDisplay, success);

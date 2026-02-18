@@ -67,6 +67,16 @@ class ToolConfig:
     # === 元数据（可选）===
     category: str = "general"              # 工具分类（用于 UI 分组等）
     
+    # === 显示配置 ===
+    display_format: Optional[Callable] = None
+    # 显示格式化函数（用于前端展示）
+    # - None: 使用默认显示
+    # - Callable: 返回显示信息字典
+    # 函数签名: (args: dict, result: Any, success: bool) -> dict
+    # 返回: { "abstract": str, "details": dict | None }
+    #   abstract: 卡片 header 摘要，人类可读（如文件名、搜索词）
+    #   details:  展开区域的结构化字段字典，None 表示不可展开
+    
 
 class ToolRegistry:
     """
@@ -217,7 +227,8 @@ def register_tool(
     max_instances: int = 0,
     max_call_pairs: int = 0,
     result_transform: Optional[Callable] = None,
-    category: str = "general"
+    category: str = "general",
+    display_format: Optional[Callable] = None
 ) -> ToolConfig:
     """
     便捷的工具注册函数
@@ -232,6 +243,7 @@ def register_tool(
         max_call_pairs: 配对最大数量（同时删 call + result）
         result_transform: 结果转换函数
         category: 工具分类
+        display_format: 显示格式化函数
     
     Returns:
         注册的 ToolConfig 对象
@@ -245,7 +257,8 @@ def register_tool(
         max_instances=max_instances,
         max_call_pairs=max_call_pairs,
         result_transform=result_transform,
-        category=category
+        category=category,
+        display_format=display_format
     )
     ToolRegistry.register(config)
     return config

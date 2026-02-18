@@ -6,7 +6,7 @@ tool_execution:
   mode: threaded
   timeout: 30.0
 api:
-  key: aef418d2241a4e008fcdd61370cef5cc.VDXiXUnwJLWHcliy
+  key: ca01c1d55ef643fa90e7d6addba27a12.lJBRo8JGjdwYyxCH
   url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
   model: glm-4.7
 memory:
@@ -30,8 +30,8 @@ system:
   home_dir: D:\桌面\Paw
   chunk_size: 96000
 theme:
-  id: taoxi
-  titlebar: '#FFFFFF'
-  loading: '#FFD6E0'
-  main: '#FFF0F5'
-  accent: '#ff6b35'
+  id: cuimo
+  titlebar: '#000000'
+  loading: '#000000'
+  main: '#000000'
+  accent: '#10b981'

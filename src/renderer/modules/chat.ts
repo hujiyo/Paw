@@ -1,6 +1,6 @@
 // 对话历史管理
 import { escapeHtml, scrollToBottom } from './utils.js';
-import { createMsgEl, getToolDisplay, updateToolElement, ToolArgs, createMessageActions } from './render.js';
+import { createMsgEl, getDefaultDisplay, updateToolElement, getToolIcon, ToolArgs, createMessageActions } from './render.js';
 import { Browser } from './browser.js';
 import { Planner } from './planner.js';
 
@@ -336,8 +336,10 @@ export const ChatHistory: ChatHistoryManager = {
 
                         const toolEl = document.createElement('div');
                         toolEl.id = `tool-${tc.id}`;
-                        toolEl.className = 'tool';
-                        toolEl.innerHTML = `<div class="tool__header"><div class="tool__spinner"></div><span class="tool__name">${func.name || ''}</span> <span class="tool__args">${typeof args === 'string' ? args : JSON.stringify(args)}</span></div>`;
+                        toolEl.className = 'tool tool--running';
+                        const toolIcon = getToolIcon(func.name || '');
+                        const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
+                        toolEl.innerHTML = `<div class="tool__header"><span class="tool__icon-wrap">${toolIcon}</span><span class="tool__name">${func.name || ''}</span>${argsStr ? `<span class="tool__args">${argsStr}</span>` : ''}<span class="tool__meta"><span class="tool__spinner"></span></span></div>`;
                         toolEl.dataset.rawRequest = JSON.stringify(tc);
 
                         // 追加到 body 末尾
@@ -358,7 +360,7 @@ export const ChatHistory: ChatHistoryManager = {
 
         toolResults.forEach(result => {
             const args = toolArgsMap.get(result.toolCallId || '') || {};
-            const display = getToolDisplay(result.toolName, result.content, args);
+            const display = getDefaultDisplay(result.content);
             const el = document.getElementById(`tool-${result.toolCallId}`);
             updateToolElement(el, result.toolName, display, true);
             

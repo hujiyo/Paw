@@ -4,9 +4,8 @@ import { escapeHtml } from './utils.js';
 // ============ 类型定义 ============
 
 export interface ToolDisplay {
-    line1: string;
-    line2: string;
-    has_line2: boolean;
+    abstract: string;
+    details: Record<string, string> | null;
 }
 
 export interface ToolArgs {
@@ -222,204 +221,111 @@ export function addSysMsg(container: HTMLElement, text: string, type: string = '
     container.appendChild(el);
 }
 
+// ============ 工具图标映射 ============
+
+const TOOL_ICONS: Record<string, string> = {
+    read_files:        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+    edit_files:        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+    create_file:       '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>',
+    file_glob:         '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+    run_shell_command: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+    search_web:        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    load_url_content:  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+    read_page:         '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+    create_plan:       '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+    edit_plans:        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+    create_todo_list:  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+    add_todos:         '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+    mark_todo_as_done: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
+    read_todos:        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+    memory_search:     '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+    memory_write:      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+};
+
+const DEFAULT_TOOL_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>';
+
+export function getToolIcon(name: string): string {
+    return TOOL_ICONS[name] ?? DEFAULT_TOOL_ICON;
+}
+
 // ============ 工具显示格式化 ============
 
-// 工具显示格式化 (核心逻辑，与后端对齐)
-export function getToolDisplay(toolName: string, resultText: string, args: ToolArgs): ToolDisplay {
-    const content = resultText || '';
+// 默认显示格式化（降级处理，后端已计算好 display）
+export function getDefaultDisplay(resultText: string): ToolDisplay {
+    const content = resultText?.trim() || '';
+    if (!content) return { abstract: '已完成', details: null };
 
-    // read_file
-    if (toolName === 'read_file') {
-        const path = args.file_path || '';
-        const filename = path.split('/').pop()?.split('\\').pop() || '';
-        const totalLines = content.split('\n').length;
-        const offset = args.offset;
-        const limit = args.limit;
-        let rangeStr = `(all ${totalLines}行)`;
-        if (offset && limit) {
-            const end = offset + limit - 1;
-            rangeStr = `(${offset}-${end}/${totalLines}行)`;
-        } else if (offset) {
-            rangeStr = `(${offset}-end/${totalLines}行)`;
-        }
-        return {
-            line1: `${filename} ${rangeStr}`,
-            line2: '',
-            has_line2: false
-        };
+    const lines = content.split('\n').filter(l => l.trim());
+    if (lines.length <= 1) {
+        return { abstract: content.slice(0, 80), details: null };
     }
-
-    // write_to_file / delete_file / edit / multi_edit
-    if (['write_to_file', 'delete_file', 'edit', 'multi_edit'].includes(toolName)) {
-        const path = args.file_path || '';
-        const filename = path.split('/').pop()?.split('\\').pop() || '';
-        return { line1: filename, line2: '', has_line2: false };
-    }
-
-    // list_dir
-    if (toolName === 'list_dir') {
-        const path = args.directory_path || '.';
-        const lines = content.split('\n').filter(l => l.startsWith('['));
-        const count = lines.length;
-        const preview = lines.slice(0, 3).map(l => {
-            const match = l.match(/\] (.+?)(?: \(|$)/);
-            return match ? match[1] : '';
-        }).filter(Boolean).join(', ');
-        return {
-            line1: path,
-            line2: preview + (count > 3 ? `... (+${count-3})` : ''),
-            has_line2: count > 0
-        };
-    }
-
-    // find_by_name
-    if (toolName === 'find_by_name') {
-        const pattern = args.pattern || '';
-        const items = content.split('\n').filter(Boolean);
-        const count = items.length;
-        if (count === 0) {
-            return { line1: `"${pattern}" 无匹配`, line2: '', has_line2: false };
-        }
-        const names = items.slice(0, 3).map(i => i.split('/').pop()?.split('\\').pop() || '');
-        const preview = names.join(', ');
-        return {
-            line1: `"${pattern}" ${count}匹配`,
-            line2: preview + (count > 3 ? `... (+${count-3})` : ''),
-            has_line2: true
-        };
-    }
-
-    // grep_search
-    if (toolName === 'grep_search') {
-        const query = args.query || '';
-        const resultTextTrimmed = content.trim();
-        if (!resultTextTrimmed || resultTextTrimmed.toLowerCase().includes('no matches')) {
-            return { line1: `"${query}" 无匹配`, line2: '', has_line2: false };
-        }
-        const lines = resultTextTrimmed.split('\n');
-        const summary = (lines[0]?.slice(0, 100) || '') + (lines[0]?.length > 100 ? '...' : '');
-        return {
-            line1: `"${query}"`,
-            line2: summary + (lines.length > 1 ? ` (+${lines.length-1})` : ''),
-            has_line2: true
-        };
-    }
-
-    // search_web
-    if (toolName === 'search_web') {
-        const query = args.query || '';
-        try {
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const data = JSON.parse(jsonMatch[0]) as { results?: Array<{ id: string; title: string }> };
-                const results = data.results || [];
-                return {
-                    line1: `${results.length}条 "${query}"`,
-                    line2: results.map(r => `[${r.id}] ${r.title}`).join('\n'),
-                    has_line2: results.length > 0
-                };
-            }
-        } catch (e) { /* ignore */ }
-        return { line1: `"${query}"`, line2: '', has_line2: false };
-    }
-
-    // load_url_content
-    if (toolName === 'load_url_content') {
-        try {
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const data = JSON.parse(jsonMatch[0]) as { 
-                    title?: string; 
-                    url_id?: string; 
-                    pages?: Array<{ page_id: string; summary: string }> 
-                };
-                const title = (data.title || '无标题').slice(0, 100);
-                const urlId = data.url_id || '';
-                const pages = data.pages || [];
-                return {
-                    line1: urlId ? `[${urlId}] ${title}` : title,
-                    line2: pages.map(p => `[${p.page_id}] ${p.summary}`).join('\n'),
-                    has_line2: pages.length > 0
-                };
-            }
-        } catch (e) { /* ignore */ }
-        return { line1: args.url?.slice(0, 100) || '', line2: '', has_line2: false };
-    }
-
-    // read_page
-    if (toolName === 'read_page') {
-        const pageId = args.page_id || '';
-        try {
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const data = JSON.parse(jsonMatch[0]) as { 
-                    page_num?: string | number; 
-                    total_pages?: string | number; 
-                    size?: number 
-                };
-                const pageNum = data.page_num || '?';
-                const total = data.total_pages || '?';
-                const size = data.size || 0;
-                return {
-                    line1: `[${pageId}] 第${pageNum}/${total}页 (${size}字节)`,
-                    line2: '',
-                    has_line2: false
-                };
-            }
-        } catch (e) { /* ignore */ }
-        return { line1: `[${pageId}]`, line2: '', has_line2: false };
-    }
-
-    // 默认：多行内容显示
-    if (content.includes('\n')) {
-        const lines = content.split('\n');
-        return {
-            line1: lines[0]?.slice(0, 100) || '',
-            line2: lines.slice(1, 10).join('\n'),
-            has_line2: true
-        };
-    }
-
-    return { line1: content.slice(0, 100), line2: '', has_line2: false };
+    return {
+        abstract: lines[0].slice(0, 80) + (lines[0].length > 80 ? '…' : ''),
+        details: { '输出': lines.join('\n') }
+    };
 }
 
 // ============ 工具UI更新 ============
 
-// 更新工具UI
+// 构建 details 字段的展开体 HTML
+function buildDetailsHtml(details: Record<string, string>): string {
+    const rows = Object.entries(details).map(([key, val]) => {
+        const isMultiline = val.includes('\n');
+        const valHtml = isMultiline
+            ? `<pre class="tool__detail-pre">${escapeHtml(val)}</pre>`
+            : `<span class="tool__detail-val">${escapeHtml(val)}</span>`;
+        return `<div class="tool__detail-row"><span class="tool__detail-key">${escapeHtml(key)}</span>${valHtml}</div>`;
+    }).join('');
+    return `<div class="tool__body">${rows}</div>`;
+}
+
+// 绑定卡片折叠展开事件
+function bindToolToggle(el: HTMLElement): void {
+    const header = el.querySelector('.tool__header');
+    if (!header) return;
+    header.addEventListener('click', () => {
+        el.classList.toggle('tool--expanded');
+    });
+}
+
+// 更新工具UI（完成态）
 export function updateToolElement(el: HTMLElement | null, name: string, display: ToolDisplay, success: boolean): void {
     if (!el) return;
 
-    el.className = `tool ${success ? 'tool--success' : 'tool--error'}`;
+    const startTime = el.dataset.startTime ? parseInt(el.dataset.startTime) : 0;
+    const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) + 's' : '';
 
-    const line1 = display.line1 || '';
-    const line2 = display.line2 || '';
-    const hasLine2 = display.has_line2 || false;
+    const hasDetails = !!display.details && Object.keys(display.details).length > 0;
+    el.className = `tool tool--done ${success ? 'tool--success' : 'tool--error'}`;
 
-    // Header: ● tool_name line1
-    let headerHtml = `<span class="tool__icon">●</span><span class="tool__name">${name}</span> <span class="tool__args">${line1}</span>`;
+    const icon = getToolIcon(name);
+    const statusIcon = success
+        ? '<svg class="tool__status-icon tool__status-icon--ok" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+        : '<svg class="tool__status-icon tool__status-icon--err" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
-    // Body: 每行前面加 ⎿
-    let bodyHtml = '';
-    if (hasLine2 && line2) {
-        const lines = line2.split('\n');
-        let firstLine = true;
-        lines.forEach(line => {
-            // 如果行以 │ 开头（连接线），保留原样
-            if (line.startsWith('│')) {
-                bodyHtml += `<div class="tool__body-line">${escapeHtml(line)}</div>`;
-            } else {
-                // 使用 Flex 布局结构：左侧是固定宽度的分支符号，右侧是内容
-                const branch = firstLine ? '⎿ ' : '';
-                bodyHtml += `<div class="tool__body-line">
-                    <span class="tool__branch">${branch}</span>
-                    <span class="tool__content">${escapeHtml(line)}</span>
-                </div>`;
-                firstLine = false;
-            }
-        });
-    }
+    const chevronHtml = hasDetails
+        ? '<svg class="tool__chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>'
+        : '';
 
-    el.innerHTML = `<div class="tool__header">${headerHtml}</div>${bodyHtml ? `<div class="tool__body">${bodyHtml}</div>` : ''}`;
+    const elapsedHtml = elapsed ? `<span class="tool__elapsed">${elapsed}</span>` : '';
+    const abstract = display.abstract || '';
+    const bodyHtml = hasDetails ? buildDetailsHtml(display.details!) : '';
+
+    el.innerHTML = `
+        <div class="tool__header">
+            <span class="tool__icon-wrap">${icon}</span>
+            <span class="tool__name">${escapeHtml(name)}</span>
+            ${abstract ? `<span class="tool__args">${escapeHtml(abstract)}</span>` : ''}
+            <span class="tool__meta">
+                ${elapsedHtml}
+                ${statusIcon}
+                ${chevronHtml}
+            </span>
+        </div>
+        ${bodyHtml}
+    `;
+
+    if (hasDetails) bindToolToggle(el);
 }
 
 // ============ 弹窗渲染 ============

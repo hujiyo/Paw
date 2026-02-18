@@ -18,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi import Request
 import uvicorn
+from tool_registry import ToolRegistry
+from display_formatters import format_default
 
 class WebUI:
     """
@@ -685,22 +687,32 @@ class WebUI:
             "raw_request": raw_request
         })
 
-    def show_tool_result(self, tool_call_id: str, tool_name: str, display: dict, success: bool = True, raw_response: dict = None):
+    def show_tool_result(self, tool_call_id: str, tool_name: str, args: dict, result: dict, success: bool = True):
         """显示工具调用结果
         
         Args:
             tool_call_id: 工具调用 ID
             tool_name: 工具名称
-            display: 显示信息
+            args: 工具参数（已解析的字典）
+            result: 工具执行结果
             success: 是否成功
-            raw_response: 原始响应数据（包含完整的工具执行结果）
         """
+        display = None
+        
+        config = ToolRegistry.get(tool_name)
+        if config and config.display_format:
+            try:
+                result_data = result.get("result") if success else result.get("error")
+                display = config.display_format(args, result_data, success)
+            except Exception:
+                display = format_default(args, result.get("result") if success else result.get("error"), success)
+        
         self.queue_message("tool_result", {
             "id": tool_call_id,
             "name": tool_name,
             "display": display,
             "success": success,
-            "raw_response": raw_response
+            "raw_response": result
         })
 
     async def get_user_input(self, prompt: str = None) -> str:
