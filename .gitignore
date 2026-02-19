@@ -53,3 +53,5 @@ src/main/**/*.js
 src/renderer/**/*.js
 *.js.map
 *.js
+
+release/

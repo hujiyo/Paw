@@ -1,6 +1,6 @@
 {
   "name": "paw-desktop",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Paw - 智能终端 AI Agent 桌面应用",
   "main": "dist/main/main.js",
   "author": "Paw Team",
@@ -30,13 +30,12 @@
     "appId": "com.paw.desktop",
     "productName": "Paw",
     "directories": {
-      "output": "dist-build",
+      "output": "release",
       "buildResources": "resources"
     },
     "files": [
       "dist/**/*",
-      "resources/**/*",
-      "static/**/*"
+      "resources/**/*"
     ],
     "extraResources": [
       {
@@ -52,12 +51,16 @@
         "to": "renderer"
       },
       {
-        "from": "static",
+        "from": "resources/static",
         "to": "static"
       },
       {
         "from": "resources/templates",
         "to": "templates"
+      },
+      {
+        "from": "resources/icons",
+        "to": "icons"
       }
     ],
     "win": {
