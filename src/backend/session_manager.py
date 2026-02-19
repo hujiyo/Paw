@@ -33,6 +33,7 @@ class SessionSnapshot:
     is_manual_title: bool = False                # 是否为手动设置的标题
     shell_open: bool = False                     # 终端是否打开
     shell_pid: Optional[int] = None              # 终端PID（如果打开）
+    mode: str = "default"                        # 当前对话模式
 
 
 class SessionManager:
@@ -89,7 +90,8 @@ class SessionManager:
             "message_count": snapshot.message_count,
             "token_count": snapshot.token_count,
             "is_manual_title": snapshot.is_manual_title,
-            "shell_open": snapshot.shell_open
+            "shell_open": snapshot.shell_open,
+            "mode": snapshot.mode
         }
         self._save_index()
 
@@ -123,7 +125,8 @@ class SessionManager:
                      shell_open: bool = False,
                      shell_pid: Optional[int] = None,
                      session_id: Optional[str] = None,
-                     title: Optional[str] = None) -> SessionSnapshot:
+                     title: Optional[str] = None,
+                     mode: str = "default") -> SessionSnapshot:
         """保存当前会话
 
         Args:
@@ -180,7 +183,8 @@ class SessionManager:
             message_count=self._count_messages(chunks_data),
             is_manual_title=is_manual_title,
             shell_open=shell_open,
-            shell_pid=shell_pid
+            shell_pid=shell_pid,
+            mode=mode
         )
 
         # 保存到文件
@@ -198,7 +202,8 @@ class SessionManager:
                     "message_count": snapshot.message_count,
                     "is_manual_title": snapshot.is_manual_title,
                     "shell_open": snapshot.shell_open,
-                    "shell_pid": snapshot.shell_pid
+                    "shell_pid": snapshot.shell_pid,
+                    "mode": snapshot.mode
                 }, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[SessionManager] 保存会话失败: {e}")
@@ -238,7 +243,8 @@ class SessionManager:
                 message_count=data.get("message_count", 0),
                 is_manual_title=data.get("is_manual_title", False),
                 shell_open=data.get("shell_open", False),
-                shell_pid=data.get("shell_pid")
+                shell_pid=data.get("shell_pid"),
+                mode=data.get("mode", "default")
             )
         except Exception as e:
             print(f"[SessionManager] 加载会话失败: {e}")

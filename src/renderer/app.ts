@@ -53,6 +53,7 @@ interface SessionListData {
 
 interface SessionLoadData {
     chunks: SessionChunk[];
+    mode?: string;
 }
 
 interface SessionLoadedData {
@@ -415,7 +416,11 @@ function handleEvent({ event, data }: WebSocketEvent): void {
         'show_memory': () => Memory.show((data as { conversations: Conversation[] }).conversations),
         'memory_result': () => Memory.handleResult(data as MemoryResult),
         'session_list': () => handleSessionList(data as SessionListData),
-        'session_load': () => ChatHistory.loadSessionChunks((data as SessionLoadData).chunks),
+        'session_load': () => {
+            const loadData = data as SessionLoadData;
+            ChatHistory.loadSessionChunks(loadData.chunks);
+            if (loadData.mode) updateModeUI(loadData.mode);
+        },
         'show_error': () => showErrorDialog((data as { text: string }).text),
         'session_loaded': () => {
             const loadedData = data as SessionLoadedData;
@@ -436,7 +441,11 @@ function handleEvent({ event, data }: WebSocketEvent): void {
         },
         'models_fetched': () => Settings.handleModelResponse(data as ModelsFetchedData),
         'terminal_output': () => updateTerminalOutput(data as { content: string; is_open: boolean }),
-        'todos_updated': () => handleTodosUpdated(data as { todos: Array<{id: string; title: string; details?: string; status: string}> })
+        'todos_updated': () => handleTodosUpdated(data as { todos: Array<{id: string; title: string; details?: string; status: string}> }),
+        'mode_changed': () => {
+            const modeData = data as { mode: string; success?: boolean };
+            updateModeUI(modeData.mode);
+        }
     };
     handlers[event]?.();
 }
@@ -1026,5 +1035,76 @@ dom.messages.addEventListener('contextmenu', (e: MouseEvent) => {
     }
 });
 
+// ============ 模式选择器 ============
+interface ModeInfo { name: string; label: string; desc: string; }
+
+const modeLabels: Record<string, string> = {};
+
+const modeTrigger = document.getElementById('mode-trigger') as HTMLButtonElement | null;
+const modeDropdown = document.getElementById('mode-dropdown') as HTMLElement | null;
+const modeLabelEl = document.getElementById('mode-label') as HTMLElement | null;
+
+function updateModeUI(mode: string): void {
+    if (modeLabelEl) {
+        modeLabelEl.textContent = modeLabels[mode] || mode;
+    }
+    if (modeDropdown) {
+        modeDropdown.querySelectorAll<HTMLElement>('.mode-selector__option').forEach(opt => {
+            opt.classList.toggle('mode-selector__option--active', opt.dataset.mode === mode);
+        });
+    }
+    if (modeTrigger) {
+        modeTrigger.classList.toggle('mode-selector__trigger--active', mode !== 'default');
+    }
+}
+
+function bindModeDropdownEvents(): void {
+    if (!modeTrigger || !modeDropdown) return;
+
+    modeTrigger.addEventListener('click', (e: MouseEvent) => {
+        e.stopPropagation();
+        modeDropdown.classList.toggle('mode-selector__dropdown--open');
+    });
+
+    modeDropdown.querySelectorAll<HTMLElement>('.mode-selector__option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            const mode = opt.dataset.mode || 'default';
+            send(JSON.stringify({ type: 'set_mode', mode }));
+            updateModeUI(mode);
+            modeDropdown.classList.remove('mode-selector__dropdown--open');
+        });
+    });
+}
+
+async function initModeSelector(): Promise<void> {
+    if (!modeDropdown) return;
+    try {
+        const res = await fetch('/api/modes');
+        const data = await res.json() as { modes: ModeInfo[] };
+        modeDropdown.innerHTML = '';
+        data.modes.forEach((m, i) => {
+            modeLabels[m.name] = m.label;
+            const el = document.createElement('div');
+            el.className = 'mode-selector__option' + (i === 0 ? ' mode-selector__option--active' : '');
+            el.dataset.mode = m.name;
+            el.innerHTML = `<span class="mode-selector__option-name">${m.label}</span><span class="mode-selector__option-desc">${m.desc}</span>`;
+            modeDropdown.appendChild(el);
+        });
+        bindModeDropdownEvents();
+    } catch {
+        modeLabels['default'] = 'Default';
+        bindModeDropdownEvents();
+    }
+}
+
+document.addEventListener('click', (e: MouseEvent) => {
+    if (!modeDropdown || !modeDropdown.classList.contains('mode-selector__dropdown--open')) return;
+    const selector = document.getElementById('mode-selector');
+    if (selector && !selector.contains(e.target as Node)) {
+        modeDropdown.classList.remove('mode-selector__dropdown--open');
+    }
+});
+
 // 启动初始化
 autoResize();
+initModeSelector();

@@ -20,6 +20,7 @@ from fastapi import Request
 import uvicorn
 from tool_registry import ToolRegistry
 from display_formatters import format_default
+from prompts import SystemPrompts
 
 class WebUI:
     """
@@ -86,6 +87,11 @@ class WebUI:
                     return HTMLResponse(content=f.read())
             except FileNotFoundError:
                 return HTMLResponse(content="Error: index.html not found.", status_code=500)
+
+        @self.app.get("/api/modes")
+        async def get_modes():
+            """获取所有可用对话模式列表"""
+            return JSONResponse(content={"modes": SystemPrompts.list_modes_with_meta()})
 
         @self.app.get("/api/config")
         async def get_config():
@@ -891,10 +897,11 @@ class WebUI:
             "current_id": current_id
         })
 
-    def send_session_load(self, chunks: list):
+    def send_session_load(self, chunks: list, mode: str = "default"):
         """发送加载会话的完整内容"""
         self.queue_message("session_load", {
-            "chunks": chunks
+            "chunks": chunks,
+            "mode": mode
         })
 
     def send_session_loaded(self, session_id: str, title: str):

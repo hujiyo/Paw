@@ -160,6 +160,9 @@ class Paw:
         if hasattr(ui, 'set_stop_callback'):
             ui.set_stop_callback(self._handle_stop_request)
 
+        # 当前对话模式（default/coding/chatting/learning，可在对话中切换）
+        self.current_mode: str = "default"
+
         # 系统提示词（第一人称）
         self.system_prompt = self._create_system_prompt()
         _mark("构建 system_prompt")
@@ -247,8 +250,9 @@ class Paw:
         # 替换终端状态占位符
         main_prompt = main_prompt.replace("{terminal_status}", terminal_info)
 
-        # 组合基础系统提示词
-        prompt = main_prompt
+        # 附加模式提示词（附加在主提示词之后，default 模式为空字符串）
+        mode_prompt = SystemPrompts.get_mode_prompt(self.current_mode)
+        prompt = main_prompt + (mode_prompt if mode_prompt else "")
 
         # === 注入 Skill 列表（Level 1: name + description）===
         skills_prompt = self._get_skills_prompt()
@@ -835,6 +839,18 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
         except Exception as e:
             self.ui.print_dim(f"[Memory] 保存对话失败: {e}")
 
+    async def _set_mode(self, new_mode: str) -> bool:
+        """切换对话模式，返回是否成功"""
+        if new_mode not in SystemPrompts.list_modes():
+            return False
+        self.current_mode = new_mode
+        self.system_prompt = self._create_system_prompt()
+        self.chunk_manager.update_latest_system_prompt(self.system_prompt)
+        self._save_session()
+        if hasattr(self.ui, 'send_message'):
+            await self.ui.send_message('mode_changed', {'mode': new_mode, 'success': True})
+        return True
+
     def _save_session(self):
         """保存当前会话快照"""
         try:
@@ -855,7 +871,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 model=self.model or "unknown",
                 shell_open=terminal_status.get('is_open', False),
                 shell_pid=terminal_status.get('pid'),
-                session_id=self.current_session_id
+                session_id=self.current_session_id,
+                mode=self.current_mode
             )
 
             # 更新当前会话ID（即使 session_id 已传入也更新，确保一致性）
@@ -930,6 +947,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 更新当前会话ID
             self.current_session_id = snapshot.session_id
 
+            # 恢复对话模式
+            self.current_mode = snapshot.mode
+
             # 如果 Shell 是打开的，尝试恢复
             # 注意：Shell 状态恢复需要终端支持会话恢复，这里只记录状态
             if snapshot.shell_open:
@@ -938,7 +958,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 同步到 Web UI
             if sync_ui and hasattr(self.ui, 'send_session_load'):
                 # 发送完整 chunks 给前端渲染（使用更新后的 chunks）
-                self.ui.send_session_load(self.chunk_manager.to_json())
+                self.ui.send_session_load(self.chunk_manager.to_json(), mode=self.current_mode)
                 self.ui.send_session_loaded(snapshot.session_id, snapshot.title)
 
             # 更新状态栏
@@ -1642,6 +1662,13 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 # 尝试解析为 JSON 消息（用于处理前端配置化命令）
                 try:
                     msg_data = json.loads(user_input)
+                    if isinstance(msg_data, dict) and msg_data.get('type') == 'set_mode':
+                        new_mode = msg_data.get('mode', 'default').strip().lower()
+                        if not await self._set_mode(new_mode):
+                            if hasattr(self.ui, 'send_message'):
+                                await self.ui.send_message('mode_changed', {'mode': self.current_mode, 'success': False})
+                        continue
+
                     if isinstance(msg_data, dict) and msg_data.get('type') == 'create_new_chat':
                         # 处理新建对话配置
                         workspace_dir = msg_data.get('workspace_dir', str(Path.home()))
@@ -1693,7 +1720,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                             model=self.model,
                             shell_open=False,
                             shell_pid=None,
-                            session_id=None
+                            session_id=None,
+                            mode=self.current_mode
                         )
                         self.current_session_id = new_session.session_id
                         
@@ -1941,7 +1969,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                                 model=self.model,
                                 shell_open=False,
                                 shell_pid=None,
-                                session_id=None
+                                session_id=None,
+                                mode=self.current_mode
                             )
                             self.current_session_id = new_session.session_id
 
@@ -1972,6 +2001,21 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                 if user_input == '/pass':
                     # 用户跳过本轮输入，不发送任何内容给 LLM
                     self.ui.print_dim("[跳过本轮输入]")
+                    continue
+
+                if user_input.startswith('/mode'):
+                    parts = user_input.split(None, 1)
+                    if len(parts) == 1:
+                        # 查询当前模式
+                        available = ', '.join(SystemPrompts.list_modes())
+                        self.ui.print_dim(f"[Mode] 当前模式: {self.current_mode} | 可用: {available}")
+                    else:
+                        new_mode = parts[1].strip().lower()
+                        if await self._set_mode(new_mode):
+                            self.ui.print_dim(f"[Mode] 切换到: {new_mode}")
+                        else:
+                            available = ', '.join(SystemPrompts.list_modes())
+                            self.ui.print_dim(f"[Mode] 未知模式 '{new_mode}'，可用: {available}")
                     continue
 
                 if user_input == '/stop':
@@ -2060,7 +2104,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             shell_open=False,
             shell_pid=None,
             session_id=None,
-            title=title # 传入手动设置的标题
+            title=title, # 传入手动设置的标题
+            mode=self.current_mode
         )
         self.current_session_id = new_session.session_id
         

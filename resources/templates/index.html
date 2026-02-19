@@ -116,7 +116,17 @@
                         <div class="input-wrap">
                             <form class="input-form" id="input-form">
                                 <textarea id="input" placeholder="Ask Paw anything..." rows="1"></textarea>
-                                <button type="submit" id="send-btn">Send</button>
+                                <div class="input-form__toolbar">
+                                    <div class="mode-selector" id="mode-selector">
+                                        <button class="mode-selector__trigger" id="mode-trigger" title="切换对话模式">
+                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+                                            <span class="mode-selector__label" id="mode-label">Default</span>
+                                            <svg class="mode-selector__caret" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                                        </button>
+                                        <div class="mode-selector__dropdown" id="mode-dropdown"></div>
+                                    </div>
+                                    <button type="submit" id="send-btn">Send</button>
+                                </div>
                             </form>
                         </div>
                     </div>

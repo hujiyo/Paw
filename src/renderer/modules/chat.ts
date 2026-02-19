@@ -41,7 +41,7 @@ export interface ChunkMetadata {
 }
 
 export interface SessionChunk {
-    type: 'user' | 'assistant' | 'tool_result';
+    type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system' | 'memory' | 'shell' | 'thought';
     content?: string;
     metadata?: ChunkMetadata;
 }
@@ -282,6 +282,11 @@ export const ChatHistory: ChatHistoryManager = {
         chunks.forEach(chunk => {
             const type = chunk.type;
 
+            // 跳过内部 chunk 类型
+            if (type === 'system' || type === 'memory' || type === 'shell' || type === 'thought') {
+                return;
+            }
+
             if (type === 'user') {
                 // 重置 assistant 状态
                 currentAssistantMsgId = null;
@@ -316,10 +321,29 @@ export const ChatHistory: ChatHistoryManager = {
                     this.dom!.messages.appendChild(currentAssistantMsgEl);
                 }
 
+                // tool_call 卡片由独立的 tool_call chunk 负责渲染，此处不重复处理
+                // 仅将 metadata.tool_calls 的 id→args 映射预存，供 tool_result 查找
                 if (chunk.metadata?.tool_calls) {
-                    const body = currentAssistantMsgEl?.querySelector('.msg__body');
-
                     chunk.metadata.tool_calls.forEach(tc => {
+                        const func = tc.function || {};
+                        const args = func.arguments || '{}';
+                        let parsedArgs: ToolArgs;
+                        if (typeof args === 'string') {
+                            try { parsedArgs = JSON.parse(args) as ToolArgs; }
+                            catch { parsedArgs = {}; }
+                        } else {
+                            parsedArgs = args as ToolArgs;
+                        }
+                        toolArgsMap.set(tc.id, parsedArgs);
+                    });
+                }
+
+            } else if (type === 'tool_call') {
+                const body = currentAssistantMsgEl?.querySelector('.msg__body');
+                
+                if (chunk.content) {
+                    try {
+                        const tc = JSON.parse(chunk.content) as ToolCall;
                         const func = tc.function || {};
                         const args = func.arguments || '{}';
                         let parsedArgs: ToolArgs;
@@ -342,11 +366,12 @@ export const ChatHistory: ChatHistoryManager = {
                         toolEl.innerHTML = `<div class="tool__header"><span class="tool__icon-wrap">${toolIcon}</span><span class="tool__name">${func.name || ''}</span>${argsStr ? `<span class="tool__args">${argsStr}</span>` : ''}<span class="tool__meta"><span class="tool__spinner"></span></span></div>`;
                         toolEl.dataset.rawRequest = JSON.stringify(tc);
 
-                        // 追加到 body 末尾
                         if (body) {
                             body.appendChild(toolEl);
                         }
-                    });
+                    } catch {
+                        // 解析失败，跳过
+                    }
                 }
 
             } else if (type === 'tool_result') {
