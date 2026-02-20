@@ -904,6 +904,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             return False
 
         try:
+            if self.tools.async_shell.is_shell_open():
+                self.tools.async_shell.close()
+            
             # 恢复 ChunkManager
             from chunk_system import ChunkManager
             self.chunk_manager = ChunkManager.from_json(
@@ -1670,7 +1673,9 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         continue
 
                     if isinstance(msg_data, dict) and msg_data.get('type') == 'create_new_chat':
-                        # 处理新建对话配置
+                        if self.tools.async_shell.is_shell_open():
+                            self.tools.async_shell.close()
+                        
                         workspace_dir = msg_data.get('workspace_dir', str(Path.home()))
                         title = msg_data.get('title', '').strip()
                         model = msg_data.get('model', '').strip()

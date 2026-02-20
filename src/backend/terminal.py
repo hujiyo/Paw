@@ -5,39 +5,37 @@ import time
 import threading
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 from queue import Queue, Empty
 import sys
 
 class ThreadedTerminal:
     """基于线程的终端管理器（替代 pexpect 方案）"""
     
-    # 调试模式开关（设为 False 隐藏 DEBUG 输出）
     DEBUG = False
     
-    def __init__(self, sandbox_dir: Path, shell_config: dict = None):
-        self.sandbox_dir = sandbox_dir
+    def __init__(self, get_sandbox_dir: Callable[[], Path], shell_config: dict = None):
+        self._get_sandbox_dir = get_sandbox_dir
         self.shell_config = shell_config or {}
 
-        # 线程通信队列
-        self.command_queue = Queue()  # 主线程 -> 工作线程
-        self.result_queue = Queue()   # 工作线程 -> 主线程
+        self.command_queue = Queue()
+        self.result_queue = Queue()
 
-        # 状态管理
         self.is_running = False
         self.worker_thread = None
-        self._just_opened = False  # 标记终端是否刚被打开
+        self._just_opened = False
 
-        # 输出缓冲（按字节长度限制，以整行为单位截断）
         self.output_buffer = []
-        # 从配置读取缓冲区大小（KB），默认24KB，范围4-64KB
         buffer_size_kb = self.shell_config.get('buffer_size', 24)
-        buffer_size_kb = max(4, min(64, buffer_size_kb))  # 限制范围
-        self.max_buffer_size = buffer_size_kb * 1024  # 转换为字节
+        buffer_size_kb = max(4, min(64, buffer_size_kb))
+        self.max_buffer_size = buffer_size_kb * 1024
         self.lock = threading.Lock()
 
-        # 控制信号
         self._stop_flag = False
+    
+    @property
+    def sandbox_dir(self) -> Path:
+        return self._get_sandbox_dir()
     
     def _debug(self, msg: str):
         """调试输出（仅在 DEBUG=True 时显示）"""
@@ -424,9 +422,10 @@ class ThreadedTerminal:
         """关闭终端"""
         self._stop_flag = True
         
-        # 等待工作线程结束
         if self.worker_thread and self.worker_thread.is_alive():
             self.worker_thread.join(timeout=2)
         
-        # 清理进程（在 _cleanup_processes 中完成）
+        self._cleanup_processes()
+        self.is_running = False
+        self.worker_thread = None
         self._debug(" 终端已关闭")

@@ -24,25 +24,26 @@ class BaseTools:
     """基础工具类 - 仅包含 3-5 个核心原子操作"""
     
     def __init__(self, sandbox_dir: str, config: Optional[dict] = None):
-        """初始化工具集
-        
-        Args:
-            sandbox_dir: 沙盒目录路径（必需）
-            config: 终端配置
-        """
         if not sandbox_dir:
             raise ValueError("sandbox_dir 是必需参数，请指定工作目录")
         
-        self.sandbox_dir = Path(sandbox_dir).resolve()
+        self._sandbox_dir = Path(sandbox_dir).resolve()
+        self._sandbox_dir.mkdir(parents=True, exist_ok=True)
         
-        # 确保沙盒目录存在
-        self.sandbox_dir.mkdir(parents=True, exist_ok=True)
+        self.script_timeout = 30
         
-        self.script_timeout = 30  # 默认脚本执行超时时间（秒）
-        
-        # 创建共享异步终端管理器，传递终端配置
         terminal_config = config.get('terminal', {}) if config else {}
-        self.async_shell = ThreadedTerminal(self.sandbox_dir, terminal_config)
+        self.async_shell = ThreadedTerminal(lambda: self._sandbox_dir, terminal_config)
+    
+    @property
+    def sandbox_dir(self) -> Path:
+        return self._sandbox_dir
+    
+    @sandbox_dir.setter
+    def sandbox_dir(self, value: Path):
+        new_dir = Path(value).resolve() if not isinstance(value, Path) else value.resolve()
+        new_dir.mkdir(parents=True, exist_ok=True)
+        self._sandbox_dir = new_dir
     
     def _get_desktop_path(self) -> Path:
         """获取真实的桌面路径（使用环境变量）"""
