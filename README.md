@@ -17,31 +17,47 @@ Paw 是一个基于 Electron 的使用TypeScript+Python打造的桌面级桌面 
 - **上下文管理**：智能管理 64K+ tokens 大窗口上下文
 - **记忆系统**（可选）：基于 RAG 的对话记忆检索
 
-## 快速开始
+## 快速开始（开发环境）
 
 ```bash
-# 1. 创建 Python 虚拟环境
-python -m venv paw_env
-
-# 激活虚拟环境
-# Windows:
-paw_env\Scripts\activate
-# macOS/Linux:
-# source paw_env/bin/activate
-
-# 2. 安装 Python 依赖
-pip install -r requirements.txt
-
-# 3. 安装 Node 依赖并启动
+# 1. 安装 Node 依赖
 npm install
+
+# 2. 构建 Python 环境（paw_env）
+#    Paw 使用官方 Python embeddable 包，不依赖系统已安装的 Python
+#    按以下步骤手动构建：
+
+#    a. 下载 Python 3.13.x embeddable 包（Windows）：
+#       https://www.python.org/ftp/python/3.13.5/python-3.13.5-embed-amd64.zip
+#       解压到项目根目录的 paw_env/ 文件夹
+
+#    b. 删除 paw_env/ 下的 python313._pth 文件（必须删除，否则模块路径解析异常）
+
+#    c. 安装 pip：
+#       下载 https://bootstrap.pypa.io/get-pip.py
+#       在 paw_env/ 目录下执行：
+cd paw_env
+python.exe ..\get-pip.py --no-warn-script-location
+cd ..
+
+#    d. 安装项目依赖：
+paw_env\python.exe -m pip install -r src\backend\requirements.txt --no-warn-script-location
+
+# 3. 启动开发模式
 npm start
 ```
 
+> **为什么用 embeddable 包而不是普通 venv？**
+> 普通 venv 的 `python.exe` 依赖创建时的 Python 安装路径（硬编码在 `pyvenv.cfg`），
+> 打包后在其他电脑上路径不存在会直接崩溃。embeddable 包完全自包含，解压即用。
+
 ## 打包安装
 
-打包后的应用内置 Python 虚拟环境，用户无需安装 Python 即可使用。
+打包后的应用内置完整 Python 环境，用户无需安装 Python 即可使用。
 
 ```bash
+# 确保已按上述步骤构建好 paw_env，然后：
+
 # Windows
 npm run build:win
 
@@ -52,7 +68,7 @@ npm run build:mac
 npm run build:linux
 ```
 
-安装包输出到 `dist-build/` 目录，约 150-200MB。
+安装包输出到 `release/` 目录，约 150-200MB。
 
 ## 内置指令
 
@@ -101,28 +117,25 @@ Paw/
 │
 ├── resources/             # 资源文件
 │   ├── icons/            # 应用图标
-│   └── templates/        # HTML 模板
-│
-├── static/               # 静态资源
-│   ├── css/             # 样式文件
-│   └── fonts/           # 字体文件
+│   ├── templates/        # HTML 模板
+│   └── static/           # 静态资源（CSS、字体）
 │
 ├── dist/                # TypeScript 编译输出
-├── dist-build/          # 应用打包输出
-├── paw_env/             # Python 虚拟环境
+├── release/             # 应用打包输出
+├── paw_env/             # Python embeddable 环境（不提交 git）
 ├── package.json         # Node.js 配置
 ├── tsconfig.json        # TypeScript 配置
-└── requirements.txt     # Python 依赖
+└── src/backend/requirements.txt  # Python 依赖
 ```
 
 ## 依赖
 
-**Python 依赖** (requirements.txt):
+**Python 依赖** (`src/backend/requirements.txt`):
 - pyyaml, colorama, requests
 - fastapi, uvicorn, websockets, aiohttp
-- duckduckgo-search (DuckDuckGo 搜索)
-- beautifulsoup4, html2text
-- llama-cpp-python, chromadb (记忆系统)
+- ddgs（DuckDuckGo 搜索）、beautifulsoup4、html2text
+- llama-cpp-python（本地 embedding 记忆系统）
+- numpy, jinja2, filelock, fsspec, packaging, tqdm, regex, cachetools
 
 **Node.js 依赖** (package.json):
 - electron, electron-builder

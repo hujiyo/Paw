@@ -44,7 +44,8 @@
       },
       {
         "from": "paw_env",
-        "to": "paw_env"
+        "to": "paw_env",
+        "filter": ["**/*"]
       },
       {
         "from": "dist/renderer",

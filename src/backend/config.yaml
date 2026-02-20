@@ -27,7 +27,6 @@ web:
   page_size: 4096
   use_jina_reader: true
 system:
-  home_dir: D:\桌面\Paw
   chunk_size: 96000
 theme:
   id: yaoye

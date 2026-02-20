@@ -49,25 +49,27 @@ function getBackendDir(): string {
 
 function getPythonPath(): string {
     const isWin = process.platform === 'win32';
-    const pythonExe = isWin ? 'Scripts/python.exe' : 'bin/python3';
-    
-    // 开发环境: electron/../paw_env
-    // 生产环境: resources/paw_env
+
     let venvDir: string;
     if (app.isPackaged) {
         venvDir = path.join(process.resourcesPath, 'paw_env');
     } else {
         venvDir = path.join(__dirname, '..', '..', 'paw_env');
     }
-    
-    const pythonPath = path.join(venvDir, pythonExe);
-    if (fs.existsSync(pythonPath)) {
-        return pythonPath;
+
+    // embeddable 包：python.exe 在根目录
+    // 传统 venv：python.exe 在 Scripts/（兼容旧环境）
+    const candidates = isWin
+        ? [path.join(venvDir, 'python.exe'), path.join(venvDir, 'Scripts', 'python.exe')]
+        : [path.join(venvDir, 'bin', 'python3'), path.join(venvDir, 'python3')];
+
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
     }
-    
-    // 兜底：系统 Python
-    console.warn('[Paw] 警告: 使用系统 Python');
-    return isWin ? 'python.exe' : 'python3';
+
+    // 返回首选路径，让后续存在性检查捕获错误并上报
+    console.error(`[Paw] paw_env 未找到，已尝试: ${candidates.join(', ')}`);
+    return candidates[0];
 }
 
 function getConfigPath(): string {
@@ -130,11 +132,16 @@ async function startPythonBackend(): Promise<void> {
     const pythonPath = getPythonPath();
     const pawEntry = path.join(backendDir, 'paw.py');
 
+    const pythonExists = fs.existsSync(pythonPath);
+    const pawExists = fs.existsSync(pawEntry);
+
     console.log('=== Paw 启动信息 ===');
     console.log('isPackaged:', app.isPackaged);
     console.log('backendDir:', backendDir);
     console.log('pythonPath:', pythonPath);
     console.log('pawEntry:', pawEntry);
+    console.log('Python存在:', pythonExists);
+    console.log('paw.py存在:', pawExists);
     console.log('====================');
 
     // 写入日志（生产环境）
@@ -145,13 +152,19 @@ async function startPythonBackend(): Promise<void> {
 backendDir: ${backendDir}
 pythonPath: ${pythonPath}
 pawEntry: ${pawEntry}
-Python存在: ${fs.existsSync(pythonPath)}
-paw.py存在: ${fs.existsSync(pawEntry)}
+Python存在: ${pythonExists}
+paw.py存在: ${pawExists}
 ====================
 `);
     }
 
-    if (!fs.existsSync(pawEntry)) {
+    if (!pythonExists) {
+        const err = `Python 环境未找到: ${pythonPath}\n\n请确认安装包中包含完整的 paw_env 目录`;
+        sendError(err);
+        throw new Error(err);
+    }
+
+    if (!pawExists) {
         const err = `未找到 paw.py: ${pawEntry}`;
         sendError(err);
         throw new Error(err);
@@ -176,7 +189,10 @@ paw.py存在: ${fs.existsSync(pawEntry)}
         PAW_STATIC_DIR: staticDir
     };
 
-    pythonProcess = spawn(pythonPath, [pawEntry], {
+    // 用 -c 注入 sys.path，兼容 embeddable Python（不读 PYTHONPATH）
+    // 同时设置 __file__ 和 __spec__，让 exec 里的代码行为与直接运行脚本一致
+    const bootstrap = `import sys; sys.path.insert(0, r'${backendDir}'); __file__ = r'${pawEntry}'; __spec__ = None; exec(open(r'${pawEntry}', encoding='utf-8').read())`;
+    pythonProcess = spawn(pythonPath, ['-c', bootstrap], {
         cwd: backendDir,
         env: env,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -220,6 +236,10 @@ paw.py存在: ${fs.existsSync(pawEntry)}
     pythonProcess.on('exit', (code: number | null) => {
         console.log('[Paw] Python 退出, code:', code);
         pythonProcess = null;
+        if (!isServerReady && code !== 0) {
+            const err = `Python 后端异常退出（退出码: ${code}），请检查日志文件获取详细信息`;
+            sendError(err);
+        }
         isServerReady = false;
     });
 
@@ -239,20 +259,29 @@ function onServerReady(): void {
     }, 300);
 }
 
-function waitForServer(): Promise<void> {
-    return new Promise((resolve) => {
+function waitForServer(timeoutMs: number = 60000): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const deadline = Date.now() + timeoutMs;
+
         const check = (): void => {
             if (isServerReady) { resolve(); return; }
-            
+
+            if (Date.now() > deadline) {
+                const err = `后端启动超时（${timeoutMs / 1000}秒内未就绪），请检查 Python 环境是否完整`;
+                sendError(err);
+                reject(new Error(err));
+                return;
+            }
+
             const socket = new net.Socket();
             socket.setTimeout(1000);
-            
+
             socket.connect(8081, '127.0.0.1', () => {
                 socket.destroy();
                 onServerReady();
                 resolve();
             });
-            
+
             socket.on('error', () => setTimeout(check, 500));
             socket.on('timeout', () => { socket.destroy(); setTimeout(check, 500); });
         };
