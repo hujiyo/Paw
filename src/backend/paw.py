@@ -1658,7 +1658,7 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                             # 使用默认系统提示词
                             self.system_prompt = self._create_system_prompt()
                         
-                        # 保存新会话
+                        # 保存新会话（如果用户提供了标题，会被正确标记为手动标题）
                         new_session = self.session_manager.save_session(
                             chunk_manager=self.chunk_manager,
                             workspace_dir=workspace_dir,
@@ -1666,27 +1666,10 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                             shell_open=False,
                             shell_pid=None,
                             session_id=None,
+                            title=title if title else None,
                             mode=self.current_mode
                         )
                         self.current_session_id = new_session.session_id
-                        
-                        # 如果用户指定了标题，更新会话标题
-                        if title:
-                            # 直接修改会话文件中的标题
-                            session_file = self.session_manager.storage_path / f"{new_session.session_id}.json"
-                            if session_file.exists():
-                                try:
-                                    with open(session_file, 'r', encoding='utf-8') as f:
-                                        session_data = json.load(f)
-                                    session_data['title'] = title
-                                    with open(session_file, 'w', encoding='utf-8') as f:
-                                        json.dump(session_data, f, ensure_ascii=False, indent=2)
-                                    # 更新索引
-                                    if new_session.session_id in self.session_manager._index:
-                                        self.session_manager._index[new_session.session_id]['title'] = title
-                                        self.session_manager._save_index()
-                                except Exception as e:
-                                    self.ui.print_dim(f"[Session] 更新标题失败: {e}")
                         
                         # 同步到 Web UI
                         if hasattr(self.ui, 'send_message'):
