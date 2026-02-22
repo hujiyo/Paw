@@ -156,4 +156,4 @@ Paw的记忆系统会预计算一个"回忆意图锚点向量 B"，描述"回忆
 
 ## License
 
-MIT License
+Apache License 2.0

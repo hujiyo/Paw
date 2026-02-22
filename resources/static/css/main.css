@@ -924,6 +924,26 @@ body {
 .settings__field {
     margin-bottom: 1.2rem;
 }
+.settings__identity-inline {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    line-height: 2.5;
+}
+.settings__identity-inline span {
+    display: inline;
+}
+.settings__identity-inline .settings__input--inline {
+    width: 80px;
+    min-width: 50px !important;
+    max-width: 400px !important;
+    padding: 0.3rem 0.5rem;
+    margin: 0 0.1rem;
+    font-size: 0.9rem;
+    display: inline-block;
+    vertical-align: baseline;
+    transition: width 0.1s ease;
+    text-overflow: ellipsis;
+}
 .settings__label {
     display: block;
     font-size: 0.8rem;

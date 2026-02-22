@@ -108,6 +108,7 @@ interface SettingsManager {
     hideCalibrateStatus(): void;
     setupThemeSelector(): void;
     selectTheme(theme: string): void;
+    setupAutoWidthInputs(): void;
     open(): Promise<void>;
     close(): void;
     loadConfig(): Promise<void>;
@@ -177,6 +178,9 @@ export const Settings: SettingsManager = {
 
         // 主题选择器
         this.setupThemeSelector();
+
+        // 身份输入框自动宽度
+        this.setupAutoWidthInputs();
 
         // 记忆系统配置
         this.setupMemoryConfig();
@@ -556,6 +560,49 @@ export const Settings: SettingsManager = {
         });
     },
 
+    setupAutoWidthInputs(): void {
+        const inputIds = ['cfg-name', 'cfg-username', 'cfg-honey'];
+        const maxWidth = 400;
+        
+        let measureSpan: HTMLSpanElement | null = null;
+        
+        const getMeasureSpan = () => {
+            if (!measureSpan) {
+                measureSpan = document.createElement('span');
+                measureSpan.style.visibility = 'hidden';
+                measureSpan.style.position = 'absolute';
+                measureSpan.style.whiteSpace = 'pre';
+                measureSpan.style.top = '-9999px';
+                measureSpan.style.left = '-9999px';
+                document.body.appendChild(measureSpan);
+            }
+            return measureSpan;
+        };
+        
+        const adjustWidth = (input: HTMLInputElement) => {
+            const span = getMeasureSpan();
+            span.style.fontSize = getComputedStyle(input).fontSize;
+            span.style.fontFamily = getComputedStyle(input).fontFamily;
+            span.style.padding = getComputedStyle(input).padding;
+            span.style.border = getComputedStyle(input).border;
+            span.style.letterSpacing = getComputedStyle(input).letterSpacing;
+            
+            span.textContent = input.value || input.placeholder || '某某某';
+            const width = span.offsetWidth;
+            
+            const finalWidth = Math.min(maxWidth, Math.max(50, width + 4));
+            input.style.setProperty('width', finalWidth + 'px', 'important');
+        };
+
+        inputIds.forEach(id => {
+            const input = $<HTMLInputElement>('#' + id);
+            if (input) {
+                adjustWidth(input);
+                input.addEventListener('input', () => adjustWidth(input));
+            }
+        });
+    },
+
 
     async open(): Promise<void> {
         if (this.panel) this.panel.classList.add('settings-panel--visible');
@@ -603,6 +650,11 @@ export const Settings: SettingsManager = {
         if (cfgName) cfgName.value = identity.name || '';
         if (cfgUsername) cfgUsername.value = identity.username || '';
         if (cfgHoney) cfgHoney.value = identity.honey || '';
+        
+        // 触发 input 事件以调整输入框宽度
+        [cfgName, cfgUsername, cfgHoney].forEach(input => {
+            if (input) input.dispatchEvent(new Event('input'));
+        });
 
         // API 配置
         const api = config.api || {};

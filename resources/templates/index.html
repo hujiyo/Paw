@@ -473,17 +473,14 @@
             <!-- 身份配置 -->
             <div class="settings__section">
                 <div class="settings__section-title">身份</div>
-                <div class="settings__field">
-                    <label class="settings__label">AI 昵称</label>
-                    <input type="text" class="settings__input" id="cfg-name" placeholder="Paw">
-                </div>
-                <div class="settings__field">
-                    <label class="settings__label">用户名</label>
-                    <input type="text" class="settings__input" id="cfg-username" placeholder="hujiyo">
-                </div>
-                <div class="settings__field">
-                    <label class="settings__label">用户昵称</label>
-                    <input type="text" class="settings__input" id="cfg-honey" placeholder="老公">
+                <div class="settings__identity-inline">
+                    <span>我的名字是</span>
+                    <input type="text" class="settings__input settings__input--inline" id="cfg-username" placeholder="hujiyo" maxlength="48" aria-label="用户名字">
+                    <span>，Agent的名字是</span>
+                    <input type="text" class="settings__input settings__input--inline" id="cfg-name" placeholder="Paw" maxlength="48" aria-label="Agent名字">
+                    <span>，它一般对我的称呼是</span>
+                    <input type="text" class="settings__input settings__input--inline" id="cfg-honey" placeholder="老公" maxlength="48" aria-label="Agent对用户的称呼">
+                    <span>。</span>
                 </div>
             </div>
 

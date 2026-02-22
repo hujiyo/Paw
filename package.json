@@ -1,10 +1,10 @@
 {
   "name": "paw-desktop",
-  "version": "0.1.1",
-  "description": "Paw - 智能终端 AI Agent 桌面应用",
+  "version": "0.1.2",
+  "description": "Paw - 智能桌面 AI Agent 应用",
   "main": "dist/main/main.js",
   "author": "Paw Team",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "start": "npm run compile && electron .",
     "dev": "npm run compile && electron . --dev",
