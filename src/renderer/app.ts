@@ -753,12 +753,7 @@ dom.historyList.addEventListener('click', (e: MouseEvent) => {
     const deleteBtn = (e.target as HTMLElement).closest('[data-delete]');
     if (deleteBtn) {
         e.stopPropagation();
-        if (AppState.isGenerating) {
-            showInfoDialog('我正在回答中，可以先点 Stop 中断当前会话哦~');
-            return;
-        }
         const sessionIdToDelete = (deleteBtn as HTMLElement).dataset.delete;
-        // 检查是否为当前会话（也检查侧边栏高亮状态作为后备判断）
         const isCurrentSession = sessionIdToDelete === ChatHistory.currentSessionId || 
             dom.historyList.querySelector(`.history-item--active[data-id="${sessionIdToDelete}"]`);
         if (isCurrentSession) {
