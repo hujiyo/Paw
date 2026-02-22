@@ -1361,66 +1361,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             self.ui.print_dim(f"无法获取模型列表: {e}")
             return []
     
-    async def _enter_edit_mode(self):
-        """进入对话编辑模式"""
-        # 获取可编辑的语块
-        editable_chunks = self.chunk_manager.get_editable_chunks()
-        
-        if not editable_chunks:
-            self.ui.print_dim("没有可编辑的对话内容")
-            return
-        
-        # 显示编辑器界面
-        current_index = len(editable_chunks) - 1  # 默认选中最后一条
-        
-        while True:
-            # 重新获取可编辑语块（因为可能被删除了）
-            editable_chunks = self.chunk_manager.get_editable_chunks()
-            if not editable_chunks:
-                self.ui.print_dim("所有对话内容已清空")
-                break
-            
-            # 确保索引有效
-            if current_index >= len(editable_chunks):
-                current_index = len(editable_chunks) - 1
-            if current_index < 0:
-                current_index = 0
-            
-            # 显示编辑器并获取用户操作
-            action, real_idx, new_content = self.ui.show_chunk_editor(editable_chunks, current_index)
-            
-            if action == 'quit':
-                break
-            
-            elif action == 'edit':
-                # 编辑语块内容
-                success = self.chunk_manager.edit_chunk_content(real_idx, new_content)
-                self.ui.show_edit_result('edit', success)
-
-            elif action == 'delete':
-                # 删除单个语块
-                success = self.chunk_manager.delete_chunk(real_idx)
-                self.ui.show_edit_result('delete', success)
-                if success:
-                    # 删除后调整索引
-                    if current_index > 0:
-                        current_index -= 1
-
-            elif action == 'delete_from':
-                # 回滚：删除此条及之后的所有
-                deleted_count = self.chunk_manager.delete_chunks_from(real_idx)
-                self.ui.show_edit_result('delete_from', deleted_count > 0, f"(删除了 {deleted_count} 条)")
-                if deleted_count > 0:
-                    # 删除后调整索引
-                    current_index = max(0, len(self.chunk_manager.get_editable_chunks()) - 1)
-        
-        # 退出编辑模式，备用屏幕已自动恢复主屏幕
-        # 重新渲染对话历史，同步编辑后的内容到主屏幕
-        self.ui.refresh_conversation_history(
-            self.chunk_manager.chunks,
-            self.model
-        )
-    
     async def _enter_memory_edit_mode(self, search_keyword: str = None):
         """进入记忆管理模式
         
@@ -1805,11 +1745,6 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 显示完整的消息历史（调试用）
                     messages = self.chunk_manager.get_context_for_llm()
                     self.ui.show_messages_debug(messages)
-                    continue
-                
-                if user_input == '/edit':
-                    # 进入对话编辑模式
-                    await self._enter_edit_mode()
                     continue
                 
                 if user_input == '/memory edit':

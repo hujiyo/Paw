@@ -80,7 +80,6 @@ npm run build:linux
 | `/delete-session <id>` | 删除会话 |
 | `/model` | 重新选择模型 |
 | `/clear` | 清空对话历史 |
-| `/edit` | 进入对话编辑模式 |
 | `/memory` | 查看记忆状态 |
 | `/ctx` | 手动触发上下文优化 |
 | `/stop` | 停止当前生成 |

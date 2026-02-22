@@ -777,35 +777,6 @@ class WebUI:
     def get_model_choice(self, prompt: str) -> str: pass # 同步方法在WebUI中无意义
     def show_command_help(self, help_text: str): self.print_dim(help_text)
 
-    # --- 对话编辑器方法 ---
-    def show_editor(self, chunks: list):
-        """显示对话编辑器
-
-        Args:
-            chunks: [(real_index, chunk), ...] 可编辑的语块列表
-        """
-        from chunk_system import ChunkType
-
-        # 转换为前端需要的格式
-        chunks_data = []
-        for real_idx, chunk in chunks:
-            chunks_data.append({
-                'index': real_idx,
-                'type': chunk.chunk_type.value,
-                'content': chunk.content,
-                'tokens': chunk.tokens
-            })
-
-        self.queue_message("show_editor", {"chunks": chunks_data})
-
-    def show_editor_result(self, success: bool, message: str = "", error: str = ""):
-        """发送编辑器操作结果"""
-        self.queue_message("editor_result", {
-            "success": success,
-            "message": message,
-            "error": error
-        })
-
     # --- 记忆管理方法 ---
     def show_memory(self, conversations: list):
         """显示记忆管理界面
@@ -827,35 +798,6 @@ class WebUI:
         self.queue_message("memory_result", data)
 
     # --- 兼容Shell UI的接口 ---
-    async def show_chunk_editor(self, chunks: list, current_index: int = 0):
-        """显示对话编辑器（兼容Shell UI接口）
-
-        对于Web UI，发送事件到前端后直接返回，由前端通过WebSocket发送操作结果
-        """
-        if not chunks:
-            self.print_dim("没有可编辑的对话内容")
-            return ('quit', -1, None)
-
-        self.show_editor(chunks)
-
-        # 等待用户操作结果
-        while True:
-            response = await self.chat_queue.get()
-            if response.startswith('EDIT:'):
-                parts = response.split(':', 2)
-                if len(parts) == 3:
-                    idx = int(parts[1])
-                    new_content = parts[2]
-                    return ('edit', idx, new_content)
-            elif response.startswith('DELETE:'):
-                idx = int(response.split(':')[1])
-                return ('delete', idx, None)
-            elif response.startswith('ROLLBACK:'):
-                idx = int(response.split(':')[1])
-                return ('delete_from', idx, None)
-            elif response == 'QUIT':
-                return ('quit', -1, None)
-
     async def show_memory_editor(self, conversations: list, current_index: int = 0):
         """显示记忆管理界面（兼容Shell UI接口）
 
@@ -880,14 +822,6 @@ class WebUI:
                 return ('clean_duplicates', None, None)
             elif response == 'QUIT':
                 return ('quit', None, None)
-
-    def show_edit_result(self, action: str, success: bool, detail: str = ""):
-        """显示编辑结果"""
-        if success:
-            self.print_success(f"✓ {action}成功 {detail}")
-        else:
-            self.print_error(f"✗ 操作失败 {detail}")
-        self.show_editor_result(success, detail if success else "", detail if not success else "")
 
     # --- 会话管理方法 ---
     def send_session_list(self, sessions: list, current_id: str = None):
