@@ -4,6 +4,7 @@
 通过语块来管理上下文
 """
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Literal, Tuple
@@ -288,7 +289,7 @@ class ChunkManager:
         return self.add_chunk(tool_info, ChunkType.TOOL_CALL)
     
     def add_tool_result(self, result: str, tool_call_id: str = None, tool_name: str = None,
-                        max_call_pairs: int = 0, display_info: dict = None) -> Chunk:
+                        max_call_pairs: int = 0, success: bool = True) -> Chunk:
         """添加工具结果
 
         Args:
@@ -296,15 +297,14 @@ class ChunkManager:
             tool_call_id: 工具调用ID（OpenAI标准）
             tool_name: 工具名称
             max_call_pairs: 最大配对数量，超出时删除最旧的 (tool_call + tool_result)
-            display_info: 工具显示信息（用于恢复历史时保持显示一致性），包含 line1/line2/has_line2
+            success: 工具执行是否成功
         """
         metadata = {}
         if tool_call_id:
             metadata['tool_call_id'] = tool_call_id
         if tool_name:
             metadata['name'] = tool_name
-        if display_info:
-            metadata['display'] = display_info
+        metadata['success'] = success
 
         # 添加新的 tool_result
         chunk = self.add_chunk(result, ChunkType.TOOL_RESULT, metadata=metadata)
@@ -869,6 +869,82 @@ class ChunkManager:
             }
             for chunk in self.chunks
         ]
+
+    def to_json_with_display(self) -> List[Dict[str, Any]]:
+        """导出为JSON格式，并为 tool_result 类型的 chunk 添加 display 信息
+        
+        用于发送给前端渲染历史消息时使用。
+        display 信息从保存的 args/result/success 重新计算得出。
+        """
+        from tool_registry import ToolRegistry
+        from display_formatters import format_default
+        
+        # 先收集所有 tool_call 的 args（用于匹配 tool_result）
+        tool_args_map: Dict[str, Dict] = {}
+        for chunk in self.chunks:
+            if chunk.chunk_type == ChunkType.TOOL_CALL and chunk.content:
+                try:
+                    tc = json.loads(chunk.content)
+                    tc_id = tc.get("id", "")
+                    args_str = tc.get("function", {}).get("arguments", "{}")
+                    if isinstance(args_str, str):
+                        tool_args_map[tc_id] = json.loads(args_str)
+                    else:
+                        tool_args_map[tc_id] = args_str
+                except:
+                    pass
+            elif chunk.chunk_type == ChunkType.ASSISTANT:
+                # assistant chunk 也可能包含 tool_calls
+                if chunk.metadata.get("tool_calls"):
+                    for tc in chunk.metadata["tool_calls"]:
+                        tc_id = tc.get("id", "")
+                        args_str = tc.get("function", {}).get("arguments", "{}")
+                        if isinstance(args_str, str):
+                            try:
+                                tool_args_map[tc_id] = json.loads(args_str)
+                            except:
+                                tool_args_map[tc_id] = {}
+                        else:
+                            tool_args_map[tc_id] = args_str
+        
+        result = []
+        for chunk in self.chunks:
+            chunk_data = {
+                "content": chunk.content,
+                "type": chunk.chunk_type.value,
+                "timestamp": chunk.timestamp.isoformat(),
+                "tokens": chunk.tokens,
+                "metadata": dict(chunk.metadata)  # 复制一份，避免修改原始数据
+            }
+            
+            # 为 tool_result 添加 display
+            if chunk.chunk_type == ChunkType.TOOL_RESULT:
+                tool_call_id = chunk.metadata.get("tool_call_id", "")
+                tool_name = chunk.metadata.get("name", "")
+                success = chunk.metadata.get("success", True)
+                result_content = chunk.content or ""
+                
+                # 获取 args
+                args = tool_args_map.get(tool_call_id, {})
+                
+                # 计算 display
+                display = None
+                config = ToolRegistry.get(tool_name)
+                if config and config.display_format:
+                    try:
+                        result_data = result_content if success else None
+                        display = config.display_format(args, result_data, success)
+                    except:
+                        display = format_default(args, result_content, success)
+                else:
+                    display = format_default(args, result_content, success)
+                
+                if display:
+                    chunk_data["metadata"]["display"] = display
+            
+            result.append(chunk_data)
+        
+        return result
 
     @classmethod
     def from_json(cls, data: List[Dict[str, Any]], max_tokens: int = 64000,

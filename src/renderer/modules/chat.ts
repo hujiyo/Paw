@@ -38,6 +38,13 @@ export interface ChunkMetadata {
     tool_calls?: ToolCall[];
     tool_call_id?: string;
     name?: string;
+    display?: ToolDisplay;
+    success?: boolean;
+}
+
+export interface ToolDisplay {
+    abstract: string;
+    details: Record<string, string> | null;
 }
 
 export interface SessionChunk {
@@ -273,6 +280,8 @@ export const ChatHistory: ChatHistoryManager = {
             toolCallId: string | undefined;
             toolName: string;
             content: string;
+            display?: ToolDisplay;
+            success: boolean;
         }> = [];
         const toolArgsMap = new Map<string, ToolArgs>();
         
@@ -378,21 +387,23 @@ export const ChatHistory: ChatHistoryManager = {
                 toolResults.push({
                     toolCallId: chunk.metadata?.tool_call_id,
                     toolName: chunk.metadata?.name || 'unknown',
-                    content: chunk.content || ''
+                    content: chunk.content || '',
+                    display: chunk.metadata?.display,
+                    success: chunk.metadata?.success ?? true
                 });
             }
         });
 
         toolResults.forEach(result => {
             const args = toolArgsMap.get(result.toolCallId || '') || {};
-            const display = getDefaultDisplay(result.content);
+            const display = result.display || getDefaultDisplay(result.content);
             const el = document.getElementById(`tool-${result.toolCallId}`);
-            updateToolElement(el, result.toolName, display, true);
+            updateToolElement(el, result.toolName, display, result.success);
             
             // 保存原始响应数据
             if (el) {
                 el.dataset.rawResponse = JSON.stringify({
-                    success: true,
+                    success: result.success,
                     result: result.content
                 });
             }

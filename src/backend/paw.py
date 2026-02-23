@@ -961,7 +961,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 同步到 Web UI
             if sync_ui and hasattr(self.ui, 'send_session_load'):
                 # 发送完整 chunks 给前端渲染（使用更新后的 chunks）
-                self.ui.send_session_load(self.chunk_manager.to_json(), mode=self.current_mode)
+                # 使用 to_json_with_display() 重新计算 display 信息
+                self.ui.send_session_load(self.chunk_manager.to_json_with_display(), mode=self.current_mode)
                 self.ui.send_session_loaded(snapshot.session_id, snapshot.title)
 
             # 更新状态栏
@@ -1227,14 +1228,15 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                     # 确保result_text总是被定义
                     if success:
                         result_text = str(result.get("result", ""))
-                        self.ui.show_tool_result(tool_call_id, function_name, function_args, result, success=True)
                     else:
                         error_msg = result.get('error', '未知错误')
                         result_text = f"错误: {error_msg}"
-                        self.ui.show_tool_result(tool_call_id, function_name, function_args, result, success=False)
 
                     # 获取工具配置，检查上下文策略
                     tool_config = ToolRegistry.get(function_name)
+
+                    # 显示工具结果（前端实时显示）
+                    self.ui.show_tool_result(tool_call_id, function_name, function_args, result_text, success=success)
 
                     # 获取 max_call_pairs 配置（用于配对清理）
                     max_call_pairs = tool_config.max_call_pairs if tool_config else 0
@@ -1245,7 +1247,8 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         result_text,
                         tool_call_id=tool_call_id,
                         tool_name=function_name,
-                        max_call_pairs=max_call_pairs
+                        max_call_pairs=max_call_pairs,
+                        success=success
                     )
 
                     # 如果是 Todo 工具，推送更新到前端（类似 Shell 终端输出的实时推送机制）
@@ -2090,11 +2093,16 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
             # 执行工具
             result = await self._execute_tool({"tool": tool_name, "args": args})
 
+            # 获取工具执行结果
+            success = result.get("success", False)
+            result_text = str(result.get("result", "")) if success else f"错误: {result.get('error', '未知错误')}"
+
             # 添加工具结果到上下文
             self.chunk_manager.add_tool_result(
+                result_text,
                 tool_call_id=tool_id,
                 tool_name=tool_name,
-                result=result.get("result") or result.get("error", "")
+                success=success
             )
 
 async def main():

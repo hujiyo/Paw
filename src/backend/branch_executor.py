@@ -82,23 +82,24 @@ class BranchExecutor:
             if config:
                 config.handler = handler
     
-    def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> str:
-        """执行工具调用（统一使用 ToolRegistry）"""
+    def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        """执行工具调用（统一使用 ToolRegistry）
+        
+        Returns:
+            {"success": bool, "result": Any} 或 {"success": bool, "error": str}
+        """
         config = ToolRegistry.get(tool_name)
         if config is None:
-            return json.dumps({"error": f"未知工具: {tool_name}"})
+            return {"success": False, "error": f"未知工具: {tool_name}"}
         
         if not config.enabled:
-            return json.dumps({"error": f"工具未启用: {tool_name}"})
+            return {"success": False, "error": f"工具未启用: {tool_name}"}
         
         try:
             result = config.handler(**args)
-            # 结果统一转为 JSON 字符串
-            if isinstance(result, dict):
-                return json.dumps(result, ensure_ascii=False, indent=2)
-            return str(result)
+            return {"success": True, "result": result}
         except Exception as e:
-            return json.dumps({"error": f"工具执行失败: {str(e)}"})
+            return {"success": False, "error": f"工具执行失败: {str(e)}"}
     
     # ==================== LLM调用 ====================
     
@@ -205,18 +206,29 @@ class BranchExecutor:
                     
                     # 执行工具
                     result = self._execute_tool(tool_name, tool_args)
+                    success = result.get("success", False)
+                    
+                    # 格式化结果文本（与主流程保持一致）
+                    if success:
+                        result_data = result.get("result")
+                        if isinstance(result_data, dict):
+                            result_text = json.dumps(result_data, ensure_ascii=False, indent=2)
+                        else:
+                            result_text = str(result_data or "")
+                    else:
+                        result_text = f"错误: {result.get('error', '未知错误')}"
                     
                     # 添加工具结果到分支消息（使用标准方法）
                     self.branch.branch_chunk_manager.add_tool_result(
-                        result,
+                        result_text,
                         tool_call_id=tool_call_id,
-                        tool_name=tool_name
+                        tool_name=tool_name,
+                        success=success
                     )
                     
                     # 检查是否退出
                     if tool_name == "exit_branch":
-                        result_data = json.loads(result)
-                        if result_data.get("success"):
+                        if success:
                             self._log("编辑完成，退出分支")
                             # 恢复主工具模式
                             deactivate_branch_mode()

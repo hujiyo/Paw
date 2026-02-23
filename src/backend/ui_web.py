@@ -693,14 +693,14 @@ class WebUI:
             "raw_request": raw_request
         })
 
-    def show_tool_result(self, tool_call_id: str, tool_name: str, args: dict, result: dict, success: bool = True):
+    def show_tool_result(self, tool_call_id: str, tool_name: str, args: dict, result_text: str, success: bool = True):
         """显示工具调用结果
         
         Args:
             tool_call_id: 工具调用 ID
             tool_name: 工具名称
             args: 工具参数（已解析的字典）
-            result: 工具执行结果
+            result_text: 工具执行结果文本
             success: 是否成功
         """
         display = None
@@ -708,17 +708,17 @@ class WebUI:
         config = ToolRegistry.get(tool_name)
         if config and config.display_format:
             try:
-                result_data = result.get("result") if success else result.get("error")
+                result_data = result_text if success else None
                 display = config.display_format(args, result_data, success)
             except Exception:
-                display = format_default(args, result.get("result") if success else result.get("error"), success)
+                display = format_default(args, result_text, success)
         
         self.queue_message("tool_result", {
             "id": tool_call_id,
             "name": tool_name,
             "display": display,
             "success": success,
-            "raw_response": result
+            "raw_response": {"success": success, "result": result_text}
         })
 
     async def get_user_input(self, prompt: str = None) -> str:

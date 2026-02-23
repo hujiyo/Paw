@@ -972,7 +972,7 @@ class WebTools:
         # 配置项
         self.search_engine = self.config.get('search_engine', 'duckduckgo')
         self.max_results = self.config.get('max_results', 5)
-        self.page_size = self.config.get('page_size', 4096)  # 每页最大 4KB
+        self.page_size = self.config.get('page_size', 8192)  # 每页最大 8KB
         self.use_jina_reader = self.config.get('use_jina_reader', True)  # 默认启用 Jina Reader
         self.custom_search_api = self.config.get('custom_search_api') or {}
 
