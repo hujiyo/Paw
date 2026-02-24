@@ -1808,7 +1808,17 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                         if last_user_turn:
                             user_msg = self.chunk_manager.get_turn_content(last_user_turn)
                             # 删除最后一个助手轮次
-                            self.chunk_manager.delete_last_turn('assistant')
+                            deleted_assistant = self.chunk_manager.delete_last_turn('assistant')
+                            if not deleted_assistant:
+                                self.ui.print_error("找不到需要删除的助手消息")
+                                continue
+
+                            # 也删除对应的用户轮次，防止重复保留相同用户消息
+                            deleted_user = self.chunk_manager.delete_last_turn('user')
+                            if not deleted_user:
+                                self.ui.print_error("找不到需要删除的用户消息")
+                                continue
+
                             # 重新处理用户输入
                             should_send_turn_end = True
                             await self.process_input(user_msg)

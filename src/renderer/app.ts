@@ -219,18 +219,14 @@ setMessageActions({
             return;
         }
         
-        // 从前端 messages 中删除（仅用于 UI 显示）
+        // 从前端状态与 DOM 中移除指定消息（避免清空历史记录）
         const msgIdx = ChatHistory.messages.findIndex(m => m.id === msgId);
         if (msgIdx >= 0) {
             ChatHistory.messages.splice(msgIdx, 1);
         }
-        
-        // 清空并重新渲染整个消息区域
-        dom.messages.innerHTML = '';
-        ChatHistory.messages.forEach(msg => {
-            const el = createMsgEl(msg.role, msg.role === 'user' ? 'USER' : 'PAW', msg.text, msg.id);
-            dom.messages.appendChild(el);
-        });
+
+        const msgEl = dom.messages.querySelector(`[data-msg-id="${msgId}"]`);
+        msgEl?.remove();
         
         // 通知后端删除消息，后端处理完成后会通过 turns_updated 事件刷新对话链
         send(`/delete-message ${msgId} ${role}`);
@@ -247,20 +243,16 @@ setMessageActions({
             showInfoDialog('正在生成中，请先停止当前回复');
             return;
         }
-        
-        // 从前端 messages 中删除（仅用于 UI 显示）
+
+        // 从前端状态与 DOM 中移除指定消息（避免清空历史记录）
         const msgIdx = ChatHistory.messages.findIndex(m => m.id === msgId);
         if (msgIdx >= 0) {
             ChatHistory.messages.splice(msgIdx, 1);
         }
-        
-        // 清空并重新渲染整个消息区域
-        dom.messages.innerHTML = '';
-        ChatHistory.messages.forEach(msg => {
-            const el = createMsgEl(msg.role, msg.role === 'user' ? 'USER' : 'PAW', msg.text, msg.id);
-            dom.messages.appendChild(el);
-        });
-        
+
+        const msgEl = dom.messages.querySelector(`[data-msg-id="${msgId}"]`);
+        msgEl?.remove();
+
         // 发送重试命令，后端会重新生成
         send(`/retry ${msgId}`);
         setGeneratingState(true);

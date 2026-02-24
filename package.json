@@ -1,6 +1,6 @@
 {
   "name": "paw-desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Paw - 智能桌面 AI Agent 应用",
   "main": "dist/main/main.js",
   "author": "Paw Team",
