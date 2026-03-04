@@ -1,7 +1,7 @@
 
 import { $, $$ } from './utils.js';
-import { AppState } from './store.js';
 import { escapeHtml } from './utils.js';
+import { UIStateManager } from './ui-state.js';
 import { Browser } from './browser.js';
 import { FileEditor } from './file-editor.js';
 
@@ -17,10 +17,16 @@ export class RightSidebar {
     private static panelsContainer: HTMLElement;
     private static fileTabs: Map<string, FileTab> = new Map();
     private static activeTabId: string = 'terminal';
+    private static sidebarEl: HTMLElement;
+    private static toggleRightSidebarBtn: HTMLElement | null;
+    private static uiState: UIStateManager | null = null;
     
-    static init() {
+    static init(uiState?: UIStateManager) {
+        this.uiState = uiState || null;
         this.tabsContainer = $('#editor-tabs')!;
         this.panelsContainer = $('#editor-panels')!;
+        this.sidebarEl = $('#sidebar-right')!;
+        this.toggleRightSidebarBtn = $('#toggle-right-sidebar');
         
         // 绑定常驻标签页点击事件
         this.tabsContainer?.addEventListener('click', (e) => {
@@ -76,8 +82,8 @@ export class RightSidebar {
         }
         
         // 确保右侧边栏可见
-        if (!AppState.rightSidebarVisible) {
-            $<HTMLElement>('#toggle-right-sidebar')?.click();
+        if (!this.isRightSidebarVisible()) {
+            this.toggleRightSidebarBtn?.click();
         }
     }
     
@@ -163,5 +169,12 @@ export class RightSidebar {
             hash = hash & hash;
         }
         return Math.abs(hash).toString(36);
+    }
+
+    private static isRightSidebarVisible(): boolean {
+        if (this.uiState) {
+            return this.uiState.get('rightSidebarVisible');
+        }
+        return this.sidebarEl?.classList.contains('sidebar-right--visible') || false;
     }
 }
