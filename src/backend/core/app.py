@@ -21,10 +21,10 @@ from core import events as ev
 from core.agent import AgentKernel
 from core.catalog import build_registry
 from core.config import (
-    AppConfig, WorkspaceConfig, load_config, save_config, public_config,
+    AppConfig, build_config, load_config, save_config, public_config,
 )
 from core.context import ContextBudget
-from core.llm import LLMClient
+from core.llm import LLMClient, LLMError
 from core.prompts import SystemPromptBuilder
 from core.session import Message, Session
 from core.storage import SessionStore
@@ -42,12 +42,7 @@ class PawApp:
         from tools import BaseTools, WebTools
 
         self.tools = BaseTools(sandbox_dir=workspace_dir, config=self.config.to_dict())
-        self.web_tools = WebTools(
-            config=self.config.web.__dict__,
-            api_url=self.config.api.url,
-            model_getter=lambda: self.model,
-            api_key=self.config.api.key,
-        )
+        self.web_tools = WebTools(config=self.config.web.__dict__)
 
         self.registry = build_registry(self.tools, self.web_tools)
         self.registry.shell_snapshot = lambda: (
@@ -57,7 +52,7 @@ class PawApp:
         )
 
         self.model: str = self.config.api.model or ""
-        self.llm = LLMClient(self.config.api.url, self.config.api.key, self.model or "default")
+        self.llm = self._build_llm()
 
         self.prompt_builder = SystemPromptBuilder(self.config, self.tools)
         self.store = SessionStore(self._sessions_db_path())
@@ -72,6 +67,7 @@ class PawApp:
             store=self.store,
             budget=self.budget,
             system_prompt_builder=self.prompt_builder,
+            show_reasoning=self.config.context.show_reasoning,
         )
         self.memory_manager = None
         self._pending_memory_save = None
@@ -79,6 +75,18 @@ class PawApp:
         self._input_task: Optional[asyncio.Task] = None
 
         self._mount_routes()
+
+    def _build_llm(self) -> LLMClient:
+        api = self.config.api
+        return LLMClient(
+            api.url,
+            api.key,
+            self.model or "default",
+            style=api.style,
+            temperature=api.temperature,
+            max_tokens=api.max_tokens,
+            extra_body=api.extra_body,
+        )
 
     # ---------- 路径 ----------
 
@@ -534,7 +542,14 @@ class PawApp:
 
     async def _select_model(self) -> str:
         while True:
-            models = await self._fetch_models()
+            try:
+                models = await self._fetch_models()
+            except LLMError as e:
+                models = []
+                self.transport.emit(ev.SYSTEM_MESSAGE, {
+                    "text": str(e),
+                    "type": "error",
+                })
             if models:
                 self.transport.emit(ev.SHOW_MODEL_SELECTION, {"models": models})
             chosen = (await self.transport.request_control(
@@ -554,38 +569,24 @@ class PawApp:
                     "type": "error",
                 })
 
-    async def _fetch_models(self) -> List[str]:
-        import aiohttp
-        url = self.config.api.url
-        if "bigmodel.cn" in url:
-            base = url.split("/v4/")[0]
-            models_url = f"{base}/v4/models"
-        elif "/v1/" in url:
-            models_url = url.split("/v1/")[0] + "/v1/models"
-        else:
-            models_url = url.rstrip("/") + "/models"
+    async def _fetch_models(self, api_url: str = "", api_key: str = "") -> List[str]:
+        """获取模型列表。
 
-        headers = {}
-        if self.config.api.key:
-            headers["Authorization"] = f"Bearer {self.config.api.key}"
+        设置页传过来的地址/密钥可能还没保存，必须用它们去查询——否则
+        用户填了新供应商后点"获取模型"，拿到的仍然是上一家的列表。
+        """
+        from core.providers import build_provider
+        from core.providers.base import LLMError
+
+        url = (api_url or "").strip() or self.config.api.url
+        key = api_key if api_key is not None else self.config.api.key
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    models_url, headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status != 200:
-                        return []
-                    data = await response.json()
-                    if isinstance(data, list):
-                        return data
-                    if "models" in data:
-                        return [m["name"] for m in data["models"]]
-                    if "data" in data:
-                        return [m["id"] for m in data["data"]]
-                    return []
-        except Exception:
-            return []
+            provider = build_provider(url, key, self.config.api.style)
+            return await provider.list_models()
+        except LLMError as e:
+            raise e
+        except Exception as e:
+            raise LLMError(f"获取模型列表失败: {e}", kind="upstream")
 
     # ---------- 输入分发 ----------
 
@@ -609,7 +610,20 @@ class PawApp:
             asyncio.create_task(self._dispatch(stripped))
 
     async def _handle_fetch_models(self, msg: Dict[str, Any]) -> None:
-        models = await self._fetch_models()
+        try:
+            models = await self._fetch_models(
+                str(msg.get("api_url") or ""),
+                str(msg.get("api_key") or ""),
+            )
+        except LLMError as e:
+            # 失败原因必须让用户看到：设置页显示"模型列表获取失败"，
+            # 而不是静默返回空列表
+            self.transport.emit(ev.MODELS_FETCHED, {
+                "request_id": msg.get("request_id"),
+                "models": [],
+                "error": str(e),
+            })
+            return
         self.transport.emit(ev.MODELS_FETCHED, {
             "request_id": msg.get("request_id"),
             "models": models,
@@ -693,7 +707,11 @@ class PawApp:
             incoming = payload.get("config") or {}
             merged = self.config.to_dict()
             _deep_update(merged, incoming)
-            self.config = AppConfig(**_from_dict(merged))
+            try:
+                next_config = build_config(merged)
+            except ValueError as e:
+                return JSONResponse({"success": False, "error": f"配置不合法: {e}"})
+            self.config = next_config
             save_config(self.config)
             self._rebuild_clients()
             return JSONResponse({"success": True, "message": "配置已保存并已生效"})
@@ -1022,10 +1040,27 @@ class PawApp:
             self.transport.emit(ev.SYSTEM_MESSAGE, {"text": f"[记忆] 保存失败: {e}", "type": "dim"})
 
     def _rebuild_clients(self) -> None:
-        self.llm = LLMClient(self.config.api.url, self.config.api.key, self.model or "default")
+        """配置保存后让新配置立即生效。
+
+        LLM 客户端是可复用的，直接改它的字段即可；但协议适配器要按新
+        地址/style/私有字段重建，所以走 reconfigure。
+        """
+        api = self.config.api
+        self.llm.reconfigure(
+            api.url,
+            api.key,
+            self.model or "default",
+            style=api.style,
+            temperature=api.temperature,
+            max_tokens=api.max_tokens,
+            extra_body=api.extra_body,
+        )
         self.kernel.llm = self.llm
         self.budget.max_tokens = self.config.context.max_tokens
+        self.budget.keep_recent_turns = self.config.context.keep_recent_turns
+        self.kernel.show_reasoning = self.config.context.show_reasoning
         self.prompt_builder.config = self.config
+        self.web_tools.apply_config(self.config.web.__dict__)
 
 
 def uuid_hex() -> str:
@@ -1039,24 +1074,3 @@ def _deep_update(target: Dict[str, Any], incoming: Dict[str, Any]) -> None:
             _deep_update(target[key], value)
         else:
             target[key] = value
-
-
-def _from_dict(data: Dict[str, Any]) -> Dict[str, Any]:
-    from core.config import (
-        ApiConfig, ContextConfig, IdentityConfig, MemoryConfig, RecallConfig,
-        TerminalConfig, WebConfig,
-    )
-    return {
-        "identity": IdentityConfig(**data.get("identity", {})),
-        "api": ApiConfig(**{k: v for k, v in data.get("api", {}).items() if k in ApiConfig.__dataclass_fields__}),
-        "memory": MemoryConfig(**{k: v for k, v in data.get("memory", {}).items() if k in MemoryConfig.__dataclass_fields__}),
-        "recall": RecallConfig(**{k: v for k, v in data.get("recall", {}).items() if k in RecallConfig.__dataclass_fields__}),
-        "terminal": TerminalConfig(**{k: v for k, v in data.get("terminal", {}).items() if k in TerminalConfig.__dataclass_fields__}),
-        "web": WebConfig(**{k: v for k, v in data.get("web", {}).items() if k in WebConfig.__dataclass_fields__}),
-        "context": ContextConfig(**{k: v for k, v in data.get("context", {}).items() if k in ContextConfig.__dataclass_fields__}),
-        "workspace": WorkspaceConfig(**{
-            k: v for k, v in data.get("workspace", {}).items()
-            if k in WorkspaceConfig.__dataclass_fields__
-        }),
-        "theme": data.get("theme") or {},
-    }

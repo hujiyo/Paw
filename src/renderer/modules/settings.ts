@@ -14,6 +14,10 @@ export interface ApiConfig {
     key?: string;
     url?: string;
     model?: string | null;
+    style?: string;
+    temperature?: number;
+    max_tokens?: number;
+    extra_body?: Record<string, unknown>;
 }
 
 export interface TerminalConfig {
@@ -36,6 +40,7 @@ export interface WorkspaceConfig {
 export interface ContextConfig {
     max_tokens?: number;
     keep_recent_turns?: number;
+    show_reasoning?: boolean;
 }
 
 export interface MemoryConfig {
@@ -384,8 +389,7 @@ export const Settings: SettingsManager = {
             });
 
         } catch (err) {
-            this.showDropdownError(opts, (err as Error).message || '获取模型列表失败');
-        } finally {
+            this.showDropdownError(opts, (err as Error).message || '获取模型列表失败');        } finally {
             if (loading) loading.style.display = 'none';
         }
     },
@@ -665,8 +669,14 @@ export const Settings: SettingsManager = {
         const api = config.api || {};
         const cfgApiKey = $<HTMLInputElement>('#cfg-api-key');
         const cfgApiUrl = $<HTMLInputElement>('#cfg-api-url');
+        const cfgApiStyle = $<HTMLSelectElement>('#cfg-api-style');
+        const cfgApiTemperature = $<HTMLInputElement>('#cfg-api-temperature');
+        const cfgApiMaxTokens = $<HTMLInputElement>('#cfg-api-max-tokens');
         if (cfgApiKey) cfgApiKey.value = api.key || '';
         if (cfgApiUrl) cfgApiUrl.value = api.url || '';
+        if (cfgApiStyle) cfgApiStyle.value = api.style || 'auto';
+        if (cfgApiTemperature) cfgApiTemperature.value = String(api.temperature ?? 0.7);
+        if (cfgApiMaxTokens) cfgApiMaxTokens.value = String(api.max_tokens ?? 8192);
         this.selectModel(api.model || '');
 
         // 终端配置
@@ -694,6 +704,8 @@ export const Settings: SettingsManager = {
         if (cfgHomeDir) cfgHomeDir.value = system.home_dir || '';
         const context = config.context || {};
         if (cfgChunkSize) cfgChunkSize.value = String(context.max_tokens || 64000);
+        const cfgShowReasoning = $<HTMLInputElement>('#cfg-show-reasoning');
+        if (cfgShowReasoning) cfgShowReasoning.checked = context.show_reasoning !== false;
 
 
         // 记忆系统配置
@@ -771,6 +783,9 @@ export const Settings: SettingsManager = {
         const cfgHoney = $<HTMLInputElement>('#cfg-honey');
         const cfgApiKey = $<HTMLInputElement>('#cfg-api-key');
         const cfgApiUrl = $<HTMLInputElement>('#cfg-api-url');
+        const cfgApiStyle = $<HTMLSelectElement>('#cfg-api-style');
+        const cfgApiTemperature = $<HTMLInputElement>('#cfg-api-temperature');
+        const cfgApiMaxTokens = $<HTMLInputElement>('#cfg-api-max-tokens');
         const cfgModel = $<HTMLInputElement>('#cfg-model');
         const cfgShell = $<HTMLSelectElement>('#cfg-shell');
         const cfgEncoding = $<HTMLInputElement>('#cfg-encoding');
@@ -796,7 +811,12 @@ export const Settings: SettingsManager = {
             api: {
                 key: cfgApiKey?.value || '',
                 url: cfgApiUrl?.value || '',
-                model: cfgModel?.value || null
+                model: cfgModel?.value || null,
+                style: cfgApiStyle?.value || 'auto',
+                temperature: parseFloat(cfgApiTemperature?.value || '0.7') || 0.7,
+                max_tokens: parseInt(cfgApiMaxTokens?.value || '8192', 10) || 8192,
+                // 厂商私有字段只在配置文件里维护，设置页有提交时保留原值
+                extra_body: (this.currentConfig.api?.extra_body as Record<string, unknown>) || {}
             },
             terminal: {
                 shell: cfgShell?.value || 'powershell',
@@ -806,7 +826,7 @@ export const Settings: SettingsManager = {
             web: {
                 search_engine: cfgSearchEngine?.value || 'duckduckgo',
                 max_results: parseInt(cfgMaxResults?.value || '5', 10) || 5,
-                page_size: 4096,
+                page_size: this.currentConfig.web?.page_size ?? 4096,
                 use_jina_reader: cfgUseJina?.checked ?? true
             },
             workspace: {
@@ -814,7 +834,8 @@ export const Settings: SettingsManager = {
             },
             context: {
                 max_tokens: parseInt(cfgChunkSize?.value || '64000', 10) || 64000,
-                keep_recent_turns: 4
+                keep_recent_turns: this.currentConfig.context?.keep_recent_turns ?? 4,
+                show_reasoning: $<HTMLInputElement>('#cfg-show-reasoning')?.checked ?? true
             },
             memory: {
                 enabled: cfgMemoryEnabled?.checked ?? false,

@@ -1,42 +1,67 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""LLM 客户端：统一的 OpenAI 兼容 chat/completions 调用。
+"""模型客户端：业务层唯一入口。
 
-只做一件事——把 messages + tools 发出去，把文本增量回调、把 tool_calls
-组装好。不做重试、不做降级：出错以 LLMError 抛出，由 agent 层决定怎么展示。
+它自己不解析任何报文，只做三件事：
+    - 持有当前配置与模型名（配置变更时由应用层重建）
+    - 把请求参数与厂商私有字段组装成 ChatRequest
+    - 把真实用量回灌给 token 计数器，供上下文预算使用
+
+协议差异全部由 core/providers 消化。出错一律抛出 LLMError，
+kind 标明类别，调用方据此决定是压缩还是报错。
 """
 
-import asyncio
-import json
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-import aiohttp
+from core.providers import build_provider
+from core.providers.base import (
+    ChatRequest,
+    ChatResult,
+    LLMError,
+    Provider,
+    Usage,
+)
+from core.tokens import DEFAULT_COUNTER, count_json, count_messages_raw
 
-
-class LLMError(Exception):
-    """模型调用失败。message 是给用户看的中文描述。"""
-
-
-@dataclass
-class LLMResult:
-    content: Optional[str] = None
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
-    finish_reason: str = "stop"
+__all__ = ["LLMClient", "LLMError", "ChatResult", "Usage"]
 
 
 class LLMClient:
-    def __init__(self, api_url: str, api_key: str, model: str, timeout: float = 60.0):
-        self.api_url = api_url
-        self.api_key = api_key
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str,
+        *,
+        style: str = "auto",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        extra_body: Optional[Dict[str, Any]] = None,
+    ):
         self.model = model
-        self.timeout = timeout
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.provider: Provider = build_provider(
+            api_url, api_key, style, extra_body
+        )
 
-    def _headers(self) -> Dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        return headers
+    def reconfigure(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str,
+        *,
+        style: str = "auto",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        extra_body: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.provider = build_provider(
+            api_url, api_key, style, extra_body
+        )
 
     async def chat(
         self,
@@ -44,119 +69,53 @@ class LLMClient:
         *,
         tools: Optional[List[Dict[str, Any]]] = None,
         on_delta: Optional[Callable[[str], None]] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 4000,
-        stream: bool = True,
-        extra_params: Optional[Dict[str, Any]] = None,
-        timeout: Optional[float] = None,
-    ) -> LLMResult:
-        payload: Dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": stream,
-        }
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
-        if extra_params:
-            payload.update(extra_params)
-
-        client_timeout = aiohttp.ClientTimeout(total=timeout or self.timeout)
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.api_url,
-                    json=payload,
-                    headers=self._headers(),
-                    timeout=client_timeout,
-                ) as response:
-                    if response.status != 200:
-                        body = await response.text()
-                        raise LLMError(f"模型接口返回 {response.status}: {body[:300]}")
-                    if stream:
-                        return await self._read_stream(response, on_delta)
-                    return self._read_full(await response.json())
-        except (asyncio.TimeoutError, TimeoutError):
-            raise LLMError(f"模型请求超时（{timeout or self.timeout} 秒）")
-        except aiohttp.ClientError as e:
-            raise LLMError(f"模型网络请求失败: {e}")
-
-    @staticmethod
-    def _read_full(data: Dict[str, Any]) -> LLMResult:
-        choices = data.get("choices") or []
-        if not choices:
-            raise LLMError("模型返回缺少 choices")
-        message = choices[0].get("message") or {}
-        return LLMResult(
-            content=message.get("content"),
-            tool_calls=message.get("tool_calls") or [],
-            finish_reason=choices[0].get("finish_reason") or "stop",
+        on_reasoning: Optional[Callable[[str], None]] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stream: Optional[bool] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
+        model: Optional[str] = None,
+    ) -> ChatResult:
+        request = ChatRequest(
+            messages=messages,
+            tools=tools if self.provider.supports_tools else None,
+            temperature=self.temperature if temperature is None else temperature,
+            max_tokens=self.max_tokens if max_tokens is None else max_tokens,
+            stream=self.provider.supports_stream if stream is None else stream,
+            extra_body=dict(extra_body or {}),
         )
+        result = await self.provider.chat(
+            model or self.model,
+            request,
+            on_delta or (lambda _text: None),
+            on_reasoning or (lambda _text: None),
+        )
+        self._record_usage(messages, request.tools, result.usage)
+        return result
+
+    async def list_models(self, model: str = "") -> List[str]:
+        return await self.provider.list_models(model or self.model)
 
     @staticmethod
-    async def _read_stream(
-        response: aiohttp.ClientResponse,
-        on_delta: Optional[Callable[[str], None]],
-    ) -> LLMResult:
-        content_parts: List[str] = []
-        tool_calls: Dict[int, Dict[str, Any]] = {}
-        finish_reason = "stop"
-        first_text = True
+    def _record_usage(
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        usage: Usage,
+    ) -> None:
+        """用服务端真实 token 数校准估算比例。
 
-        async for raw in response.content:
-            line = raw.decode("utf-8", errors="ignore").strip()
-            if not line or not line.startswith("data:"):
-                continue
-            data_str = line[5:].strip()
-            if data_str == "[DONE]":
-                break
-            try:
-                chunk = json.loads(data_str)
-            except json.JSONDecodeError:
-                continue
-            choices = chunk.get("choices") or []
-            if not choices:
-                continue
-
-            choice = choices[0]
-            finish_reason = choice.get("finish_reason") or finish_reason
-            delta = choice.get("delta") or {}
-
-            text = delta.get("content")
-            if text:
-                # 首个片段去掉模型自带的前导换行
-                if first_text:
-                    text = text.lstrip("\n")
-                    if not text:
-                        continue
-                    first_text = False
-                content_parts.append(text)
-                if on_delta:
-                    on_delta(text)
-
-            for tc_delta in delta.get("tool_calls") or []:
-                index = tc_delta.get("index", 0)
-                slot = tool_calls.setdefault(
-                    index,
-                    {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
-                )
-                if tc_delta.get("id"):
-                    slot["id"] = tc_delta["id"]
-                fn = tc_delta.get("function") or {}
-                if fn.get("name"):
-                    slot["function"]["name"] += fn["name"]
-                if fn.get("arguments"):
-                    slot["function"]["arguments"] += fn["arguments"]
-
-        # 部分兼容接口不给 id，补齐以维持 tool_call/tool_result 配对
-        ordered = []
-        for index in sorted(tool_calls):
-            slot = tool_calls[index]
-            if not slot["id"]:
-                slot["id"] = f"call_{index}"
-            ordered.append(slot)
-
-        content = "".join(content_parts) if content_parts else None
-        return LLMResult(content=content, tool_calls=ordered, finish_reason=finish_reason)
+        prompt_tokens 包含工具 schema，而消息本身不含；校准前必须先把
+        工具占用的部分减掉，否则每次都会把系数往大推。
+        只在服务端确实报告了用量时校准；没报告的厂商维持启发式值。
+        """
+        prompt_tokens = usage.prompt_tokens
+        if prompt_tokens <= 0 or not messages:
+            return
+        tools_raw = count_json(tools) if tools else 0
+        raw_total = count_messages_raw(messages)
+        if raw_total <= 0:
+            return
+        # 工具部分的分母也是估算值，按同一比例扣除
+        if tools_raw > 0:
+            raw_total += tools_raw
+        DEFAULT_COUNTER.calibrate(raw_total, prompt_tokens)

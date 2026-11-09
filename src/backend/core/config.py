@@ -28,9 +28,21 @@ class IdentityConfig:
 
 @dataclass
 class ApiConfig:
+    """模型接入配置。
+
+    style 决定用哪个协议适配器：openai / anthropic / azure；
+    auto 时按 url 推断。temperature 与 max_tokens 是请求默认值，
+    推理类模型经常需要把它们调高，因此不再写死在代码里。
+    """
+
     key: str = ""
     url: str = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
     model: Optional[str] = None
+    style: str = "auto"
+    temperature: float = 0.7
+    max_tokens: int = 8192
+    # 厂商私有字段，原样并入请求体（例如 thinking、enable_search）
+    extra_body: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -80,6 +92,8 @@ class ContextConfig:
 
     max_tokens: int = 64000
     keep_recent_turns: int = 4
+    # 是否把模型返回的思维链展示给用户
+    show_reasoning: bool = True
 
 
 @dataclass
@@ -116,16 +130,49 @@ def config_path() -> Path:
     return config_dir() / CONFIG_FILE_NAME
 
 
-def _merge_dataclass(cls, raw: Any):
-    """把 dict 合并进 dataclass，忽略未知字段，保持向后兼容。"""
+def typed_dataclass(cls, raw: Any):
+    """按字段声明类型转换配置值。
+
+    配置既可能来自手写 YAML，也可能来自前端表单（全部字符串）。不在这里
+    统一转换，坏值会一路走到业务代码，在那里才以奇怪的异常形式炸开。
+    """
     if not isinstance(raw, dict):
         return cls()
     default = cls()
     kwargs = {}
-    for name in default.__dataclass_fields__:
-        if name in raw:
-            kwargs[name] = raw[name]
+    for name, declared in default.__dataclass_fields__.items():
+        if name not in raw:
+            continue
+        kwargs[name] = _coerce_value(cls.__name__, name, declared.type, raw[name])
     return cls(**kwargs)
+
+
+def _coerce_value(class_name: str, field_name: str, type_hint: Any, value: Any) -> Any:
+    hint = type_hint if isinstance(type_hint, str) else getattr(type_hint, "__name__", "")
+    if value is None:
+        return None
+    try:
+        if hint == "int":
+            if isinstance(value, bool):
+                raise TypeError("布尔值不能当整数")
+            return int(value)
+        if hint == "float":
+            return float(value)
+        if hint == "bool":
+            if isinstance(value, str):
+                return value.strip().lower() in ("1", "true", "yes", "on")
+            return bool(value)
+        if hint == "str":
+            return str(value)
+        if hint.startswith("Optional"):
+            return value
+        if hint.startswith("Dict") or hint == "dict":
+            if not isinstance(value, dict):
+                raise TypeError("应为字典")
+            return dict(value)
+        return value
+    except (TypeError, ValueError):
+        raise ValueError(f"配置项 {class_name}.{field_name} 的类型不合法: {value!r}")
 
 
 def _legacy_config_path() -> Optional[Path]:
@@ -135,6 +182,7 @@ def _legacy_config_path() -> Optional[Path]:
 
 
 def load_config() -> AppConfig:
+    """从磁盘读取配置。坏值在这里就报出来，不带进运行时。"""
     path = config_path()
     if not path.exists():
         legacy = _legacy_config_path()
@@ -142,27 +190,33 @@ def load_config() -> AppConfig:
             shutil.copyfile(legacy, path)
     raw: Dict[str, Any] = {}
     if path.exists():
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = yaml.safe_load(f) or {}
-        except Exception as e:
-            print(f"[Config] 读取失败 {path}: {e}")
-            raw = {}
+        with open(path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
 
+    try:
+        return build_config(raw)
+    except ValueError as e:
+        raise ValueError(f"配置文件 {path} 有误: {e}")
+
+
+def build_config(raw: Dict[str, Any]) -> AppConfig:
+    """由原始 dict 构造配置，任何非法类型都会抛 ValueError。"""
+    legacy_system = raw.get("system") or {}
+    context_raw = raw.get("context")
+    if not context_raw:
+        context_raw = {"max_tokens": legacy_system.get("chunk_size", 64000)}
+    workspace_raw = raw.get("workspace")
+    if not workspace_raw:
+        workspace_raw = {"home_dir": legacy_system.get("home_dir", "")}
     return AppConfig(
-        identity=_merge_dataclass(IdentityConfig, raw.get("identity")),
-        api=_merge_dataclass(ApiConfig, raw.get("api")),
-        memory=_merge_dataclass(MemoryConfig, raw.get("memory")),
-        recall=_merge_dataclass(RecallConfig, raw.get("recall")),
-        terminal=_merge_dataclass(TerminalConfig, raw.get("terminal")),
-        web=_merge_dataclass(WebConfig, raw.get("web")),
-        # 兼容旧配置：system.chunk_size / system.home_dir
-        context=_merge_dataclass(ContextConfig, raw.get("context") or {
-            "max_tokens": (raw.get("system") or {}).get("chunk_size", 64000)
-        }),
-        workspace=_merge_dataclass(WorkspaceConfig, raw.get("workspace") or {
-            "home_dir": (raw.get("system") or {}).get("home_dir", "")
-        }),
+        identity=typed_dataclass(IdentityConfig, raw.get("identity")),
+        api=typed_dataclass(ApiConfig, raw.get("api")),
+        memory=typed_dataclass(MemoryConfig, raw.get("memory")),
+        recall=typed_dataclass(RecallConfig, raw.get("recall")),
+        terminal=typed_dataclass(TerminalConfig, raw.get("terminal")),
+        web=typed_dataclass(WebConfig, raw.get("web")),
+        context=typed_dataclass(ContextConfig, context_raw),
+        workspace=typed_dataclass(WorkspaceConfig, workspace_raw),
         theme=raw.get("theme") or {},
     )
 
