@@ -55,3 +55,4 @@ src/renderer/**/*.js
 *.js
 
 release/
+AGENTS.md

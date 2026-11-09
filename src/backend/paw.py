@@ -1777,6 +1777,13 @@ If so, call load_skill(skill_name="...") to get detailed instructions."""
                             self.ui.print_error(f"删除会话失败: {session_id}")
                     continue
 
+                if user_input == '/reload-session':
+                    # 重新发送当前会话 chunks 给前端（消息编辑器修改后刷新显示）
+                    if hasattr(self.ui, 'send_session_load'):
+                        self.ui.send_session_load(self.chunk_manager.to_json_with_display(), mode=self.current_mode)
+                    self._update_status_bar()
+                    continue
+
                 if user_input.startswith('/delete-message '):
                     # 删除单条消息（前端操作）
                     parts = user_input.split(' ')

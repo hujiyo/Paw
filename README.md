@@ -83,6 +83,7 @@ npm run build:linux
 | `/memory` | 查看记忆状态 |
 | `/ctx` | 手动触发上下文优化 |
 | `/stop` | 停止当前生成 |
+| `/reload-session` | 重新推送当前会话内容（消息编辑器保存后由前端自动调用） |
 
 ## 项目结构
 
@@ -104,6 +105,8 @@ Paw/
 │       ├── tools.py       # 基础工具（文件/终端/Web）
 │       ├── tool_definitions.py  # 工具 Schema 定义
 │       ├── tool_registry.py     # 工具注册中心
+│       ├── tool_executor.py     # 线程隔离的工具执行器
+│       ├── display_formatters.py # 工具结果的展示格式化
 │       ├── chunk_system.py      # 上下文管理
 │       ├── context_branch.py    # 上下文分支编辑
 │       ├── branch_executor.py   # 分支执行器
@@ -112,7 +115,8 @@ Paw/
 │       ├── prompts.py           # 提示词配置
 │       ├── call.py              # LLM API 客户端
 │       ├── ui_web.py            # Web UI 服务
-│       └── terminal.py          # 异步终端管理
+│       ├── terminal.py          # 异步终端管理
+│       └── lib/                 # 技能市场与阈值校准
 │
 ├── resources/             # 资源文件
 │   ├── icons/            # 应用图标

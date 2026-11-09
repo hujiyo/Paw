@@ -12,7 +12,7 @@
     <script>
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
     </script>
-    <link rel="stylesheet" href="/static/css/main.css?v=1.0.3">
+    <link rel="stylesheet" href="/static/css/main.css?v=0.1.4">
 </head>
 <body>
     <div id="app-shell">
@@ -762,6 +762,85 @@
         </div>
     </aside>
 
-    <script type="module" src="/js/app.js?v=1.0.3"></script>
+    <!-- 消息编辑器全屏页面 -->
+    <div id="message-editor-page" class="me-page">
+        <!-- 顶部工具栏 -->
+        <div class="me-toolbar">
+            <button class="me-toolbar__back" id="me-back-btn" title="返回对话">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+                返回
+            </button>
+            <div class="me-toolbar__title">消息编辑器</div>
+            <div class="me-toolbar__actions">
+                <button class="me-toolbar__btn" id="me-add-user-btn" title="添加用户消息">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    用户消息
+                </button>
+                <button class="me-toolbar__btn" id="me-add-assistant-btn" title="添加助手消息">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    助手消息
+                </button>
+            </div>
+        </div>
+
+        <!-- 主内容区：左右分栏 -->
+        <div class="me-content">
+            <!-- 左侧：轮次列表 -->
+            <div class="me-sidebar">
+                <div class="me-sidebar__header">
+                    <span class="me-sidebar__title">对话轮次</span>
+                    <span class="me-sidebar__count" id="me-turn-count">0</span>
+                </div>
+                <div class="me-sidebar__list" id="me-turn-list"></div>
+            </div>
+
+            <!-- 右侧：编辑区 -->
+            <div class="me-editor">
+                <div class="me-editor__empty" id="me-editor-empty">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                        <path d="M2 17l10 5 10-5"></path>
+                        <path d="M2 12l10 5 10-5"></path>
+                    </svg>
+                    <p>选择左侧轮次进行编辑</p>
+                </div>
+                <div class="me-editor__content" id="me-editor-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 工具调用添加对话框 -->
+    <div id="me-tool-dialog" class="me-tool-dialog">
+        <div class="me-tool-dialog__content">
+            <div class="me-tool-dialog__title">添加工具调用</div>
+            <div class="me-tool-dialog__field">
+                <label>工具名称</label>
+                <input type="text" id="me-tool-name" placeholder="例如 read_files" />
+            </div>
+            <div class="me-tool-dialog__field">
+                <label>参数 (JSON)</label>
+                <textarea id="me-tool-args" rows="4" placeholder='{}'>{}</textarea>
+            </div>
+            <div class="me-tool-dialog__field">
+                <label>结果</label>
+                <textarea id="me-tool-result" rows="4" placeholder="工具返回值（OpenAI 协议要求每个调用必须配对一条结果）"></textarea>
+            </div>
+            <div class="me-tool-dialog__actions">
+                <button class="me-btn" id="me-tool-cancel">取消</button>
+                <button class="me-btn me-btn--save" id="me-tool-confirm">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/app.js?v=0.1.4"></script>
 </body>
 </html>

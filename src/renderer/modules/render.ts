@@ -27,6 +27,7 @@ export interface MessageActions {
     onDelete?: (msgId: string, role: 'user' | 'assistant') => void;
     onRetry?: (msgId: string) => void;
     onContinue?: (msgId: string) => void;
+    onEdit?: () => void;
 }
 
 let messageActionsCallbacks: MessageActions = {};
@@ -42,6 +43,12 @@ export function setMessageActions(actions: MessageActions): void {
 function buildActionsHtml(role: 'user' | 'assistant'): string {
     let actionsHtml = `
         <div class="msg__actions">
+            <button class="msg__action-btn msg__action-btn--edit" title="编辑对话">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+            </button>
             <button class="msg__action-btn msg__action-btn--copy" title="复制">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -72,57 +79,6 @@ function buildActionsHtml(role: 'user' | 'assistant'): string {
     }
     actionsHtml += '</div>';
     return actionsHtml;
-}
-
-// 创建消息操作按钮元素（用于动态添加）
-export function createMessageActions(role: 'user' | 'assistant', msgId: string | null): HTMLDivElement {
-    const container = document.createElement('div');
-    container.innerHTML = buildActionsHtml(role);
-    const actionsEl = container.firstElementChild as HTMLDivElement;
-    
-    // 绑定事件
-    const parentEl = actionsEl;
-    const copyBtn = parentEl.querySelector('.msg__action-btn--copy');
-    const deleteBtn = parentEl.querySelector('.msg__action-btn--delete');
-    const retryBtn = parentEl.querySelector('.msg__action-btn--retry');
-    const continueBtn = parentEl.querySelector('.msg__action-btn--continue');
-    
-    // 复制按钮 - 复制整个消息的所有内容
-    copyBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const msgEl = (e.target as HTMLElement).closest('.msg');
-        // 获取所有内容块的文本
-        const contentEls = msgEl?.querySelectorAll('.msg__content');
-        const textParts: string[] = [];
-        contentEls?.forEach(contentEl => {
-            const text = contentEl.textContent?.trim();
-            if (text) textParts.push(text);
-        });
-        const textToCopy = textParts.join('\n\n') || '';
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            const btn = copyBtn as HTMLElement;
-            btn.classList.add('msg__action-btn--success');
-            setTimeout(() => btn.classList.remove('msg__action-btn--success'), 1500);
-        });
-        messageActionsCallbacks.onCopy?.(textToCopy, role);
-    });
-    
-    deleteBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (msgId) messageActionsCallbacks.onDelete?.(msgId, role);
-    });
-    
-    retryBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (msgId) messageActionsCallbacks.onRetry?.(msgId);
-    });
-    
-    continueBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (msgId) messageActionsCallbacks.onContinue?.(msgId);
-    });
-    
-    return actionsEl;
 }
 
 // 创建消息元素
@@ -161,10 +117,16 @@ export function createMsgEl(type: string, author: string, text: string, id: stri
 
 // 绑定消息操作按钮事件
 function bindMessageActions(el: HTMLElement, msgId: string | null, role: 'user' | 'assistant', originalText: string): void {
+    const editBtn = el.querySelector('.msg__action-btn--edit');
     const copyBtn = el.querySelector('.msg__action-btn--copy');
     const deleteBtn = el.querySelector('.msg__action-btn--delete');
     const retryBtn = el.querySelector('.msg__action-btn--retry');
     const continueBtn = el.querySelector('.msg__action-btn--continue');
+    
+    editBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        messageActionsCallbacks.onEdit?.();
+    });
     
     // 复制按钮 - 复制整个消息的所有内容
     copyBtn?.addEventListener('click', (e) => {

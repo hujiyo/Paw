@@ -21,6 +21,7 @@ import { SessionManager } from './modules/session-manager.js';
 import { ToolbarManager } from './modules/toolbar-manager.js';
 import { ModeSelector } from './modules/mode-selector.js';
 import { MessageHandler } from './modules/message-handler.js';
+import { MessageEditor } from './modules/message-editor.js';
 
 // ============ DOM 缓存 ============
 interface DomElements {
@@ -82,6 +83,13 @@ WorkspaceFilesSidebar.onFileOpen((path, name, content) => {
 
 // ============ 消息操作回调 ============
 setMessageActions({
+    onEdit: () => {
+        if (uiState.get('isGenerating')) {
+            dialogManager.showInfo('正在生成中，无法编辑对话');
+            return;
+        }
+        MessageEditor.open();
+    },
     onCopy: (text, role) => {
         console.log(`[App] Copied ${role} message`);
     },
@@ -393,6 +401,14 @@ toolbarManager.init();
 sessionManager.init();
 messageHandler.init();
 modeSelector.init();
+
+// 初始化消息编辑器
+MessageEditor.init({
+    onSaved: () => {
+        // 编辑器保存后重新加载会话，刷新显示
+        wsManager.send('/reload-session');
+    }
+});
 
 // 自动调整输入框高度
 const input = document.getElementById('input') as HTMLTextAreaElement;
