@@ -57,10 +57,15 @@ export const StatusBar: StatusBarManager = {
                     return `token: ${(num / 1000).toFixed(1)}K`;
                 }
                 return `token: ${num}`;
+            },
+            // 预算上限紧跟在用量之后显示成 "token: 3.2K / 64K"
+            limit: (v: string | number): string => {
+                const num = typeof v === 'number' ? v : parseInt(v as string, 10);
+                return num >= 1000 ? ` / ${(num / 1000).toFixed(0)}K` : ` / ${num}`;
             }
         };
-        // 默认顺序：workspace -> model -> tokens
-        this._order = ['workspace', 'model', 'tokens'];
+        // 默认顺序：workspace -> model -> tokens -> limit
+        this._order = ['workspace', 'model', 'tokens', 'limit'];
     },
 
     /**
