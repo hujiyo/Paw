@@ -14,6 +14,7 @@
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
@@ -233,6 +234,31 @@ def extract_model_ids(data: Any) -> List[str]:
     return []
 
 
+async def fetch_model_list(base: str, headers: Dict[str, str]) -> List[str]:
+    """从服务根地址取模型列表。
+
+    用户可能只填了域名，模型列表通常在 /v1/models，因此 404 时再试一次；
+    鉴权失败换地址也没用，直接抛出。
+    """
+    candidates = [f"{base}/models"]
+    if "/v1" not in base:
+        candidates.append(f"{base}/v1/models")
+    last: Optional[LLMError] = None
+    for url in candidates:
+        try:
+            return await fetch_models(url, headers)
+        except LLMError as e:
+            last = e
+            if e.status != 404:
+                raise
+    assert last is not None
+    raise LLMError(
+        f"获取模型列表失败：{'、'.join(candidates)} 均不可用（{last.message}）",
+        kind=last.kind,
+        status=last.status,
+    )
+
+
 async def fetch_models(url: str, headers: Dict[str, str]) -> List[str]:
     """请求模型列表。失败抛出 LLMError，不返回空列表掩盖问题。"""
     try:
@@ -276,6 +302,29 @@ def base_url(url: str) -> str:
             path = path[: -len(suffix)]
             break
     return urlunsplit((parts.scheme, parts.netloc, path, "", "")).rstrip("/")
+
+
+def chat_endpoint(url: str) -> str:
+    """把用户填的地址补全成完整的 chat 端点。
+
+    设置页只校验"地址能连通"，用户很可能只填到服务根地址或 /v1；
+    直接把这些地址当端点 POST 会得到一个 nginx 404。完整端点原样返回。
+
+    带版本段的服务（.../v1、.../paas/v4）只在末尾补 /chat/completions；
+    裸域名才补 /v1/chat/completions，因为版本段属于厂商自己的路由。
+    """
+    parts = urlsplit(url or "")
+    path = parts.path.rstrip("/")
+    endpoint_suffixes = ("/chat/completions", "/completions", "/messages")
+    if any(path.endswith(suffix) for suffix in endpoint_suffixes):
+        return url
+    # .../deployments/{name} 是 Azure 式路径，无法推断模型段
+    if re.search(r"/deployments/", path):
+        return url
+    base = base_url(url)
+    if re.search(r"/v\d", urlsplit(base).path):
+        return base + "/chat/completions"
+    return base + "/v1/chat/completions"
 
 
 CONTEXT_OVERFLOW_HINTS = (
