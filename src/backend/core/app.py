@@ -233,7 +233,7 @@ class PawApp:
             return
 
         if cmd.startswith("/load "):
-            await self._load_session(cmd.split(" ", 1)[1].strip())
+            self._load_session(cmd.split(" ", 1)[1].strip())
             return
 
         if cmd.startswith("/delete-session "):
