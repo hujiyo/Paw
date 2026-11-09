@@ -169,6 +169,9 @@ class AgentKernel:
 
             outcome = await self._run_tool_calls(result.tool_calls)
             if outcome == "stop":
+                # 未执行的工具调用不能留在会话里：没有对应 tool 结果
+                # 的 tool_calls 会让下一次请求直接被协议拒绝
+                self._drop_unresolved_tool_calls()
                 return self._finish_stopped(final_text)
             if outcome == "silent":
                 return self._finish_silent()
@@ -306,6 +309,19 @@ class AgentKernel:
         if self._stream_id is not None:
             self._emit(ev.ASSISTANT_STREAM_END, {"id": self._stream_id})
             self._stream_id = None
+
+    def _drop_unresolved_tool_calls(self) -> None:
+        """移除没有对应 tool 结果的工具调用。"""
+        assert self.session is not None
+        resolved = {m.tool_call_id for m in self.session.messages if m.role == "tool"}
+        for message in self.session.messages:
+            if message.role != "assistant" or not message.tool_calls:
+                continue
+            message.tool_calls = [
+                tc for tc in message.tool_calls
+                if (tc.get("id") or "") in resolved
+            ] or None
+        self.store.mark_dirty(self.session)
 
     def _finish_silent(self) -> TurnOutcome:
         self._end_stream()
