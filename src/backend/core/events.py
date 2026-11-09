@@ -24,6 +24,11 @@ ASSISTANT_STREAM_START = "assistant_stream_start"
 ASSISTANT_STREAM_CHUNK = "assistant_stream_chunk"
 ASSISTANT_STREAM_END = "assistant_stream_end"
 
+# --- 思维链（推理类模型） ---
+REASONING_START = "reasoning_start"
+REASONING_CHUNK = "reasoning_chunk"
+REASONING_END = "reasoning_end"
+
 # --- 工具 ---
 TOOL_START = "tool_start"
 TOOL_RESULT = "tool_result"

@@ -202,6 +202,18 @@ wsManager.on('assistant_stream_end', (data) => {
     messageHandler.handleStreamEnd(data as { id: string });
 });
 
+wsManager.on('reasoning_start', () => {
+    messageHandler.handleReasoningStart();
+});
+
+wsManager.on('reasoning_chunk', (data) => {
+    messageHandler.handleReasoningChunk(data as { id: string; text?: string });
+});
+
+wsManager.on('reasoning_end', () => {
+    messageHandler.handleReasoningEnd();
+});
+
 wsManager.on('tool_start', (data) => {
     messageHandler.handleToolStart(data as { id: string; name: string; args: string; raw_request?: Record<string, unknown> });
 });

@@ -15,9 +15,8 @@
 
 import asyncio
 import json
-import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from core import events as ev
@@ -25,7 +24,8 @@ from core.context import ContextBudget
 from core.llm import LLMClient, LLMError
 from core.session import Session
 from core.storage import SessionStore
-from core.tools import ToolError, ToolResult, ToolSpec, execute_tool
+from core.tokens import count_json
+from core.tools import ToolError, execute_tool
 
 
 class StopRequested(Exception):
@@ -50,6 +50,7 @@ class AgentKernel:
         budget: ContextBudget,
         system_prompt_builder,
         max_steps: int = 32,
+        show_reasoning: bool = True,
     ):
         self.sink = sink
         self.llm = llm
@@ -58,13 +59,16 @@ class AgentKernel:
         self.budget = budget
         self.build_system_prompt = system_prompt_builder
         self.max_steps = max_steps
+        self.show_reasoning = show_reasoning
         self.session: Optional[Session] = None
         self._stop = asyncio.Event()
         self._stream_id: Optional[str] = None
+        self._reasoning_id: Optional[str] = None
         # 本轮临时注入的记忆（不进会话历史，避免模型模仿其格式）
         self.pending_context: str = ""
         # 本次流式已产出的文本（中断时用它落盘，避免内容丢失）
         self._streamed_text: str = ""
+        self._streamed_reasoning: str = ""
 
     # ---------- 会话 ----------
 
@@ -124,6 +128,8 @@ class AgentKernel:
 
         self._stop.clear()
         self._streamed_text = ""
+        self._streamed_reasoning = ""
+        self.budget.reset()
         session = self.session
         session.add_user(user_input)
         self.store.mark_dirty(session)
@@ -131,6 +137,7 @@ class AgentKernel:
 
         final_text = ""
         hit_step_limit = False
+        overflow_retried = False
         for step in range(1, self.max_steps + 1):
             if self._stop.is_set():
                 return self._finish_stopped(final_text)
@@ -144,26 +151,59 @@ class AgentKernel:
                     messages,
                     tools=self.registry.schemas(),
                     on_delta=self._on_delta,
+                    on_reasoning=self._on_reasoning,
                 )
             except StopRequested:
                 self._end_stream()
-                if self._streamed_text:
-                    session.add_assistant(self._streamed_text)
+                self._end_reasoning()
+                if self._streamed_text or self._streamed_reasoning:
+                    session.add_assistant(
+                        self._streamed_text, None, self._streamed_reasoning or None
+                    )
                     self.store.mark_dirty(session)
                 self._streamed_text = ""
+                self._streamed_reasoning = ""
                 return self._finish_stopped(final_text)
             except LLMError as e:
                 self._end_stream()
+                self._end_reasoning()
+                if e.kind == "context_overflow" and not overflow_retried:
+                    # 服务端说上下文超了：说明估算偏低，收紧本轮预算后重试一次。
+                    # 只重试一次，再失败就是真的超了，直接报给用户。
+                    overflow_retried = True
+                    target = self.budget.shrink()
+                    self._sys(
+                        f"[上下文] 服务端报告上下文超限，已收紧到 {target} tokens 并重试",
+                        "dim",
+                    )
+                    continue
                 self._sys(str(e), "error")
                 return TurnOutcome(completed=False, error=str(e), final_text=final_text)
 
             self._end_stream()
+            self._end_reasoning()
+            reasoning = self._streamed_reasoning
             self._streamed_text = ""
+            self._streamed_reasoning = ""
             if result.content:
                 final_text = result.content
+            if result.reasoning:
+                reasoning = result.reasoning
 
-            assistant = session.add_assistant(result.content or "", result.tool_calls or None)
+            session.add_assistant(
+                result.content or "",
+                result.tool_calls or None,
+                reasoning or None,
+            )
             self.store.mark_dirty(session)
+
+            if result.truncated:
+                # 截断必须说出来：用户看到的断句和"模型不会写"是两回事
+                self._sys(
+                    f"[模型] 输出达到长度上限（{self.llm.max_tokens} tokens）被截断，"
+                    "可在设置中调高最大输出长度",
+                    "error",
+                )
 
             if not result.tool_calls:
                 break
@@ -292,17 +332,20 @@ class AgentKernel:
     def _prepare_messages(self) -> List[Dict[str, Any]]:
         assert self.session is not None
         system_prompt = self.build_system_prompt(self.session)
-        tools_tokens = len(json.dumps(self.registry.schemas(), ensure_ascii=False)) // 4
+        tools_tokens = count_json(self.registry.schemas())
+        # 预留输出空间：输入占满预算时模型没有余量生成回复
+        reserve = min(4096, max(512, self.llm.max_tokens))
         messages, report = self.budget.fit(
             self.session,
             system_prompt,
             tools_tokens,
             lambda s: s.to_llm_messages(system_prompt),
+            reserve=reserve,
         )
         if report.dropped_turns:
             self._sys(
                 f"[上下文] 超出预算，已移除最旧的 {report.dropped_turns} 轮对话"
-                f"（当前 {report.after}/{self.budget.max_tokens} tokens）",
+                f"（当前 {report.after}/{self.budget.effective_max()} tokens）",
                 "dim",
             )
         return messages
@@ -312,16 +355,38 @@ class AgentKernel:
     def _on_delta(self, text: str) -> None:
         if self._stop.is_set():
             raise StopRequested()
+        self._end_reasoning()
         self._streamed_text += text
         if self._stream_id is None:
             self._stream_id = str(uuid.uuid4())
             self._emit(ev.ASSISTANT_STREAM_START, {"id": self._stream_id})
         self._emit(ev.ASSISTANT_STREAM_CHUNK, {"id": self._stream_id, "text": text})
 
+    def _on_reasoning(self, text: str) -> None:
+        """思维链走独立通道，不混入正文。
+
+        部分模型会边思考边输出正文，两者交替到达；一旦开始出正文就
+        结束思考块，避免前端把正文挤进折叠区。
+        """
+        if self._stop.is_set():
+            raise StopRequested()
+        if not self.show_reasoning:
+            return
+        self._streamed_reasoning += text
+        if self._reasoning_id is None:
+            self._reasoning_id = str(uuid.uuid4())
+            self._emit(ev.REASONING_START, {"id": self._reasoning_id})
+        self._emit(ev.REASONING_CHUNK, {"id": self._reasoning_id, "text": text})
+
     def _end_stream(self) -> None:
         if self._stream_id is not None:
             self._emit(ev.ASSISTANT_STREAM_END, {"id": self._stream_id})
             self._stream_id = None
+
+    def _end_reasoning(self) -> None:
+        if self._reasoning_id is not None:
+            self._emit(ev.REASONING_END, {"id": self._reasoning_id})
+            self._reasoning_id = None
 
     def _drop_unresolved_tool_calls(self) -> None:
         """移除没有对应 tool 结果的工具调用。"""
@@ -365,6 +430,7 @@ class AgentKernel:
             workspace=self.session.workspace_dir,
             model=self.session.model,
             tokens=tokens,
+            limit=self.budget.effective_max(),
         )
 
     def _emit_todos(self) -> None:

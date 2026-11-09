@@ -1,6 +1,7 @@
 // 对话历史管理
-import { escapeHtml, scrollToBottom } from './utils.js';
+import { scrollToBottom } from './utils.js';
 import { createMsgEl, getDefaultDisplay, updateToolElement, getToolIcon, ToolArgs } from './render.js';
+import { renderMarkdown } from './markdown.js';
 import { Browser } from './browser.js';
 import { Planner } from './planner.js';
 
@@ -10,20 +11,6 @@ export interface Message {
     id: string;
     role: 'user' | 'assistant';
     text: string;
-}
-
-export interface TurnPart {
-    type: 'text' | 'tool';
-    text?: string;
-    id?: string;
-    name?: string;
-}
-
-export interface Turn {
-    role: 'user' | 'assistant';
-    msgId: string | null;
-    text: string;
-    parts: TurnPart[];
 }
 
 export interface ToolCall {
@@ -48,7 +35,7 @@ export interface ToolDisplay {
 }
 
 export interface SessionChunk {
-    type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system' | 'memory' | 'shell' | 'thought';
+    type: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system' | 'memory' | 'shell' | 'reasoning';
     content?: string;
     metadata?: ChunkMetadata;
 }
@@ -59,17 +46,22 @@ export interface DomRefs {
     [key: string]: HTMLElement | null;
 }
 
-// ============ ChatHistory 管理器 ============
-// 重构说明：轮次数据现在由后端 ChunkManager 统一管理
-// 前端仅保留必要的 UI 状态，通过 /api/turns 或 turns_updated 事件获取数据
-
-interface BackendTurn {
-    index: number;
-    role: 'user' | 'assistant';
-    preview: string;
-    tool_count: number;
-    parts: TurnPart[];
+/** 历史会话里的思维链：与实时流式一致的折叠结构。 */
+function buildReasoningEl(text: string): HTMLElement {
+    const details = document.createElement('details');
+    details.className = 'msg__reasoning';
+    const summary = document.createElement('summary');
+    summary.textContent = '思考过程';
+    const body = document.createElement('div');
+    body.className = 'msg__reasoning-body';
+    body.textContent = text;
+    details.appendChild(summary);
+    details.appendChild(body);
+    return details;
 }
+
+// ============ ChatHistory 管理器 ============
+// 会话内容由后端会话模型统一持有；前端只维护渲染所需的边界状态。
 
 interface ChatHistoryManager {
     dom: DomRefs | null;
@@ -78,14 +70,7 @@ interface ChatHistoryManager {
     isInAssistantTurn: boolean;
     init(dom: DomRefs): void;
     addUserMessage(text: string): string;
-    onStreamStart(msgId: string): void;
-    onStreamEnd(text: string): void;
-    addTool(toolId: string, toolName: string): void;
     endAssistantTurn(): void;
-    renderChain(): void;
-    renderChainFromData(turns: BackendTurn[]): void;
-    fetchAndRenderChain(): Promise<void>;
-    highlightAndScrollTo(elementId: string, isTool?: boolean): void;
     clear(): void;
     loadSessionChunks(chunks: SessionChunk[]): void;
 }
@@ -117,130 +102,14 @@ export const ChatHistory: ChatHistoryManager = {
         return msgId;
     },
 
-    // 记录流式文本开始（UI 状态管理）
-    onStreamStart(msgId: string): void {
-        // 保留用于 UI 状态跟踪
-    },
-
-    // 记录流式文本结束
-    onStreamEnd(text: string): void {
-        // 保留用于 UI 状态跟踪
-    },
-
-    // 添加工具调用（UI 状态管理）
-    addTool(toolId: string, toolName: string): void {
-        // 保留用于 UI 状态跟踪
-    },
-
-    // 结束助手轮次 - 从后端获取最新轮次数据并渲染
+    // 结束助手轮次
     endAssistantTurn(): void {
         this.isInAssistantTurn = false;
-        // 从后端获取最新轮次数据
-        this.fetchAndRenderChain();
-    },
-
-    // 从后端获取轮次数据并渲染
-    async fetchAndRenderChain(): Promise<void> {
-        try {
-            const response = await fetch('/api/turns');
-            const data = await response.json();
-            if (data.success && data.turns) {
-                this.renderChainFromData(data.turns);
-            }
-        } catch (e) {
-            console.warn('Failed to fetch turns:', e);
-        }
-    },
-
-    // 渲染对话链视图（从后端数据）
-    renderChainFromData(turns: BackendTurn[]): void {
-        if (!this.dom) return;
-        
-        // 当前对话视图已移除，此方法不再需要
-        return;
-
-        turns.forEach((turn) => {
-            const el = document.createElement('div');
-            el.className = 'chain-item';
-            el.dataset.turnIdx = String(turn.index);
-
-            const isAssistant = turn.role === 'assistant';
-            const hasParts = isAssistant && turn.parts && turn.parts.length > 0;
-            const toolCount = turn.tool_count || 0;
-            
-            const preview = turn.preview || '';
-
-            let detailsHtml = '';
-            if (hasParts && turn.parts) {
-                detailsHtml = '<div class="chain-item__details">';
-                turn.parts.forEach((part) => {
-                    if (part.type === 'tool') {
-                        detailsHtml += `<div class="chain-item__detail chain-item__detail--tool" data-tool-id="${part.id}">⎿ ⚙ ${part.name}</div>`;
-                    } else if (part.type === 'text' && part.text) {
-                        const textPreview = part.text.slice(0, 50) + (part.text.length > 50 ? '…' : '');
-                        detailsHtml += `<div class="chain-item__detail chain-item__detail--text">⎿ 💬 ${escapeHtml(textPreview)}</div>`;
-                    }
-                });
-                detailsHtml += '</div>';
-            }
-
-            el.innerHTML = `
-                <div class="chain-item__header">
-                    ${hasParts ? '<span class="chain-item__toggle">▶</span>' : ''}
-                    <span class="chain-item__role chain-item__role--${turn.role}">${turn.role === 'user' ? 'USER' : 'PAW'}</span>
-                    <span class="chain-item__text">${escapeHtml(preview.slice(0, 45))}${preview.length > 45 ? '…' : ''}</span>
-                    ${toolCount > 0 ? `<span class="chain-item__meta">${toolCount}⚙</span>` : ''}
-                </div>
-                ${detailsHtml}
-            `;
-
-            const header = el.querySelector('.chain-item__header');
-            if (header) {
-                header.addEventListener('click', () => {
-                    if (hasParts) {
-                        el.classList.toggle('chain-item--expanded');
-                    }
-                });
-            }
-
-            el.querySelectorAll('.chain-item__detail').forEach(detail => {
-                detail.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const toolId = (detail as HTMLElement).dataset.toolId;
-                    if (toolId) {
-                        this.highlightAndScrollTo(`tool-${toolId}`, true);
-                    }
-                });
-            });
-
-        });
-    },
-
-    // 兼容方法：立即调用后端获取并渲染
-    renderChain(): void {
-        this.fetchAndRenderChain();
-    },
-
-    highlightAndScrollTo(elementId: string, isTool: boolean = false): void {
-        const el = document.getElementById(elementId);
-        if (!el) return;
-
-        document.querySelectorAll('.msg--highlighted, .tool--highlighted').forEach(e => {
-            e.classList.remove('msg--highlighted', 'tool--highlighted');
-        });
-
-        el.classList.add(isTool ? 'tool--highlighted' : 'msg--highlighted');
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-        setTimeout(() => {
-            el.classList.remove('msg--highlighted', 'tool--highlighted');
-        }, 2000);
     },
 
     clear(): void {
         this.messages = [];
         this.isInAssistantTurn = false;
-        this.renderChain();
     },
 
     // 加载历史会话 (包含 chunks 解析逻辑)
@@ -292,7 +161,18 @@ export const ChatHistory: ChatHistoryManager = {
             const type = chunk.type;
 
             // 跳过内部 chunk 类型
-            if (type === 'system' || type === 'memory' || type === 'shell' || type === 'thought') {
+            if (type === 'system' || type === 'memory' || type === 'shell') {
+                return;
+            }
+
+            if (type === 'reasoning') {
+                // 思维链折叠到当前助手消息里，排在正文之前
+                if (currentAssistantMsgEl) {
+                    const body = currentAssistantMsgEl.querySelector('.msg__body');
+                    if (body) {
+                        body.insertBefore(buildReasoningEl(chunk.content || ''), body.firstChild);
+                    }
+                }
                 return;
             }
 
@@ -314,7 +194,7 @@ export const ChatHistory: ChatHistoryManager = {
                         if (body) {
                             const newContent = document.createElement('div');
                             newContent.className = 'msg__content';
-                            newContent.innerHTML = marked.parse(chunk.content);
+                            newContent.innerHTML = renderMarkdown(chunk.content);
                             body.appendChild(newContent);
                         }
                     }
@@ -410,10 +290,7 @@ export const ChatHistory: ChatHistoryManager = {
         });
 
         scrollToBottom(this.dom!.msgWrap);
-        
-        // 从后端获取轮次数据并渲染对话链
-        this.renderChain();
-        
+
         // 刷新 Browser URL 列表
         Browser.refresh();
         // 刷新 Planner 状态

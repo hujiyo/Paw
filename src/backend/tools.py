@@ -18,7 +18,6 @@ from urllib.parse import quote_plus
 import aiohttp
 from bs4 import BeautifulSoup
 import html2text
-from core.llm import LLMClient
 
 class BaseTools:
     """基础工具类 - 仅包含 3-5 个核心原子操作"""
@@ -954,52 +953,30 @@ class WebTools:
     """
     Web 工具类 - 提供搜索和网页阅读功能
     """
-    def __init__(self, config: dict, api_url: str, model_getter, api_key: Optional[str] = None):
-        """
-        初始化 Web 工具
-        
-        Args:
-            config: web 配置字典
-            api_url: API 地址（用于生成摘要）
-            model_getter: 获取当前模型名称的函数（动态获取）
-            api_key: API 密钥
-        """
-        self.config = config or {}
-        self.api_url = api_url
-        self._model_getter = model_getter  # 动态获取模型
-        self.api_key = api_key
-
-        # 配置项
-        self.search_engine = self.config.get('search_engine', 'duckduckgo')
-        self.max_results = self.config.get('max_results', 5)
-        self.page_size = self.config.get('page_size', 8192)  # 每页最大 8KB
-        self.use_jina_reader = self.config.get('use_jina_reader', True)  # 默认启用 Jina Reader
-        self.custom_search_api = self.config.get('custom_search_api') or {}
-
-        # 内存存储: page_id -> {"content": str, "url": str, "summary": str}
+    def __init__(self, config: dict):
+        # 缓存状态与配置无关，只初始化一次
         self.pages: Dict[str, Dict[str, str]] = {}
-
-        # URL 到 page_ids 的映射
         self.url_pages: Dict[str, List[str]] = {}
-
-        # 搜索结果 URL 映射: url_id -> url
         self.url_refs: Dict[str, str] = {}
-
-        # 已使用的 ID 集合（防止重复，page_id 和 url_id 共用）
         self.used_ids: set = set()
 
-        # html2text 转换器配置
         self.h2t = html2text.HTML2Text()
         self.h2t.ignore_links = False
         self.h2t.ignore_images = True
         self.h2t.ignore_emphasis = False
         self.h2t.body_width = 0  # 不自动换行
 
-    @property
-    def model(self) -> str:
-        """动态获取当前模型名称"""
-        return self._model_getter() if callable(self._model_getter) else str(self._model_getter)
-    
+        self.apply_config(config or {})
+
+    def apply_config(self, config: dict) -> None:
+        """配置保存后立即生效。只重算派生参数，不动已缓存的页面。"""
+        self.config = config or {}
+        self.search_engine = self.config.get('search_engine', 'duckduckgo')
+        self.max_results = self.config.get('max_results', 5)
+        self.page_size = self.config.get('page_size', 8192)
+        self.use_jina_reader = self.config.get('use_jina_reader', True)
+        self.custom_search_api = self.config.get('custom_search_api') or {}
+
     def _generate_page_id(self) -> str:
         """生成全局唯一的 4 位 page_id (base62)"""
         chars = string.ascii_lowercase + string.ascii_uppercase + string.digits
@@ -1201,12 +1178,11 @@ class WebTools:
             page_ids = [self._generate_page_id() for _ in pages_content]
             total_pages = len(pages_content)
             
-            # 并行生成所有摘要（大幅提升速度）
-            summary_tasks = [
-                self._generate_summary(content, i + 1, total_pages)
+            # 逐页摘要
+            summaries = [
+                self._generate_summary_sync(content, i + 1, total_pages)
                 for i, content in enumerate(pages_content)
             ]
-            summaries = await asyncio.gather(*summary_tasks)
             
             # 存储到内存并构建返回信息
             page_infos = []
@@ -1441,45 +1417,16 @@ class WebTools:
         
         return pages if pages else [content]
     
-    async def _generate_summary(self, content: str, page_num: int, total_pages: int) -> str:
-        """使用 LLM 生成页面摘要（10-30字）"""
-        
-        # 如果内容为空，直接返回
+    def _generate_summary_sync(self, content: str, page_num: int, total_pages: int) -> str:
+        """页面摘要：不依赖模型。
+
+        用模型逐页摘要会让一次抓取产生 N 次额外请求，既慢又贵，还会
+        触发限流。摘要的唯一用途是让模型决定读哪一页，取正文首句已经够用。
+        需要模型理解时，模型可以直接 read_page 读全文。
+        """
         if not content or not content.strip():
             return "(空页面)"
-        
-        # 截取内容的前 500 字符用于生成摘要
-        preview = content[:500] if len(content) > 500 else content
-        
-        prompt = f"""请用10-30个中文字符总结以下内容。只输出总结，不要其他内容。\n内容（第{page_num}页/共{total_pages}页）:\n{preview} \n请开始总结:"""
-        
-        try:
-            llm = LLMClient(self.api_url, self.api_key, self.model, timeout=15)
-            
-            messages = [
-                {"role": "system", "content": "你是一个精简的摘要生成器。只输出10-30字的中文摘要，不要任何其他内容。"},
-                {"role": "user", "content": prompt}
-            ]
-            
-            response = await llm.chat(
-                messages,
-                temperature=0.3,
-                max_tokens=50,
-                extra_params={"thinking": "disabled"}  # 禁用推理模式
-            )
-            
-            if response.content:
-                summary = response.content.strip()
-                return summary[:30] if len(summary) > 30 else summary
-            return self._simple_summary(content)
-                        
-        except Exception as e:
-            # 出错时使用简单摘要
-            pass
-        
-        # 兆底：确保返回非空
-        fallback = self._simple_summary(content)
-        return fallback if fallback else f"第{page_num}页内容"
+        return self._simple_summary(content)
     
     def _simple_summary(self, content: str) -> str:
         """简单摘要（当 LLM 不可用时）"""

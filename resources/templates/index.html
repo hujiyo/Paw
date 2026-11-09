@@ -499,6 +499,26 @@
                     <input type="text" class="settings__input" id="cfg-api-url" placeholder="https://api.example.com/v1/chat/completions">
                 </div>
                 <div class="settings__field">
+                    <label class="settings__label">接口协议</label>
+                    <select class="settings__select" id="cfg-api-style">
+                        <option value="auto">自动识别（按地址判断）</option>
+                        <option value="openai">OpenAI 兼容</option>
+                        <option value="anthropic">Anthropic Messages</option>
+                        <option value="azure">Azure OpenAI</option>
+                    </select>
+                    <div class="settings__hint">绝大多数厂商使用 OpenAI 兼容协议；地址里含 /messages 或 anthropic 时自动识别为 Anthropic</div>
+                </div>
+                <div class="settings__field">
+                    <label class="settings__label">温度</label>
+                    <input type="number" class="settings__input" id="cfg-api-temperature" min="0" max="2" step="0.1" value="0.7">
+                    <div class="settings__hint">0 更确定，1 以上更发散；推理类模型建议 0.6 左右</div>
+                </div>
+                <div class="settings__field">
+                    <label class="settings__label">最大输出长度 (token)</label>
+                    <input type="number" class="settings__input" id="cfg-api-max-tokens" min="256" max="65536" step="256" value="8192">
+                    <div class="settings__hint">单次回复的上限；推理类模型的思维链也占用这个额度</div>
+                </div>
+                <div class="settings__field">
                     <label class="settings__label">默认模型</label>
                     <div class="model-select" id="model-select">
                         <div class="model-select__trigger" id="model-select-trigger">
@@ -579,6 +599,14 @@
                 <div class="settings__field">
                     <label class="settings__label">上下文窗口大小 (token)</label>
                     <input type="number" class="settings__input" id="cfg-chunk-size" min="1000" max="200000" step="1000" value="64000">
+                    <div class="settings__hint">整轮请求的总预算（系统提示 + 历史 + 工具定义）。超出后会自动压缩旧内容并告知</div>
+                </div>
+                <div class="settings__field">
+                    <label class="settings__label">显示思维链</label>
+                    <div class="settings__checkbox-group">
+                        <input type="checkbox" class="settings__checkbox" id="cfg-show-reasoning">
+                        <span class="settings__hint">推理类模型输出的思考过程以折叠区展示，不占用上下文预算</span>
+                    </div>
                 </div>
             </div>
 

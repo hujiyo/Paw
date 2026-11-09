@@ -14,11 +14,11 @@
 keep_recent_turns 轮不动。
 """
 
-import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.session import Message, Session
+from core.tokens import count_messages
 
 # 工具结果截断后保留的字符数
 TOOL_RESULT_KEEP_CHARS = 1200
@@ -28,14 +28,7 @@ SHELL_TOOL_NAMES = {"run_command", "open_shell", "interrupt_command"}
 
 
 def estimate_tokens(messages: List[Dict[str, Any]]) -> int:
-    total = 0
-    for msg in messages:
-        content = msg.get("content")
-        if isinstance(content, str):
-            total += len(content)
-        if msg.get("tool_calls"):
-            total += len(json.dumps(msg["tool_calls"], ensure_ascii=False))
-    return total // 4
+    return count_messages(messages)
 
 
 @dataclass
@@ -51,6 +44,19 @@ class ContextBudget:
     def __init__(self, max_tokens: int, keep_recent_turns: int = 4):
         self.max_tokens = max_tokens
         self.keep_recent_turns = keep_recent_turns
+        # 服务端报告上下文超长后，本轮改用更小的目标，避免重试时再次超限
+        self.override: Optional[int] = None
+
+    def effective_max(self) -> int:
+        return self.override or self.max_tokens
+
+    def shrink(self, ratio: float = 0.6) -> int:
+        """把本轮的预算目标下调，返回新的目标值。"""
+        self.override = max(1024, int(self.effective_max() * ratio))
+        return self.override
+
+    def reset(self) -> None:
+        self.override = None
 
     def fit(
         self,
@@ -58,13 +64,15 @@ class ContextBudget:
         system_prompt: str,
         tools_tokens: int,
         build: callable,
+        reserve: int = 0,
     ) -> Tuple[List[Dict[str, Any]], BudgetReport]:
         """把会话压到预算内，返回最终消息与报告。
 
         build(session) -> messages 由调用方提供（复用 session.to_llm_messages），
-        以便压缩后重新构建时保持一致。
+        以便压缩后重新构建时保持一致。reserve 是本轮要预留的输出空间，
+        必须从可用预算里扣掉，否则输入占满后模型没有余量生成回复。
         """
-        available = self.max_tokens - tools_tokens
+        available = self.effective_max() - tools_tokens - reserve
         messages = build(session)
         before = estimate_tokens(messages)
 
@@ -124,9 +132,8 @@ class ContextBudget:
                 return dropped
 
             user_indices = [i for i, m in enumerate(session.messages) if m.role == "user"]
-        # 至少保留 system 之外的一段内容，避免删到空会话
+            # 至少保留最近 keep_recent_turns 轮，避免删到空会话
             if len(user_indices) <= self.keep_recent_turns:
-                # 已无可再删的轮次，保留全部；上层会在请求前再检查一次
                 return dropped
 
             cut_index = user_indices[0]

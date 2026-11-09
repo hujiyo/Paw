@@ -17,7 +17,6 @@ interface StreamData {
     id: string;
     text?: string;
 }
-
 interface ToolStartData {
     id: string;
     name: string;
@@ -140,6 +139,8 @@ export class MessageHandler {
     /** 新对话或加载历史会话时重置轮次边界。 */
     resetTurnState(): void {
         this.currentAssistantEl = null;
+        this.currentReasoningEl = null;
+        this.reasoningBuf = '';
         this.uiState.endStream();
     }
 
@@ -149,6 +150,45 @@ export class MessageHandler {
 
     handleStreamEnd(data: StreamData): void {
         this.endStream(data.id);
+    }
+
+    // ---------- 思维链 ----------
+    // 推理模型边想边写，思考内容走独立通道，折叠展示，不混入正文。
+
+    private currentReasoningEl: HTMLElement | null = null;
+    private reasoningBuf = '';
+
+    handleReasoningStart(): void {
+        if (this.currentReasoningEl) return;
+        if (!this.currentAssistantEl) {
+            this.currentAssistantEl = createMsgEl('assistant', 'PAW', '', `msg-${Date.now()}`);
+            this.messages.appendChild(this.currentAssistantEl);
+        }
+        const body = this.currentAssistantEl.querySelector('.msg__body');
+        if (!body) return;
+
+        const details = document.createElement('details');
+        details.className = 'msg__reasoning';
+        details.innerHTML = '<summary>思考过程</summary><div class="msg__reasoning-body"></div>';
+        // 思考块永远排在正文之前
+        body.insertBefore(details, body.firstChild);
+        this.currentReasoningEl = details;
+        this.reasoningBuf = '';
+    }
+
+    handleReasoningChunk(data: StreamData): void {
+        if (!this.currentReasoningEl) this.handleReasoningStart();
+        this.reasoningBuf += data.text || '';
+        const target = this.currentReasoningEl?.querySelector('.msg__reasoning-body');
+        if (target) {
+            target.textContent = this.reasoningBuf;
+            scrollToBottom(this.msgWrap);
+        }
+    }
+
+    handleReasoningEnd(): void {
+        this.currentReasoningEl = null;
+        this.reasoningBuf = '';
     }
 
     /** 当前助手轮次的容器。一轮里可能有多次流式输出（工具调用前后各一次）。 */
@@ -171,7 +211,6 @@ export class MessageHandler {
         if (body) body.appendChild(content);
 
         this.uiState.set('currentContentEl', content);
-        ChatHistory.onStreamStart(id);
         scrollToBottom(this.msgWrap);
     }
 
@@ -213,7 +252,6 @@ export class MessageHandler {
         });
 
         const streamBuf = this.uiState.get('streamBuf');
-        ChatHistory.onStreamEnd(streamBuf);
 
         Browser.refresh();
         this.uiState.endStream();
@@ -266,7 +304,6 @@ export class MessageHandler {
             this.currentAssistantEl.appendChild(el);
         }
 
-        ChatHistory.addTool(data.id, data.name);
         scrollToBottom(this.msgWrap);
 
         if (['create_todo_list', 'add_todos', 'mark_todo_as_done'].includes(data.name)) {
@@ -319,6 +356,8 @@ export class MessageHandler {
         this.setGeneratingState(false);
         // 本轮结束，下一轮助手消息必须新建容器
         this.currentAssistantEl = null;
+        this.currentReasoningEl = null;
+        this.reasoningBuf = '';
         this.uiState.endStream();
     }
 
