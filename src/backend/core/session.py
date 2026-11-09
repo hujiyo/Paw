@@ -22,6 +22,8 @@ class Message:
     tool_calls: Optional[List[Dict[str, Any]]] = None
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
+    # 模型输出的思维链。只用于展示，不参与后续请求。
+    reasoning: Optional[str] = None
     # 展示用附加信息（不参与模型请求）
     display: Optional[Dict[str, Any]] = None
     success: bool = True
@@ -60,6 +62,8 @@ class Message:
             data["tool_call_id"] = self.tool_call_id
         if self.name:
             data["name"] = self.name
+        if self.reasoning:
+            data["reasoning"] = self.reasoning
         if self.display:
             data["display"] = self.display
         return data
@@ -72,16 +76,20 @@ class Message:
             tool_calls=data.get("tool_calls"),
             tool_call_id=data.get("tool_call_id"),
             name=data.get("name"),
+            reasoning=data.get("reasoning"),
             display=data.get("display"),
             success=data.get("success", True),
             timestamp=data.get("timestamp") or datetime.now().isoformat(),
         )
 
     def estimate_tokens(self) -> int:
-        chars = len(self.content or "")
+        from core.tokens import count_json, count_text
+
+        chars = count_text(self.content)
         if self.tool_calls:
-            chars += len(json.dumps(self.tool_calls, ensure_ascii=False))
-        return max(1, chars // 4)
+            chars += count_json(self.tool_calls)
+        # 思维链不进入请求，不占预算
+        return max(1, chars)
 
 
 @dataclass
@@ -108,8 +116,13 @@ class Session:
         self.touch()
         return msg
 
-    def add_assistant(self, text: str, tool_calls: Optional[List[Dict[str, Any]]] = None) -> Message:
-        msg = Message("assistant", text or "", tool_calls=tool_calls)
+    def add_assistant(
+        self,
+        text: str,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        reasoning: Optional[str] = None,
+    ) -> Message:
+        msg = Message("assistant", text or "", tool_calls=tool_calls, reasoning=reasoning)
         self.messages.append(msg)
         self.touch()
         return msg
@@ -215,6 +228,15 @@ class Session:
                     "metadata": {},
                 })
             elif msg.role == "assistant":
+                if msg.reasoning:
+                    chunks.append({
+                        "type": "reasoning",
+                        "msg_id": msg_id,
+                        "content": msg.reasoning,
+                        "timestamp": msg.timestamp,
+                        "tokens": 0,
+                        "metadata": {},
+                    })
                 if msg.content:
                     chunks.append({
                         "type": "assistant",
@@ -230,7 +252,7 @@ class Session:
                         "msg_id": msg_id,
                         "content": json.dumps(tc, ensure_ascii=False),
                         "timestamp": msg.timestamp,
-                        "tokens": len(json.dumps(tc, ensure_ascii=False)) // 4,
+                        "tokens": 0,
                         "metadata": {},
                     })
             elif msg.role == "tool":

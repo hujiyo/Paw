@@ -103,7 +103,7 @@ class Transport:
         """请求一次控制类输入（如模型选择），期间普通输入仍走主队列。"""
         self._ensure_queue()
         self._expect_control = kind
-        self.emit("request_input", {"prompt": prompt, "type": kind})
+        self.emit(ev.REQUEST_INPUT, {"prompt": prompt, "type": kind})
         value = await self._control_queue.get()
         self._expect_control = None
         return value
@@ -162,9 +162,12 @@ class Transport:
                     text = await ws.receive_text()
                     self._route_input(text)
             except WebSocketDisconnect:
-                self._ws = None
-                if self._on_disconnect:
-                    self._on_disconnect()
+                # 只清理自己这条连接：旧连接在新连接建立之后才断开时，
+                # 不能把新连接一并清掉，否则事件会一直堆在待发队列里
+                if self._ws is ws:
+                    self._ws = None
+                    if self._on_disconnect:
+                        self._on_disconnect()
 
     def _route_input(self, text: str) -> None:
         stripped = text.strip()
