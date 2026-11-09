@@ -48,7 +48,10 @@ async def main() -> None:
     # 否则在没有配置模型时，前端连不上、选择请求永远等不到。
     server_task = asyncio.create_task(transport.serve())
     await app.start()
-    await server_task
+    try:
+        await server_task
+    finally:
+        await app.shutdown()
 
 
 if __name__ == "__main__":

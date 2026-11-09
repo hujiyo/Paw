@@ -23,6 +23,8 @@ from core.session import Message, Session
 # 工具结果截断后保留的字符数
 TOOL_RESULT_KEEP_CHARS = 1200
 SHELL_KEEP_CHARS = 4000
+# 共享终端的工具名：它们的输出是同一块屏幕的重复快照
+SHELL_TOOL_NAMES = {"run_command", "open_shell", "interrupt_command"}
 
 
 def estimate_tokens(messages: List[Dict[str, Any]]) -> int:
@@ -96,7 +98,7 @@ class ContextBudget:
         """同名的 shell 结果只保留最近一条的完整内容，其余截断。"""
         shell_msgs = [
             m for m in session.messages
-            if m.role == "tool" and m.name == "run_command"
+            if m.role == "tool" and m.name in SHELL_TOOL_NAMES
         ]
         for msg in shell_msgs[:-1]:
             if len(msg.content) > SHELL_KEEP_CHARS:

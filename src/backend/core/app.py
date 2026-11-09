@@ -105,6 +105,13 @@ class PawApp:
     def _on_disconnect(self) -> None:
         self.store.flush()
 
+    async def shutdown(self) -> None:
+        """停止后台协程并落盘。由服务关闭信号触发。"""
+        self._stop_event.set()
+        if self._input_task is not None:
+            self._input_task.cancel()
+        self.store.flush()
+
     async def start(self) -> None:
         self.transport.set_handlers(
             on_message=self._handle_raw_message,
@@ -133,10 +140,8 @@ class PawApp:
     async def _input_loop(self) -> None:
         while not self._stop_event.is_set():
             user_input = await self.transport.get_input()
-            if user_input.lower() in ("exit", "quit", "bye"):
-                self.store.flush()
-                self._stop_event.set()
-                return
+            # 桌面模式下"exit"不是退出命令：服务由 Electron 托管，
+            # 这里只把它当普通输入交给模型，避免用户以为已退出
             if not user_input.strip():
                 continue
             await self._dispatch(user_input)
