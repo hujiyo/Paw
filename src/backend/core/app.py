@@ -438,9 +438,8 @@ class PawApp:
         session = self.kernel.session
         if session is None:
             return
-        session.add_user("[系统提示: 请继续你之前的回复，不要重复已说过的内容]")
-        self.store.mark_dirty(session)
-        await self._run_turn("")
+        # 用一条明确的继续指令作为本轮输入，不要手工建消息再传空串
+        await self._run_turn("[系统提示: 请继续你之前的回复，不要重复已说过的内容]")
 
     # ---------- 记忆视图 ----------
 
@@ -991,22 +990,29 @@ class PawApp:
         return removed
 
     def _persist_memory(self) -> None:
-        pending = getattr(self, "_pending_memory_save", None)
-        if not pending:
-            return
+        pending = self._pending_memory_save
         self._pending_memory_save = None
-        user_text, session = pending
-        if not session.messages:
+        if not pending or self.memory_manager is None:
             return
-        last_assistant = None
-        for message in reversed(session.messages):
-            if message.role == "assistant":
-                last_assistant = message.content
+        user_text, session = pending
+        # 只取本轮 user 消息之后的第一条助手回复；倒序找会拿到上一轮的内容
+        user_index = None
+        for i in range(len(session.messages) - 1, -1, -1):
+            message = session.messages[i]
+            if message.role == "user" and message.content == user_text:
+                user_index = i
                 break
-        if not last_assistant:
+        if user_index is None:
+            return
+        answer = None
+        for message in session.messages[user_index + 1:]:
+            if message.role == "assistant" and message.content:
+                answer = message.content
+                break
+        if not answer:
             return
         try:
-            self.memory_manager.save_conversation(user_text, last_assistant)
+            self.memory_manager.save_conversation(user_text, answer)
         except Exception as e:
             self.transport.emit(ev.SYSTEM_MESSAGE, {"text": f"[记忆] 保存失败: {e}", "type": "dim"})
 

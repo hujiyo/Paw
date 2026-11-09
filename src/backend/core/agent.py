@@ -130,6 +130,7 @@ class AgentKernel:
         self._refresh_status()
 
         final_text = ""
+        hit_step_limit = False
         for step in range(1, self.max_steps + 1):
             if self._stop.is_set():
                 return self._finish_stopped(final_text)
@@ -175,7 +176,15 @@ class AgentKernel:
                 return self._finish_stopped(final_text)
             if outcome == "silent":
                 return self._finish_silent()
+        else:
+            # 循环自然走完说明到达步数上限，必须让用户看到
+            hit_step_limit = True
 
+        if hit_step_limit:
+            self._sys(
+                f"[Agent] 已达到单轮最大工具步数（{self.max_steps}），本轮已中止",
+                "error",
+            )
         self.store.mark_dirty(session)
         self.store.flush()
         self._refresh_status()
@@ -261,7 +270,11 @@ class AgentKernel:
         return "continue"
 
     def _discard_silent_turn(self) -> None:
-        """stay_silent：移除本轮最后一条 user 之后的全部内容。"""
+        """stay_silent：移除本轮最后一条 user 之后的内容，保留用户输入本身。
+
+        前端在收到 stay_silent 时只移除助手卡片，因此这里也必须保留
+        用户消息，否则刷新后用户会发现自己说的话不见了。
+        """
         assert self.session is not None
         messages = self.session.messages
         last_user = None
@@ -270,7 +283,7 @@ class AgentKernel:
                 last_user = i
                 break
         if last_user is not None:
-            del messages[last_user:]
+            del messages[last_user + 1:]
         self.store.mark_dirty(self.session)
         self.store.flush()
 
