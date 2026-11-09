@@ -13,6 +13,7 @@ ChatRequest / ChatResult：
 
 import json
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from core.providers.base import (
     ChatRequest,
@@ -20,7 +21,8 @@ from core.providers.base import (
     LLMError,
     Provider,
     Usage,
-    fetch_models,
+    base_url,
+    fetch_model_list,
 )
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -146,7 +148,9 @@ class AnthropicProvider(Provider):
         on_reasoning: Callable[[str], None],
     ) -> ChatResult:
         payload = self.build_payload(model, request)
-        session, response = await self._post(self.url, self._headers(), payload, timeout=180)
+        session, response = await self._post(
+            _messages_endpoint(self.url), self._headers(), payload, timeout=180
+        )
         try:
             if request.stream:
                 return await self._read_stream(response, on_delta, on_reasoning)
@@ -293,9 +297,19 @@ class AnthropicProvider(Provider):
     # ---------- 模型列表 ----------
 
     async def list_models(self, model: str = "") -> List[str]:
-        return await fetch_models(
-            f"{self._base_url()}/models", self._headers()
-        )
+        return await fetch_model_list(self._base_url(), self._headers())
+
+
+def _messages_endpoint(url: str) -> str:
+    """把用户填的地址补全成 /v1/messages。
+
+    只填域名或 /v1 时直接 POST 会得到 404，与 OpenAI 适配器同理。
+    """
+    parts = urlsplit(url or "")
+    path = parts.path.rstrip("/")
+    if path.endswith("/messages"):
+        return url
+    return base_url(url) + "/v1/messages"
 
 
 def _json_or_none(text: str) -> Optional[Dict[str, Any]]:

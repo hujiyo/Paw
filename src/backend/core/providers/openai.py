@@ -17,8 +17,9 @@ from core.providers.base import (
     LLMError,
     Provider,
     Usage,
+    chat_endpoint,
     describe_status,
-    fetch_models,
+    fetch_model_list,
 )
 
 
@@ -61,7 +62,9 @@ class OpenAIProvider(Provider):
         on_reasoning: Callable[[str], None],
     ) -> ChatResult:
         payload = self.build_payload(model, request)
-        session, response = await self._post(self.url, self._headers(), payload, timeout=180)
+        session, response = await self._post(
+            chat_endpoint(self.url), self._headers(), payload, timeout=180
+        )
         try:
             content_type = response.headers.get("Content-Type", "")
             if request.stream and "text/event-stream" in content_type:
@@ -181,25 +184,7 @@ class OpenAIProvider(Provider):
     # ---------- 模型列表 ----------
 
     async def list_models(self, model: str = "") -> List[str]:
-        candidates = [f"{self._base_url()}/models"]
-        # 用户只填了域名或地址不带版本段时，模型列表通常在 /v1/models
-        if "/v1" not in self._base_url():
-            candidates.append(f"{self._base_url()}/v1/models")
-        last: Optional[LLMError] = None
-        for url in candidates:
-            try:
-                return await fetch_models(url, self._headers())
-            except LLMError as e:
-                last = e
-                # 只有"地址不存在"才换下一个候选；鉴权失败换地址也没用
-                if e.status != 404:
-                    raise
-        assert last is not None
-        raise LLMError(
-            f"获取模型列表失败：{'、'.join(candidates)} 均不可用（{last.message}）",
-            kind=last.kind,
-            status=last.status,
-        )
+        return await fetch_model_list(self._base_url(), self._headers())
 
 
 class AzureProvider(OpenAIProvider):
@@ -228,6 +213,17 @@ class AzureProvider(OpenAIProvider):
         return payload
 
     def _request_url(self) -> str:
+        """Azure 的端点路径必须包含 /openai/deployments/{deployment}/chat/completions。
+
+        少了这一段，裸域名会被当成端点直接 POST，服务端只回一个 404，
+        用户看到的是"接口地址不存在"，却不知道是协议选错了。
+        """
+        if "/deployments/" not in self.url:
+            raise LLMError(
+                "接口协议选了 Azure OpenAI，但地址不是 Azure 端点。"
+                "Azure 地址应形如 https://<资源名>.openai.azure.com/openai/deployments/"
+                "<deployment>/chat/completions；普通 OpenAI 兼容服务请把协议改为自动或 OpenAI 兼容。"
+            )
         if "api-version=" in self.url:
             return self.url
         joiner = "&" if "?" in self.url else "?"
