@@ -29,9 +29,13 @@ export interface WebConfig {
     use_jina_reader?: boolean;
 }
 
-export interface SystemConfig {
+export interface WorkspaceConfig {
     home_dir?: string;
-    chunk_size?: number;
+}
+
+export interface ContextConfig {
+    max_tokens?: number;
+    keep_recent_turns?: number;
 }
 
 export interface MemoryConfig {
@@ -59,7 +63,8 @@ export interface AppConfig {
     api?: ApiConfig;
     terminal?: TerminalConfig;
     web?: WebConfig;
-    system?: SystemConfig;
+    workspace?: WorkspaceConfig;
+    context?: ContextConfig;
     memory?: MemoryConfig;
     recall?: RecallConfig;
     theme?: ThemeConfig;
@@ -683,11 +688,13 @@ export const Settings: SettingsManager = {
         if (cfgUseJina) cfgUseJina.checked = web.use_jina_reader !== false;
 
         // 系统配置
-        const system = config.system || {};
+        const system = config.workspace || {};
         const cfgHomeDir = $<HTMLInputElement>('#cfg-home-dir');
         const cfgChunkSize = $<HTMLInputElement>('#cfg-chunk-size');
         if (cfgHomeDir) cfgHomeDir.value = system.home_dir || '';
-        if (cfgChunkSize) cfgChunkSize.value = String(system.chunk_size || 64000);
+        const context = config.context || {};
+        if (cfgChunkSize) cfgChunkSize.value = String(context.max_tokens || 64000);
+
 
         // 记忆系统配置
         const memory = config.memory || {};
@@ -802,9 +809,12 @@ export const Settings: SettingsManager = {
                 page_size: 4096,
                 use_jina_reader: cfgUseJina?.checked ?? true
             },
-            system: {
-                home_dir: cfgHomeDir?.value?.trim() || '',
-                chunk_size: parseInt(cfgChunkSize?.value || '64000', 10) || 64000
+            workspace: {
+                home_dir: cfgHomeDir?.value?.trim() || ''
+            },
+            context: {
+                max_tokens: parseInt(cfgChunkSize?.value || '64000', 10) || 64000,
+                keep_recent_turns: 4
             },
             memory: {
                 enabled: cfgMemoryEnabled?.checked ?? false,
@@ -837,7 +847,7 @@ export const Settings: SettingsManager = {
             });
             const result = await response.json() as { success: boolean; error?: string };
             if (result.success) {
-                this.showToast('配置已保存，请重启应用生效', 'success');
+                this.showToast('配置已保存并生效', 'success');
                 this.currentConfig = config;
             } else {
                 this.showToast(result.error || '保存失败', 'error');

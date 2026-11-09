@@ -28,6 +28,7 @@ interface HljsLib {
     highlight(code: string, options: { language: string }): HighlightResult;
     highlightAuto(code: string): HighlightResult;
     getLanguage(name: string): object | undefined;
+    highlightElement(el: HTMLElement): void;
 }
 
 // ============ Electron API 类型定义 ============
@@ -36,7 +37,7 @@ interface ElectronAppInfo {
     version: string;
     platform: string;
     isDev: boolean;
-    coreDir: string;
+    backendDir: string;
 }
 
 interface ElectronThemeColors {

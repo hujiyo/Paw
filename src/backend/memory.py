@@ -654,7 +654,8 @@ class MemoryManager:
                  project_path: Path,
                  embedding_url: str = "",
                  embedding_key: str = "",
-                 embedding_model: str = ""):
+                 embedding_model: str = "",
+                 recall: Optional[Any] = None):
         """
         初始化记忆管理器
         
@@ -663,6 +664,7 @@ class MemoryManager:
             embedding_url: Embedding API 地址
             embedding_key: Embedding API 密钥（本地服务可留空）
             embedding_model: Embedding 模型名称
+            recall: 回忆配置（AppConfig.recall）。传入时以它为准，不再读工作区 config.yaml。
         """
         self.project_path = Path(project_path)
         
@@ -701,7 +703,7 @@ class MemoryManager:
         )
 
         # 加载回忆意图判断配置
-        self._load_recall_config()
+        self._load_recall_config(recall)
 
         # 预计算"回忆意图"锚点向量 B
         self._recall_intent_vector: List[float] = []
@@ -709,22 +711,20 @@ class MemoryManager:
 
     # ==================== 回忆意图判断配置 ====================
 
-    def _load_recall_config(self):
-        """加载回忆相关配置（从项目根目录的 config.yaml）"""
-        import os
-        config_path = self.project_path / "config.yaml"
+    def _load_recall_config(self, recall: Optional[Any] = None):
+        """加载回忆配置。
+
+        配置来源只有一个：AppConfig.recall。不再去读工作区的 config.yaml，
+        否则设置界面的改动不会生效。
+        """
         self._recall_enabled = True
         self._recall_threshold = _DEFAULT_RECALL_THRESHOLD
 
-        if config_path.exists():
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f) or {}
-                recall_config = config.get('recall', {})
-                self._recall_enabled = recall_config.get('enabled', True)
-                self._recall_threshold = recall_config.get('threshold', _DEFAULT_RECALL_THRESHOLD)
-            except Exception as e:
-                print(f"[Memory] 加载 recall 配置失败: {e}")
+        if recall is not None:
+            self._recall_enabled = bool(getattr(recall, "enabled", True))
+            self._recall_threshold = float(
+                getattr(recall, "threshold", _DEFAULT_RECALL_THRESHOLD)
+            )
 
     def _init_recall_intent_vector(self):
         """预计算'回忆意图'锚点向量 B"""

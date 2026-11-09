@@ -1,28 +1,16 @@
-# Paw 项目依赖
-# 仅包含项目实际使用的依赖，无冗余
+# Paw 后端依赖
+# 只列出被源码直接 import 的包。
 
-# 核心依赖
+# 配置与基础
 pyyaml>=6.0
-colorama>=0.4.6
 requests>=2.31.0
 
-# Web UI
+# Web 服务
 fastapi>=0.122.0
 uvicorn>=0.38.0
-websockets>=15.0.1
 aiohttp>=3.13.2
 
 # Web 工具
 ddgs>=8.0.0
 beautifulsoup4>=4.12.0
 html2text>=2024.2.26
-
-# 基础工具（llama-cpp-python / transformers 等的隐式依赖）
-numpy>=1.20.0
-jinja2>=2.11.3
-filelock>=3.0.0
-fsspec>=2023.5.0
-packaging>=20.0
-tqdm>=4.27
-regex>=2022.1.18
-cachetools>=4.2.2

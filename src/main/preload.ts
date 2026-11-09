@@ -6,7 +6,7 @@ interface AppInfo {
     version: string;
     platform: NodeJS.Platform;
     isDev: boolean;
-    coreDir: string;
+    backendDir: string;
 }
 
 interface ThemeColors {
