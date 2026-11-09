@@ -6,22 +6,12 @@ import { DialogManager } from './dialog-manager.js';
 import { ChatHistory } from './chat.js';
 import { createMsgEl, getDefaultDisplay, updateToolElement, getToolIcon } from './render.js';
 import { scrollToBottom, escapeHtml } from './utils.js';
+import { renderMarkdown, highlightCode } from './markdown.js';
 import { StatusBar } from './store.js';
 import { RightSidebar } from './right-sidebar.js';
 import { Browser } from './browser.js';
 import { Planner } from './planner.js';
 import { Memory, Conversation, MemoryResult } from './memory.js';
-
-const renderMarkdown = (text: string): string => {
-    if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
-        try {
-            return marked.parse(text);
-        } catch (err) {
-            console.error('[MessageHandler] Failed to parse markdown chunk:', err);
-        }
-    }
-    return text.replace(/\n/g, '<br>');
-};
 
 interface StreamData {
     id: string;
@@ -147,6 +137,12 @@ export class MessageHandler {
         this.startStream(data.id);
     }
 
+    /** 新对话或加载历史会话时重置轮次边界。 */
+    resetTurnState(): void {
+        this.currentAssistantEl = null;
+        this.uiState.endStream();
+    }
+
     handleStreamChunk(data: StreamData): void {
         this.appendStream(data.id, data.text || '');
     }
@@ -155,28 +151,28 @@ export class MessageHandler {
         this.endStream(data.id);
     }
 
+    /** 当前助手轮次的容器。一轮里可能有多次流式输出（工具调用前后各一次）。 */
+    private currentAssistantEl: HTMLElement | null = null;
+
     private startStream(id: string): void {
         this.uiState.startStream(id);
 
-        let msgEl = this.messages.querySelector('.msg--assistant:last-child');
-
-        if (!msgEl) {
-            msgEl = createMsgEl('assistant', 'PAW', '', id);
-            this.messages.appendChild(msgEl);
+        // 工具调用之后的新一轮流式文本仍属于同一个助手消息，
+        // 但新对话的第一段必须创建新的消息容器。
+        if (!this.currentAssistantEl) {
+            this.currentAssistantEl = createMsgEl('assistant', 'PAW', '', `msg-${Date.now()}`);
+            this.messages.appendChild(this.currentAssistantEl);
         }
 
-        const body = msgEl.querySelector('.msg__body');
-        const uniqueId = `stream-${id}`;
+        const body = this.currentAssistantEl.querySelector('.msg__body');
         const content = document.createElement('div');
         content.className = 'msg__content';
-        content.id = uniqueId;
-
-        if (body) {
-            body.appendChild(content);
-        }
+        content.id = `stream-${id}`;
+        if (body) body.appendChild(content);
 
         this.uiState.set('currentContentEl', content);
         ChatHistory.onStreamStart(id);
+        scrollToBottom(this.msgWrap);
     }
 
     private appendStream(id: string, text: string): void {
@@ -201,6 +197,7 @@ export class MessageHandler {
             return;
         }
 
+        highlightCode(content);
         content.querySelectorAll('pre code').forEach(el => {
             const pre = el.parentElement;
             if (!pre) return;
@@ -224,11 +221,11 @@ export class MessageHandler {
 
     handleToolStart(data: ToolStartData): void {
         if (this.uiState.get('rightSidebarVisible')) {
-            if (['read_files', 'edit_files', 'create_file', 'file_glob'].includes(data.name)) {
+            if (['read_file', 'write_to_file', 'edit', 'multi_edit', 'delete_file', 'find_by_name', 'grep_search', 'list_dir'].includes(data.name)) {
                 RightSidebar.switchView('files');
-            } else if (['run_shell_command'].includes(data.name)) {
+            } else if (['run_command', 'open_shell', 'interrupt_command'].includes(data.name)) {
                 RightSidebar.switchView('terminal');
-            } else if (['create_plan', 'edit_plans', 'create_todo_list', 'add_todos', 'mark_todo_as_done', 'read_todos'].includes(data.name)) {
+            } else if (['create_todo_list', 'add_todos', 'mark_todo_as_done', 'read_todos'].includes(data.name)) {
                 RightSidebar.switchView('plan');
             } else if (['search_web', 'load_url_content', 'read_page'].includes(data.name)) {
                 RightSidebar.switchToTab('browser');
@@ -237,8 +234,10 @@ export class MessageHandler {
         }
 
         if (data.name === 'stay_silent') {
-            const msgEl = this.messages.querySelector('.msg--assistant:last-child');
-            if (msgEl) msgEl.remove();
+            if (this.currentAssistantEl) {
+                this.currentAssistantEl.remove();
+                this.currentAssistantEl = null;
+            }
             ChatHistory.isInAssistantTurn = false;
             this.setGeneratingState(false);
             return;
@@ -255,18 +254,16 @@ export class MessageHandler {
             el.dataset.rawRequest = JSON.stringify(data.raw_request);
         }
 
-        let msgEl = this.messages.querySelector('.msg--assistant:last-child');
-
-        if (!msgEl) {
-            msgEl = createMsgEl('assistant', 'PAW', '', `msg-${Date.now()}`);
-            this.messages.appendChild(msgEl);
+        if (!this.currentAssistantEl) {
+            this.currentAssistantEl = createMsgEl('assistant', 'PAW', '', `msg-${Date.now()}`);
+            this.messages.appendChild(this.currentAssistantEl);
         }
 
-        const body = msgEl.querySelector('.msg__body');
+        const body = this.currentAssistantEl.querySelector('.msg__body');
         if (body) {
             body.appendChild(el);
         } else {
-            msgEl.appendChild(el);
+            this.currentAssistantEl.appendChild(el);
         }
 
         ChatHistory.addTool(data.id, data.name);
@@ -320,6 +317,9 @@ export class MessageHandler {
         ChatHistory.isInAssistantTurn = false;
         ChatHistory.endAssistantTurn();
         this.setGeneratingState(false);
+        // 本轮结束，下一轮助手消息必须新建容器
+        this.currentAssistantEl = null;
+        this.uiState.endStream();
     }
 
     handleStatusUpdate(data: StatusData): void {

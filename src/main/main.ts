@@ -72,8 +72,8 @@ function getPythonPath(): string {
     return candidates[0];
 }
 
-function getConfigPath(): string {
-    return path.join(getBackendDir(), 'config.yaml');
+function getUserDataDir(): string {
+    return app.getPath('userData');
 }
 
 function getLoadingPagePath(): string {
@@ -96,7 +96,7 @@ function getIconPath(): string {
 
 function getThemeColors(): ThemeColors {
     try {
-        const configPath = getConfigPath();
+        const configPath = path.join(getUserDataDir(), 'config.yaml');
         if (fs.existsSync(configPath)) {
             const config = yaml.load(fs.readFileSync(configPath, 'utf8')) as Config;
             const theme = config.theme || {};
@@ -186,8 +186,21 @@ paw.py存在: ${pawExists}
         PYTHONUNBUFFERED: '1',
         PYTHONIOENCODING: 'utf-8',
         PAW_RENDERER_DIR: rendererDir,
-        PAW_STATIC_DIR: staticDir
+        PAW_STATIC_DIR: staticDir,
+        // 配置与会话数据放在用户目录，安装包升级不会覆盖
+        PAW_CONFIG_DIR: getUserDataDir(),
+        PAW_DATA_DIR: getUserDataDir()
     };
+
+    // 首次运行：把示例配置复制到用户数据目录，避免没有配置就启动
+    const configPath = path.join(getUserDataDir(), 'config.yaml');
+    if (!fs.existsSync(configPath)) {
+        const example = path.join(backendDir, 'config.example.yaml');
+        if (fs.existsSync(example)) {
+            fs.copyFileSync(example, configPath);
+            console.log('[Paw] 已创建初始配置:', configPath);
+        }
+    }
 
     // 用 -c 注入 sys.path，兼容 embeddable Python（不读 PYTHONPATH）
     // 同时设置 __file__ 和 __spec__，让 exec 里的代码行为与直接运行脚本一致

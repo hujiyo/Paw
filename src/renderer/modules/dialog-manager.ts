@@ -119,10 +119,15 @@ export class DialogManager {
     showInputPrompt(prompt: string): void {
         this.showModal(prompt, '<input type="text" class="modal__input" placeholder="输入...">');
         this.actions.style.display = 'flex';
-        setTimeout(() => {
-            const input = this.body.querySelector('input') as HTMLInputElement;
-            if (input) input.focus();
-        }, 30);
+        const input = this.body.querySelector('input') as HTMLInputElement | null;
+        if (!input) return;
+        input.focus();
+        input.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.okBtn.click();
+            }
+        });
     }
 
     private showModal(title: string, content: string): void {

@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Paw</title>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.css">
-    <!-- Monaco Editor Loader -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <meta name="paw-token" content="{{PAW_TOKEN}}">
+    <!-- 第三方运行库本地打包，离线可用 -->
+    <script src="/static/vendor/marked.min.js"></script>
+    <script src="/static/vendor/purify.min.js"></script>
+    <script src="/static/vendor/highlight-common.js"></script>
+    <link rel="stylesheet" href="/static/vendor/hljs-atom-one-dark.css">
+    <!-- Monaco Editor -->
+    <script src="/static/vendor/monaco/vs/loader.js"></script>
     <script>
-        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
+        require.config({ paths: { 'vs': '/static/vendor/monaco/vs' } });
     </script>
     <link rel="stylesheet" href="/static/css/main.css?v=0.1.4">
 </head>

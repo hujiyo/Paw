@@ -1,18 +1,18 @@
+# Paw 配置示例。复制为实际配置后填写。
+# 实际配置文件位于用户数据目录（由 Electron 通过 PAW_CONFIG_DIR 指定），
+# 不会进入仓库，也不要提交任何真实密钥。
 identity:
   name: Paw
   username: hujiyo
   honey: 老公
-tool_execution:
-  mode: threaded
-  timeout: 30.0
 api:
-  key: ca01c1d55ef643fa90e7d6addba27a12.lJBRo8JGjdwYyxCH
+  key: ""
   url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
   model: glm-4.7
 memory:
   enabled: false
   embedding_url: http://localhost:1234/v1/embeddings
-  embedding_key: ''
+  embedding_key: ""
   embedding_model: text-embedding-qwen3-embedding-0.6b
 recall:
   enabled: true
@@ -24,10 +24,11 @@ terminal:
 web:
   search_engine: duckduckgo
   max_results: 5
-  page_size: 4096
+  page_size: 8192
   use_jina_reader: true
-system:
-  chunk_size: 96000
+context:
+  max_tokens: 64000
+  keep_recent_turns: 4
 theme:
   id: yaoye
   titlebar: '#000000'

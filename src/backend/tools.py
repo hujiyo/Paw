@@ -18,7 +18,7 @@ from urllib.parse import quote_plus
 import aiohttp
 from bs4 import BeautifulSoup
 import html2text
-from call import LLMClient, LLMConfig
+from core.llm import LLMClient
 
 class BaseTools:
     """基础工具类 - 仅包含 3-5 个核心原子操作"""
@@ -1454,12 +1454,7 @@ class WebTools:
         prompt = f"""请用10-30个中文字符总结以下内容。只输出总结，不要其他内容。\n内容（第{page_num}页/共{total_pages}页）:\n{preview} \n请开始总结:"""
         
         try:
-            llm = LLMClient(LLMConfig(
-                api_url=self.api_url,
-                model=self.model,
-                api_key=self.api_key,
-                timeout=15
-            ))
+            llm = LLMClient(self.api_url, self.api_key, self.model, timeout=15)
             
             messages = [
                 {"role": "system", "content": "你是一个精简的摘要生成器。只输出10-30字的中文摘要，不要任何其他内容。"},
@@ -1473,11 +1468,10 @@ class WebTools:
                 extra_params={"thinking": "disabled"}  # 禁用推理模式
             )
             
-            if not response.is_error and response.content:
+            if response.content:
                 summary = response.content.strip()
                 return summary[:30] if len(summary) > 30 else summary
-            else:
-                return self._simple_summary(content)
+            return self._simple_summary(content)
                         
         except Exception as e:
             # 出错时使用简单摘要

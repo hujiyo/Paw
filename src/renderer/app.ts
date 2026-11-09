@@ -1,5 +1,6 @@
 // 主入口文件 - 重构版
-import { $, $$, initMarkdown } from './modules/utils.js';
+import { $, $$ } from './modules/utils.js';
+import { initMarkdown, renderMarkdown } from './modules/markdown.js';
 import { ThemeColors } from './modules/theme.js';
 import { createMsgEl, addSysMsg, setMessageActions } from './modules/render.js';
 import { ChatHistory, DomRefs, SessionChunk } from './modules/chat.js';
@@ -8,13 +9,12 @@ import { Settings } from './modules/settings.js';
 import { NewChatDialog } from './modules/new-chat.js';
 import { StatusBar, SessionInfo } from './modules/store.js';
 import { RightSidebar } from './modules/right-sidebar.js';
-import { FileExplorer } from './modules/file-explorer.js';
 import { Planner } from './modules/planner.js';
 import { Browser } from './modules/browser.js';
 import { WorkspaceFilesSidebar } from './modules/workspace-files-sidebar.js';
 import { Skills } from './modules/skills.js';
 import { EditorSettings } from './modules/editor-settings.js';
-import { WebSocketManager } from './modules/websocket.js';
+import { WebSocketManager, installFetchAuth } from './modules/websocket.js';
 import { UIStateManager } from './modules/ui-state.js';
 import { DialogManager } from './modules/dialog-manager.js';
 import { SessionManager } from './modules/session-manager.js';
@@ -53,6 +53,7 @@ const dom: DomElements = {
 };
 
 // ============ 初始化模块 ============
+installFetchAuth();
 initMarkdown();
 
 const wsManager = new WebSocketManager(`ws://${location.host}/ws`);
@@ -69,7 +70,6 @@ Memory.init(dom as unknown as MemoryDomRefs, (msg: string) => wsManager.send(msg
 ChatHistory.init(dom as unknown as DomRefs);
 StatusBar.init(dom.statusBar);
 RightSidebar.init(uiState);
-FileExplorer.init();
 Planner.init();
 Browser.init();
 WorkspaceFilesSidebar.init();
@@ -80,6 +80,23 @@ EditorSettings.init();
 WorkspaceFilesSidebar.onFileOpen((path, name, content) => {
     RightSidebar.openFileTab(path, name, content);
 });
+
+// ============ 消息 → 轮次定位 ============
+// 后端按"第几个用户轮次"删除，这里把 DOM 里的消息映射到轮次下标。
+// 用户消息本身即一个轮次；助手消息归属于它之前最近的那个用户消息。
+function resolveTurnIndex(msgId: string): number | null {
+    const all = Array.from(dom.messages.querySelectorAll('[data-msg-id]')) as HTMLElement[];
+    const targetIdx = all.findIndex(el => el.dataset.msgId === msgId);
+    if (targetIdx < 0) return null;
+
+    let turn = -1;
+    for (let i = 0; i <= targetIdx; i++) {
+        if (all[i].classList.contains('msg--user')) {
+            turn += 1;
+        }
+    }
+    return turn >= 0 ? turn : null;
+}
 
 // ============ 消息操作回调 ============
 setMessageActions({
@@ -99,19 +116,12 @@ setMessageActions({
             return;
         }
 
-        const msgIdx = ChatHistory.messages.findIndex(m => m.id === msgId);
-        if (msgIdx >= 0) {
-            ChatHistory.messages.splice(msgIdx, 1);
+        const turnIndex = resolveTurnIndex(msgId);
+        if (turnIndex === null) {
+            dialogManager.showError('无法定位该消息所属的轮次，请刷新会话');
+            return;
         }
-
-        const msgEl = dom.messages.querySelector(`[data-msg-id="${msgId}"]`);
-        msgEl?.remove();
-
-        wsManager.send(`/delete-message ${msgId} ${role}`);
-        ChatHistory.renderChain();
-
-        Browser.refresh();
-        Planner.refresh();
+        wsManager.send(`/delete-message ${turnIndex} ${role}`);
     },
     onRetry: (msgId) => {
         if (uiState.get('isGenerating')) {
@@ -119,20 +129,13 @@ setMessageActions({
             return;
         }
 
-        const msgIdx = ChatHistory.messages.findIndex(m => m.id === msgId);
-        if (msgIdx >= 0) {
-            ChatHistory.messages.splice(msgIdx, 1);
+        const turnIndex = resolveTurnIndex(msgId);
+        if (turnIndex === null) {
+            dialogManager.showError('无法定位该消息所属的轮次，请刷新会话');
+            return;
         }
-
-        const msgEl = dom.messages.querySelector(`[data-msg-id="${msgId}"]`);
-        msgEl?.remove();
-
-        wsManager.send(`/retry ${msgId}`);
+        wsManager.send(`/retry ${turnIndex}`);
         uiState.setGenerating(true);
-        ChatHistory.renderChain();
-
-        Browser.refresh();
-        Planner.refresh();
     },
     onContinue: (msgId) => {
         if (uiState.get('isGenerating')) {
@@ -225,11 +228,17 @@ wsManager.on('show_model_selection', (data) => {
     });
 });
 
+// 控制输入的回调只注册一次，否则每次请求都会叠加监听器导致重复发送
+let controlInputHandler: ((data: unknown) => void) | null = null;
+dialogManager.on('input', (value) => {
+    controlInputHandler?.(value);
+});
+
 wsManager.on('request_input', (data) => {
+    controlInputHandler = (value: unknown): void => {
+        wsManager.send(String(value));
+    };
     dialogManager.showInputPrompt((data as { prompt?: string }).prompt || '输入');
-    dialogManager.on('input', (value) => {
-        wsManager.send(value as string);
-    });
 });
 
 wsManager.on('show_memory', (data) => {
@@ -245,6 +254,7 @@ wsManager.on('session_list', (data) => {
 });
 
 wsManager.on('session_load', (data) => {
+    messageHandler.resetTurnState();
     const loadData = data as { chunks: SessionChunk[]; mode?: string };
     ChatHistory.loadSessionChunks(loadData.chunks);
     if (loadData.mode) modeSelector.updateUI(loadData.mode);
@@ -263,6 +273,7 @@ wsManager.on('session_loaded', (data) => {
 });
 
 wsManager.on('new_chat', (data) => {
+    messageHandler.resetTurnState();
     ChatHistory.clear();
     dom.messages.innerHTML = '';
     const newChatData = data as { session_id?: string };

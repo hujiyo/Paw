@@ -2,6 +2,29 @@
 
 export type EventHandler = (data?: unknown) => void;
 
+function readToken(): string {
+    const meta = document.querySelector('meta[name="paw-token"]');
+    return meta?.getAttribute('content') || '';
+}
+
+/**
+ * 本机接口的鉴权：包装全局 fetch，让所有同源请求自动带上令牌。
+ * 在 app.ts 启动时调用一次即可，调用点无需关心鉴权。
+ */
+export function installFetchAuth(): void {
+    const original = window.fetch.bind(window);
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+        // 只对本站路径加头，外部链接保持原样
+        if (url.startsWith('/') || url.startsWith(window.location.origin)) {
+            const headers = new Headers(init?.headers || {});
+            headers.set('X-Paw-Token', readToken());
+            return original(input, { ...(init || {}), headers });
+        }
+        return original(input, init);
+    };
+}
+
 export class WebSocketManager {
     private ws: WebSocket | null = null;
     private eventHandlers: Map<string, Set<EventHandler>> = new Map();
@@ -14,11 +37,14 @@ export class WebSocketManager {
     private static readonly MAX_QUEUE_SIZE = 50;
 
     constructor(url: string) {
-        this.url = url;
+        // 令牌来自页面 meta，随 URL 一起传给后端校验
+        const token = readToken();
+        this.url = token ? `${url}?token=${encodeURIComponent(token)}` : url;
         this.connect();
     }
 
     private connect(): void {
+        // 令牌在构造时已附加到 URL；重连沿用同一个带令牌地址
         this.ws = new WebSocket(this.url);
         this.setupEventListeners();
     }
