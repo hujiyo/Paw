@@ -1,6 +1,6 @@
 // 对话历史管理
 import { escapeHtml, scrollToBottom } from './utils.js';
-import { createMsgEl, getDefaultDisplay, updateToolElement, getToolIcon, ToolArgs, createMessageActions } from './render.js';
+import { createMsgEl, getDefaultDisplay, updateToolElement, getToolIcon, ToolArgs } from './render.js';
 import { Browser } from './browser.js';
 import { Planner } from './planner.js';
 

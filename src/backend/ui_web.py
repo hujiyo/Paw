@@ -327,6 +327,101 @@ class WebUI:
             except Exception as e:
                 return JSONResponse(content={"success": False, "error": str(e)})
 
+        @self.app.get("/api/turns/detailed")
+        async def get_turns_detailed():
+            """获取详细轮次数据（供消息编辑器使用）"""
+            if self._chunk_manager_ref is None:
+                return JSONResponse(content={"success": False, "error": "ChunkManager not initialized"})
+            try:
+                turns = self._chunk_manager_ref.get_turns_detailed()
+                return JSONResponse(content={"success": True, "turns": turns})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
+        @self.app.post("/api/turn/edit-chunk")
+        async def edit_chunk(request: Request):
+            """编辑指定 chunk 的内容（精确编辑）"""
+            if self._chunk_manager_ref is None:
+                return JSONResponse(content={"success": False, "error": "ChunkManager not initialized"})
+            try:
+                data = await request.json()
+                chunk_index = data.get("chunk_index")
+                new_content = data.get("content", "")
+                if chunk_index is None:
+                    return JSONResponse(content={"success": False, "error": "Missing chunk_index"})
+                ok = self._chunk_manager_ref.edit_chunk_content(int(chunk_index), new_content)
+                return JSONResponse(content={"success": ok})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
+        @self.app.post("/api/turn/delete")
+        async def delete_turn(request: Request):
+            """删除指定轮次"""
+            if self._chunk_manager_ref is None:
+                return JSONResponse(content={"success": False, "error": "ChunkManager not initialized"})
+            try:
+                data = await request.json()
+                turn_idx = data.get("turn_index")
+                if turn_idx is None:
+                    return JSONResponse(content={"success": False, "error": "Missing turn_index"})
+                ok = self._chunk_manager_ref.delete_turn(int(turn_idx))
+                return JSONResponse(content={"success": ok})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
+        @self.app.post("/api/turn/insert")
+        async def insert_turn(request: Request):
+            """在指定位置插入新轮次"""
+            if self._chunk_manager_ref is None:
+                return JSONResponse(content={"success": False, "error": "ChunkManager not initialized"})
+            try:
+                data = await request.json()
+                position = data.get("position", 0)
+                role = data.get("role", "user")
+                content = data.get("content", "")
+                ok = self._chunk_manager_ref.insert_turn(int(position), role, content)
+                return JSONResponse(content={"success": ok})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
+        @self.app.post("/api/turn/add-tool-call")
+        async def add_tool_call(request: Request):
+            """向 assistant 轮次添加工具调用块"""
+            if self._chunk_manager_ref is None:
+                return JSONResponse(content={"success": False, "error": "ChunkManager not initialized"})
+            try:
+                data = await request.json()
+                turn_idx = data.get("turn_index")
+                tool_name = data.get("tool_name", "")
+                arguments = data.get("arguments", "{}")
+                result = data.get("result")
+                if turn_idx is None or not tool_name:
+                    return JSONResponse(content={"success": False, "error": "Missing turn_index or tool_name"})
+                tc_id = self._chunk_manager_ref.add_tool_call_to_turn(
+                    int(turn_idx), tool_name, arguments, result
+                )
+                if tc_id:
+                    return JSONResponse(content={"success": True, "tool_call_id": tc_id})
+                return JSONResponse(content={"success": False, "error": "Failed to add tool call"})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
+        @self.app.post("/api/turn/remove-tool-call")
+        async def remove_tool_call(request: Request):
+            """从轮次中移除工具调用"""
+            if self._chunk_manager_ref is None:
+                return JSONResponse(content={"success": False, "error": "ChunkManager not initialized"})
+            try:
+                data = await request.json()
+                turn_idx = data.get("turn_index")
+                tool_call_id = data.get("tool_call_id", "")
+                if turn_idx is None or not tool_call_id:
+                    return JSONResponse(content={"success": False, "error": "Missing turn_index or tool_call_id"})
+                ok = self._chunk_manager_ref.remove_tool_call_from_turn(int(turn_idx), tool_call_id)
+                return JSONResponse(content={"success": ok})
+            except Exception as e:
+                return JSONResponse(content={"success": False, "error": str(e)})
+
         @self.app.post("/api/fs/content")
         async def get_file_content(request: Request):
             """获取文件内容"""

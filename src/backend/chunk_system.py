@@ -504,6 +504,10 @@ class ChunkManager:
             
             # AI回复（可能包含tool_calls）
             elif chunk.chunk_type == ChunkType.ASSISTANT:
+                # 空回复且无工具调用：模型从未产出过任何内容（例如生成被中断），
+                # 这种消息在协议上非法（content 为 null 又没有 tool_calls），必须跳过
+                if not chunk.content and 'tool_calls' not in chunk.metadata:
+                    continue
                 msg = {
                     "role": "assistant",
                     "content": chunk.content if chunk.content else None
@@ -1218,3 +1222,261 @@ class ChunkManager:
                 if chunk.content:
                     contents.append(chunk.content)
         return '\n'.join(contents)
+
+    # ==================== 消息编辑器支持 ====================
+
+    def get_turns_detailed(self) -> List[Dict[str, Any]]:
+        """获取详细的轮次数据（供前端消息编辑器使用）
+
+        与 get_turns() 不同，此方法返回每个 chunk 的完整内容和索引，
+        使前端能够精确编辑单个 chunk。
+
+        Returns:
+            轮次列表，每个轮次包含：
+            - turn_index: 轮次索引
+            - role: 'user' | 'assistant'
+            - chunks: [{chunk_index, type, content, metadata, tokens}, ...]
+        """
+        turns = self.get_turns()
+        result = []
+
+        for turn_idx, turn in enumerate(turns):
+            detailed_chunks = []
+            # 使用索引范围遍历,避免 list.index() 的值比较问题
+            start_idx = turn['start_idx']
+            end_idx = turn['end_idx']
+            
+            for i in range(start_idx, end_idx + 1):
+                if i >= len(self.chunks):
+                    break
+                    
+                chunk = self.chunks[i]
+                # 跳过系统类型(与 get_turns 逻辑一致)
+                if chunk.chunk_type in (ChunkType.SYSTEM, ChunkType.MEMORY, ChunkType.SHELL):
+                    continue
+
+                chunk_data: Dict[str, Any] = {
+                    'chunk_index': i,
+                    'type': chunk.chunk_type.value,
+                    'content': chunk.content,
+                    'tokens': chunk.tokens,
+                    'metadata': dict(chunk.metadata)
+                }
+
+                # 对于 tool_call 类型，尝试解析内容提供结构化信息
+                if chunk.chunk_type == ChunkType.TOOL_CALL and chunk.content:
+                    try:
+                        tc_data = json.loads(chunk.content)
+                        chunk_data['tool_call_parsed'] = {
+                            'id': tc_data.get('id', ''),
+                            'name': tc_data.get('function', {}).get('name', ''),
+                            'arguments': tc_data.get('function', {}).get('arguments', '{}')
+                        }
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                detailed_chunks.append(chunk_data)
+
+            result.append({
+                'turn_index': turn_idx,
+                'role': turn['role'],
+                'start_idx': turn['start_idx'],
+                'end_idx': turn['end_idx'],
+                'chunks': detailed_chunks
+            })
+
+        return result
+
+    def insert_turn(self, position: int, role: str, content: str) -> bool:
+        """在指定位置插入新轮次
+
+        Args:
+            position: 插入位置（轮次索引，新轮次将插入到该索引之前）
+                       如果 position >= 轮次数量，则追加到末尾
+            role: 'user' 或 'assistant'
+            content: 消息内容
+
+        Returns:
+            是否插入成功
+        """
+        if role not in ('user', 'assistant'):
+            return False
+
+        chunk_type = ChunkType.USER if role == 'user' else ChunkType.ASSISTANT
+
+        turns = self.get_turns()
+
+        # 确定在 self.chunks 中的插入位置
+        if position >= len(turns):
+            # 追加到末尾
+            insert_idx = len(self.chunks)
+        elif position < 0:
+            return False
+        else:
+            insert_idx = turns[position]['start_idx']
+
+        chunk = Chunk(
+            content=content,
+            chunk_type=chunk_type,
+            metadata={}
+        )
+        chunk.estimate_tokens()
+
+        self.chunks.insert(insert_idx, chunk)
+        self.current_tokens += chunk.tokens
+
+        self._trigger_save()
+        return True
+
+    def add_tool_call_to_turn(self, turn_idx: int, tool_name: str,
+                               arguments: str = "{}", result: str = None) -> Optional[str]:
+        """向指定的 assistant 轮次添加一个完整的工具调用（调用 + 结果）
+
+        OpenAI 的 function calling 协议要求每个 assistant 消息里的 tool_call
+        都必须紧跟一条 role=tool 的响应。只加调用而不加结果会让后续请求
+        直接被 API 拒绝，因此这里要么成对创建，要么什么都不做。
+
+        Args:
+            turn_idx: 轮次索引（必须是 assistant 轮次）
+            tool_name: 工具名称
+            arguments: 工具参数 JSON 字符串
+            result: 工具结果文本；None 时写入空结果占位
+
+        Returns:
+            新创建的 tool_call_id，失败返回 None
+        """
+        import uuid as _uuid
+
+        turns = self.get_turns()
+        if turn_idx < 0 or turn_idx >= len(turns):
+            return None
+
+        turn = turns[turn_idx]
+        if turn['role'] != 'assistant':
+            return None
+
+        # tool_call 必须挂在某条 assistant 消息上才能被协议承认
+        anchor = None
+        for chunk in reversed(turn['chunks']):
+            if chunk.chunk_type == ChunkType.ASSISTANT:
+                anchor = chunk
+                break
+        if anchor is None:
+            return None
+
+        tool_call_id = f"call_{_uuid.uuid4().hex[:24]}"
+
+        tc_data = {
+            "id": tool_call_id,
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "arguments": arguments
+            }
+        }
+
+        # 按对象身份定位锚点，不能用 list.index（dataclass 的 == 会误匹配同内容 chunk）
+        anchor_idx = None
+        for i in range(turn['start_idx'], min(turn['end_idx'], len(self.chunks) - 1) + 1):
+            if self.chunks[i] is anchor:
+                anchor_idx = i
+                break
+        if anchor_idx is None:
+            return None
+
+        insert_idx = anchor_idx + 1
+
+        tc_chunk = Chunk(
+            content=json.dumps(tc_data, ensure_ascii=False),
+            chunk_type=ChunkType.TOOL_CALL,
+            metadata={}
+        )
+        tc_chunk.estimate_tokens()
+
+        result_chunk = Chunk(
+            content=result if result is not None else "",
+            chunk_type=ChunkType.TOOL_RESULT,
+            metadata={
+                "tool_call_id": tool_call_id,
+                "name": tool_name,
+                "success": True,
+            }
+        )
+        result_chunk.estimate_tokens()
+
+        self.chunks.insert(insert_idx, tc_chunk)
+        self.chunks.insert(insert_idx + 1, result_chunk)
+        self.current_tokens += tc_chunk.tokens + result_chunk.tokens
+
+        if 'tool_calls' not in anchor.metadata:
+            anchor.metadata['tool_calls'] = []
+        anchor.metadata['tool_calls'].append(tc_data)
+
+        self._trigger_save()
+        return tool_call_id
+
+    def remove_tool_call_from_turn(self, turn_idx: int, tool_call_id: str) -> bool:
+        """从指定轮次中移除一个工具调用及其结果
+
+        Args:
+            turn_idx: 轮次索引
+            tool_call_id: 工具调用ID
+
+        Returns:
+            是否移除成功
+        """
+        turns = self.get_turns()
+        if turn_idx < 0 or turn_idx >= len(turns):
+            return False
+
+        turn = turns[turn_idx]
+        if turn['role'] != 'assistant':
+            return False
+
+        removed = False
+
+        # 同一 id 可能同时登记在 assistant metadata.tool_calls 和 TOOL_CALL chunk 里，
+        # 任何一方残留都会让该调用继续出现在发给 LLM 的上下文中，因此统一清干净
+        for chunk in turn['chunks']:
+            if chunk.chunk_type != ChunkType.ASSISTANT:
+                continue
+            tcs = chunk.metadata.get('tool_calls')
+            if not tcs:
+                continue
+            kept = [t for t in tcs if t.get('id') != tool_call_id]
+            if len(kept) < len(tcs):
+                removed = True
+            if kept:
+                chunk.metadata['tool_calls'] = kept
+            else:
+                del chunk.metadata['tool_calls']
+
+        # 删除对应的 TOOL_CALL / TOOL_RESULT chunk（仅在本轮次范围内搜索）
+        indices_to_remove = []
+        for i in range(turn['start_idx'], turn['end_idx'] + 1):
+            if i >= len(self.chunks):
+                break
+            chunk = self.chunks[i]
+
+            tc_id = None
+            if chunk.chunk_type == ChunkType.TOOL_CALL and chunk.content:
+                try:
+                    tc_id = json.loads(chunk.content).get('id')
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    tc_id = None
+            elif chunk.chunk_type == ChunkType.TOOL_RESULT:
+                tc_id = chunk.metadata.get('tool_call_id')
+
+            if tc_id == tool_call_id:
+                indices_to_remove.append(i)
+                removed = True
+
+        for i in sorted(indices_to_remove, reverse=True):
+            if i < len(self.chunks):
+                self.current_tokens -= self.chunks[i].tokens
+                self.chunks.pop(i)
+
+        if removed:
+            self._trigger_save()
+
+        return removed
